@@ -21,6 +21,7 @@ import { MockUSDe } from '@0xc/hardhat/MockUSDe/MockUSDe';
 import { TrancheDepositor } from '@0xc/hardhat/TrancheDepositor/TrancheDepositor';
 import { SNUSDSwapAdapter } from '@0xc/hardhat/sNUSDSwapAdapter/sNUSDSwapAdapter';
 import { DeploymentsBase, IDeploymentsBaseParams } from './DeploymentsBase';
+import { LensPriceFeed } from '@0xc/hardhat/LensPriceFeed/LensPriceFeed';
 import { IStrategy } from '@0xc/hardhat/IStrategy/IStrategy';
 import { SUSDeAprPairProvider } from '@0xc/hardhat/sUSDeAprPairProvider/sUSDeAprPairProvider';
 import { IBeaconProxy } from 'dequanto/contracts/deploy/proxy/ProxyDeployment';
@@ -189,5 +190,26 @@ export class NeutrlDeployments extends DeploymentsBase<{
         });
 
         return depositor;
+    }
+
+    async ensureLenses() {
+        const { lens } = await super.ensureLenses();
+        const { NUSD } = await this.ensureUnderlying();
+
+        const { contract: nusdPriceFeed } = await this.ds.ensure(LensPriceFeed, {
+            id: this.getContractId(`LensPriceFeed`),
+            arguments: [this.owner.address],
+        });
+
+        await this.ds.configure(lens, {
+            title: 'Price Feed for NUSD',
+            shouldUpdate: async () => false === $address.eq(nusdPriceFeed.address, await lens.priceFeeds(NUSD.address)),
+            updater: async () => {
+                const owner = await this.getAccountOwner(lens.address);
+                await lens.$receipt().setPriceFeed(owner, NUSD.address, nusdPriceFeed.address);
+            }
+        });
+
+        return { lens };
     }
 }

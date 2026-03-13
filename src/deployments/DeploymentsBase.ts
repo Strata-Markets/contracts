@@ -43,6 +43,7 @@ import { ERC20 } from 'dequanto/prebuilt/openzeppelin/ERC20';
 import { KyberSwapAdapter } from '@0xc/hardhat/KyberSwapAdapter/KyberSwapAdapter';
 import { ChainAccountService } from 'dequanto/ChainAccountService';
 import { $is } from 'dequanto/utils/$is';
+import { Ownable } from 'dequanto/prebuilt/openzeppelin/Ownable';
 
 
 export interface ICdoDeploymentsBase {
@@ -834,6 +835,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         });
         return { lens: cdoLens }
     }
+    async configureLenses(): Promise<{ lens: CDOLens } | void> {}
 
     protected getContractId(name: keyof ICDO['Contracts'][''] | string) {
         if (this.pfx) {
@@ -1054,6 +1056,11 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         }
 
         return ChainAccountService.get(mix);
+    }
+    public async getAccountOwner(contract: TEth.Address): Promise<TEth.IAccount> {
+        let ownabled = new Ownable(contract, this.client);
+        let owner = await ownabled.owner();
+        return this.getAccount(owner);
     }
 
     public async getAccountByRole(roleOrName: TEth.Hex | keyof typeof this.ROLES): Promise<TEth.IAccount> {

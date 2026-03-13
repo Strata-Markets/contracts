@@ -8,6 +8,7 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import {CDOLens, IChainlinkPriceFeed} from "../contracts/lens/CDOLens.sol";
+import {LensPriceFeed} from "../contracts/lens/LensPriceFeed.sol";
 
 /**
  * @title CDOLens getPrice Fork Test
@@ -23,6 +24,10 @@ contract CDOLensGetPriceTest is Test {
     address constant SR_USDe = 0x3d7d6fdf07EE548B939A80edbc9B2256d0cdc003;
     address constant JR_USDe = 0xC58D044404d8B14e953C115E67823784dEA53d8F;
     address constant SR_USDat = 0xFaa9a0e1Db9E22AE3A20B2B58a68DC24D053d066;
+    address constant NUSD = 0xE556ABa6fe6036275Ec1f87eda296BE72C811BCE;
+    address constant JR_NUSD = 0xFC807058A352b61aEef6A38e2D0fC3990225E772;
+
+    address alice = makeAddr("updater");
 
     // Chainlink feeds on Ethereum mainnet
     address constant USDE_USD_FEED = 0xa569d910839Ae8865Da8F8e70FfFb0cBA869F961;
@@ -30,6 +35,7 @@ contract CDOLensGetPriceTest is Test {
 
     // Curve USDat/USDC StableSwap pool (coin 0 = USDC, coin 1 = USDat)
     address constant CURVE_USDAT_USDC_POOL = 0xF4d0CF32908b2C7f1021339c43Df0F77f06896d7;
+    LensPriceFeed nusdFeed;
 
     function setUp() public {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
@@ -42,10 +48,14 @@ contract CDOLensGetPriceTest is Test {
 
     function _deployLens() internal returns (CDOLens) {
         CDOLens impl = new CDOLens();
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl), abi.encodeWithSelector(CDOLens.initialize.selector, address(this))
-        );
-        return CDOLens(address(proxy));
+        ERC1967Proxy proxy =
+            new ERC1967Proxy(address(impl), abi.encodeWithSelector(CDOLens.initialize.selector, address(this)));
+        lens = CDOLens(address(proxy));
+
+        // Configure the Chainlink feed for USDe
+        lens.setPriceFeed(USDe, IChainlinkPriceFeed(USDE_USD_FEED));
+        nusdFeed = new LensPriceFeed(alice);
+        lens.setPriceFeed(NUSD, IChainlinkPriceFeed(nusdFeed));
     }
 
     function _setCurveRoute() internal {
@@ -98,7 +108,7 @@ contract CDOLensGetPriceTest is Test {
 
         uint finalAnswer = priceOfUSDatInUSDC * uint256(quote) * 1e18 / (1e14);
         console2.log("Final USDat price in USD:", finalAnswer);
-        
+
         _setCurveRoute();
 
         uint256 x = lens.getAssetUsdPrice(USDat);
@@ -115,7 +125,21 @@ contract CDOLensGetPriceTest is Test {
         assertGt(price, 0, "srUSDat price should be > 0");
     }
 
+    function test_NusdFeed() public view {
+        uint8 decimals = IChainlinkPriceFeed(nusdFeed).decimals();
+        assertEq(decimals, 8);
+
+        (, int256 answer,,,) = IChainlinkPriceFeed(nusdFeed).latestRoundData();
+        assertEq(answer, 1e8);
+    }
+
+    function test_getPrice_jrNUSD() public view {
+        uint256 price = lens.getPrice(IERC4626(JR_NUSD));
+        console2.log("jrNUSD USD price (18 dec):", price);
+        assertGt(price, 0, "jrNUSD price should be > 0");
+    }
 }
+
 
 interface ICurvePool {
     /// @notice Amount of coin `j` received as output for `dx` units of coin `i`
