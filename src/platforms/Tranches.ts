@@ -8,7 +8,7 @@ import { MKRAlphaTranche } from './strats/MKRAlphaTranche';
 import { SaturnTranche } from './strats/SaturnTranche';
 import { FigureTranche } from './strats/FigureTranche';
 
-export type TCDOKey = 'ethena' | 'neutrl' | 'mhyper' | 'mkralpha' | 'mm1usd' | 'mrox' | 'saturn' | 'figure';
+export type TCDOKey = 'ethena' | 'neutrl' | 'mhyper' | 'mkralpha' | 'mm1usd' | 'mrox' | 'saturn' | 'figure' | 'spkMhyperIso';
 export interface ICDO {
     // token symbol
     base: string;
@@ -83,7 +83,7 @@ export interface ICDO {
     };
     ContractVersions?: {
         // Discrete accounting is the default (backward compatible with previous versions).
-        accounting?: 'continuous' | 'discrete' | 'dys';
+        accounting?: 'continuous' | 'discrete' | 'dys' | 'isolated';
     };
 
     // Contracts prefixes (can be overridden for testing)
@@ -93,6 +93,49 @@ export interface ICDO {
 }
 
 export const Tranches: Record<TCDOKey, ICDO> = {
+    spkMhyperIso: {
+        base: 'USDC',
+        fees: {
+            retention: {
+                jrt: 0.5,
+                srt: 0.5,
+            },
+            performanceFee: 0.075,
+        },
+        riskPremium: {
+            x: 0.125,
+            y: 0.15,
+            k: 0.3,
+        },
+        jrt: {
+            symbol: 'jrIsoSpk',
+            name: 'Strata Junior Iso Spark USDC',
+            depositsEnabled: true,
+            withdrawalsEnabled: true,
+            sharesCooldown: [
+                { covPct: 10, feeBps: 0, lock: '7days' },
+                { covPct: 20, feeBps: 10, lock: '3days' },
+                { covPct: 0, feeBps: 20, lock: 0 },
+            ],
+        },
+        srt: {
+            symbol: 'srIsoMHYPER',
+            name: 'Strata Senior Iso mHYPER',
+            depositsEnabled: true,
+            withdrawalsEnabled: true,
+            sharesCooldown: [
+                { covPct: 10, feeBps: 0, lock: 0 },
+                { covPct: 20, feeBps: 2.5, lock: 0 },
+                { covPct: 0, feeBps: 5, lock: 0 },
+            ],
+        },
+        Feed: {
+            name: 'Isolated CDO APR Pair',
+        },
+        ContractVersions: {
+            accounting: 'isolated',
+        },
+    },
     ethena: {
         base: 'USDe',
         jrt: {
@@ -319,6 +362,7 @@ export const ContractsIDMapping = {
 export const ContractsPrefixMapping = {
     ethena: 'USDe',
     figure: 'Figure',
+    spkMhyperIso: 'SpkMhyperIso',
     neutrl: 'Neutrl',
     mhyper: 'MHyper',
     mkralpha: 'MKRAlpha',

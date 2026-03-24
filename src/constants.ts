@@ -16,6 +16,8 @@ export const Addresses = {
         USDC: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
         USDT: '0xdac17f958d2ee523a2206206994597c13d831ec7',
         AavePool: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
+
+        SparkUSDCVault: '0x28B3a8fb53B741A8Fd78c0fb9A6B2393d896a43d',
     },
     hoodi: {
         USDe: "0x7054A803361640970176Edbd91992DcC52B7D235",
@@ -34,4 +36,5 @@ export const Addresses = {
 
     NUSD?: TEth.Address;
     sNUSD?: TEth.Address;
+    SparkUSDCVault?: TEth.Address;
 }>;

@@ -367,4 +367,12 @@ contract SaturnStrategy is Strategy {
         }
         return sUSDat.depositFeeBps();
     }
+
+    function shareToken() external view returns (address) {
+        return address(sUSDat);
+    }
+
+    function supportsToken(address token) external view returns (bool) {
+        return token == address(sUSDat) || token == address(USDat);
+    }
 }

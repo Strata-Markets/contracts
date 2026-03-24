@@ -197,7 +197,7 @@ contract StrataProtocolDeploymentBase is Test {
         );
         vm.label(address(feed), "AprPairFeed");
 
-        Accounting accountingImpl = new Accounting();
+        Accounting accountingImpl = new Accounting(18);
         vm.label(address(accountingImpl), "Accounting_Impl");
         accounting = Accounting(
             address(

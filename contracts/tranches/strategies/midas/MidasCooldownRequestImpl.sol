@@ -125,7 +125,6 @@ contract MidasCooldownRequestImpl is IUnstakeHandler, Initializable {
 
         Request memory req = redemptionVault.redeemRequests(requestId);
         require (req.status != RequestStatus.Pending, "RequestPending");
-
         amount = baseAsset.balanceOf(address(this));
         if (amount > 0) {
             SafeERC20.safeTransfer(baseAsset, receiver, amount);

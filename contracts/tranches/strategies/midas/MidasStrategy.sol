@@ -493,4 +493,12 @@ contract MidasStrategy is Strategy {
         maxDepositSlippageBps = bps_;
         emit MaxDepositSlippageBpsChanged(bps_);
     }
+
+    function supportsToken(address token) external override view returns (bool) {
+        return token == address(mToken) || token == address(baseAsset) || depositTokensDict[token];
+    }
+
+    function shareToken() external view returns (address) {
+        return address(mToken);
+    }
 }

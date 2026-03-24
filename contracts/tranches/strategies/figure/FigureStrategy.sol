@@ -393,4 +393,12 @@ contract FigureStrategy is Strategy {
         erc20Cooldown.setCooldownDisabled(stakingVault, isDisabled);
         emit CooldownsChanged(primeCooldownJrt_, primeCooldownSrt_);
     }
+
+    function shareToken() external view returns (address) {
+        return address(stakingVault);
+    }
+
+    function supportsToken(address token) external override view returns (bool) {
+        return token == address(stakingVault) || token == address(yieldVault) || token == address(usdc);
+    }
 }

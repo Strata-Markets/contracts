@@ -45,6 +45,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
     ///         and reconciliation replaces projected with realized (current mKRAlpha behavior).
     bool public immutable useBenchmarkProjection;
 
+    /// @notice When true, totalStrategyAssets uses lastReconciliation instead of navTimestamp
+    ///         as the time anchor, so that deposits/withdrawals between oracle updates do not
+    ///         generate phantom yield in the projected NAV.
+    bool private immutable useNavAtReconciliation;
+
     /// @dev The oracle to fetch the latest APR floor and APR base.
     IAprPairFeed public aprPairFeed;
 
@@ -153,6 +158,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
     /// @notice Timestamp of the epoch start (last reconciliation)
     uint256 public epochStart;
 
+    /// @notice Timestamp of the last oracle-detected NAV change; used as time anchor when useNavAtReconciliation is true
+    uint256 public lastReconciliation;
+
     error InvalidNavSplit(
         uint256 navT1,
         uint256 jrtAssets,
@@ -175,9 +183,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
     event FeeRetentionChanged(uint256 feeJrtRetention, uint256 feeSrtRetention);
     event FloorRateChanged(uint256 floorRate);
 
-    constructor(uint256 navDecimals, bool useBenchmarkProjection_) {
+    constructor(uint256 navDecimals, bool useBenchmarkProjection_, bool useNavAtReconciliation_) {
         ONE_ASSET = 10 ** navDecimals;
         useBenchmarkProjection = useBenchmarkProjection_;
+        useNavAtReconciliation = useNavAtReconciliation_;
     }
 
     function initialize(
@@ -208,6 +217,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         windowNetFlows = 0;
         floorRate = 0;
         valuationPrice = 1e18;
+        if (useNavAtReconciliation) lastReconciliation = block.timestamp;
     }
 
     /*****************************************************************************
@@ -227,6 +237,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
         jrtNavTime += jrAssets * dt;
         navTime += systemAssets * dt;
         lastAccrual = block.timestamp;
+    }
+
+    function _navAnchor() private view returns (uint256) {
+        return useNavAtReconciliation ? lastReconciliation : navTimestamp;
     }
 
     /*****************************************************************************
@@ -272,7 +286,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 reserveNavT1
         )
     {
-        uint256 navT1 = cdo.totalStrategyAssets(nav, navTimestamp);
+        uint256 navT1 = cdo.totalStrategyAssets(nav, _navAnchor());
         (
             jrtNavT1Projected,
             ,
@@ -311,7 +325,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
     /// @notice Returns current reserve value
     function totalReserve() external view returns (uint256) {
         (, , uint256 reserveNavT1) = totalAssets(
-            cdo.totalStrategyAssets(nav, navTimestamp)
+            cdo.totalStrategyAssets(nav, _navAnchor())
         );
         return reserveNavT1;
     }
@@ -326,7 +340,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 jrtAmountIn,
         uint256 srtAmountIn
     ) external onlyCDO {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         if (amount > reserveNav) {
             revert ReserveTooLow(reserveNav, amount);
         }
@@ -390,7 +404,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Updates the accounting by fetching the current total assets from the strategy
     function updateAccounting() external onlyCDO {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
     }
 
     /// @notice Updates the Net Asset Values after deposits or withdrawals
@@ -782,6 +796,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         }
 
         updateIndex();
+        if (useNavAtReconciliation && navT1 != nav) lastReconciliation = block.timestamp;
         nav = navT1;
         navTimestamp = block.timestamp;
         lastAccrual = block.timestamp;
@@ -921,7 +936,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     // Trigger fetching new APRs to update srtTargetIndex
     function onAprChanged() external onlyRole(UPDATER_FEED_ROLE) {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         (bool modified, UD60x18 aprTarget_, UD60x18 aprBase_) = fetchAprs();
         if (modified) {
             emit AprDataChangedViaPush(aprTarget_, aprBase_);
@@ -935,7 +950,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         UD60x18 riskY_,
         UD60x18 riskK_
     ) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         riskX = riskX_;
         riskY = riskY_;
         riskK = riskK_;
@@ -968,7 +983,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             bps <= RESERVE_BPS_MAX && bps != reserveBps,
             "InvalidNewReserve"
         );
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         reserveBps = bps;
         emit ReservePercentageChanged(reserveBps);
     }

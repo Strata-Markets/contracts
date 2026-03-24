@@ -22,6 +22,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     int64   private constant APR_FEED_BOUNDARY_MIN = 0;
     uint256 private constant APR_FEED_DECIMALS = 12;
     uint256 private immutable ONE_ASSET;
+    bool private immutable useNavAtReconciliation;
 
     /// @dev The oracle to fetch the latest APR floor and APR base.
     /// @notice When the oracle is updated, it can actively push the latest values to this contract, allowing us to adjust srtTargetIndex.
@@ -78,7 +79,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     // The index for NAV during projection
     uint256 public navTargetIndex;
 
-    /// @notice Latest changes to "nav"
+    /// @notice Timestamp of the last balance flow (deposit, withdrawal, or reserve reduction).
     uint256 public navTimestamp;
 
     /// @notice Projected Junior NAV during the rewardless periods
@@ -105,6 +106,11 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     ///      to prevent front-running and allow for proper loss validation
     uint64 public valuationGracePeriod;
 
+    /// @notice Timestamp of the last successful NAV reconciliation.
+    /// @dev Only used when useNavAtReconciliation is true. Passed to totalStrategyAssets so
+    ///      sub-strategies gate their reward signal on this value, which only advances when
+    ///      real rewards are detected — not on every deposit.
+    uint256 public lastReconciliation;
 
     error InvalidNavSplit(uint256 navT1, uint256 jrtAssets, uint256 srtAssets, uint256 reserveAssets);
     error ReserveTooLow(uint256 reserveNav, uint256 requestedNav);
@@ -118,8 +124,13 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     event FeeAccrued(bool isJrt, uint256 amountToReserve, uint256 amountToTranche);
     event FeeRetentionChanged(uint256 feeJrtRetention, uint256 feeSrtRetention);
 
-    constructor (uint256 navDecimals) {
+    constructor (uint256 navDecimals, bool useNavAtReconciliation_) {
         ONE_ASSET = 10 ** navDecimals;
+        useNavAtReconciliation = useNavAtReconciliation_;
+    }
+
+    function _navAnchor() private view returns (uint256) {
+        return useNavAtReconciliation ? lastReconciliation : navTimestamp;
     }
 
     function initialize(
@@ -143,6 +154,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         minimumJrtSrtRatio = 0.05e18;
         minimumJrtSrtRatioBuffer = 0.06e18;
         valuationPrice = 1e18;
+        if (useNavAtReconciliation) lastReconciliation = block.timestamp;
     }
 
     /// @notice Returns the updated total assets for each tranche and the reserve
@@ -163,12 +175,12 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
 
     /// @notice Returns the updated total assets for each tranche and the reserve
     /// @dev This method is used by the Tranches to get their updated total assets for the current block
-    /// @dev The strategy must return NAV with new rewards, using accounting's current NAV and `navTimestamp`.
+    /// @dev The strategy must return NAV with new rewards, using accounting's current NAV and timestamp.
     /// @return jrtNavT1Projected The updated Junior Tranche TVL
     /// @return srtNavT1 The updated Senior Tranche TVL
     /// @return reserveNavT1 The updated Reserve TVL
     function totalAssets () public view returns (uint256 jrtNavT1Projected, uint256 srtNavT1, uint256 reserveNavT1) {
-        uint256 navT1 = cdo.totalStrategyAssets(nav, navTimestamp);
+        uint256 navT1 = cdo.totalStrategyAssets(nav, _navAnchor());
         return totalAssets(navT1);
     }
 
@@ -186,7 +198,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     /// @dev This method returns the maximum amount that `reduceReserve` can handle
     /// @return The current reserve Net Asset Value (NAV)
     function totalReserve () external view returns (uint256) {
-        (,,uint256 reserveNavT1) = totalAssets(cdo.totalStrategyAssets(nav, navTimestamp));
+        (,,uint256 reserveNavT1) = totalAssets(cdo.totalStrategyAssets(nav, _navAnchor()));
         return reserveNavT1;
     }
 
@@ -204,7 +216,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     /// @param jrtAmountIn The amount to be credited to the Junior Tranche
     /// @param srtAmountIn The amount to be credited to the Senior Tranche
     function reduceReserve (uint256 amount, uint256 jrtAmountIn, uint256 srtAmountIn) external onlyCDO {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         if (amount > reserveNav) {
             revert ReserveTooLow(reserveNav, amount);
         }
@@ -266,7 +278,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     ///      allowing it to determine if new yield has arrived and should be reconciled.
     ///      This triggers a true-up between projected and realized Junior NAV if rewards are detected.
     function updateAccounting () external onlyCDO {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
     }
 
     /// @notice Updates the Net Asset Values (NAVs) after deposits or withdrawals
@@ -535,6 +547,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             uint256 reserveNavT1
         ) = calculateNAVSplit(nav, jrtNavProjected, jrtBaseNav, srtBaseNav, reserveNav, navT1);
         updateIndex();
+        if (useNavAtReconciliation && navT1 != nav) lastReconciliation = block.timestamp;
         nav = navT1;
         navTimestamp = block.timestamp;
         srtBaseNav = srtNavT1;
@@ -636,7 +649,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
 
     // Trigger fetching new APRs to update srtTargetIndex
     function onAprChanged () external onlyRole(UPDATER_FEED_ROLE)  {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         (bool modified, UD60x18 aprTarget_, UD60x18 aprBase_) = fetchAprs();
         if (modified) {
             emit AprDataChangedViaPush(aprTarget_, aprBase_);
@@ -656,7 +669,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         UD60x18 riskY_,
         UD60x18 riskK_
     ) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         riskX = riskX_;
         riskY = riskY_;
         riskK = riskK_;
@@ -683,7 +696,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     /// @dev The maximum allowed value is defined by RESERVE_BPS_MAX
     function setReserveBps (uint256 bps) external onlyOwner {
         require(bps <= RESERVE_BPS_MAX && bps != reserveBps, "InvalidNewReserve");
-        updateAccountingInner(cdo.totalStrategyAssets(nav, navTimestamp));
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         reserveBps = bps;
         emit ReservePercentageChanged(reserveBps);
     }

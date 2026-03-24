@@ -237,4 +237,12 @@ contract sUSDeStrategy is Strategy {
         erc20Cooldown.setCooldownDisabled(sUSDe, isDisabled);
         emit CooldownsChanged(sUSDeCooldownJrt_, sUSDeCooldownSrt_);
     }
+
+    function shareToken() external view returns (address) {
+        return address(sUSDe);
+    }
+
+    function supportsToken(address token) external view returns (bool) {
+        return token == address(sUSDe) || token == address(USDe);
+    }
 }

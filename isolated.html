@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Isolated Strategy Architecture</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { background: #0d1117; display: flex; justify-content: center; padding: 40px; margin: 0; }
+    .mermaid { background: #161b22; padding: 48px; border-radius: 12px; width: 100%; max-width: 1600px; }
+    .mermaid svg { width: 100% !important; height: auto !important; min-height: 900px; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <div class="mermaid">
+flowchart TD
+    User(["👤 User"])
+    Operator(["🔧 Operator"])
+
+    subgraph Tranches["Tranches — user entry point"]
+        JRT["JRT Vault\nERC4626"]
+        SRT["SRT Vault\nERC4626"]
+    end
+
+    subgraph CDO["StrataCDO — coordination layer"]
+        CDOc["deposit() / withdraw()\nupdateAccounting()\ncalculateExitMode()\nmaxDeposit / maxWithdraw"]
+    end
+
+    subgraph AcctBox["Accounting"]
+        Acct["totalAssets()\nmaxDeposit / maxWithdraw\nupdateAccounting / accrueFee"]
+    end
+
+    APR["AprPairFeed\noracle"]
+
+    subgraph Strat["IsolatedStrategy"]
+        IS["deposit / withdraw\nwithdrawForRebalance\ndepositForRebalance\nnotifyRebalanceComplete\n─────────────────────\njuniorDebtToSenior\nseniorDebtToJunior"]
+    end
+
+    subgraph Reb["Rebalancer"]
+        RB["initiateRebalance()\ncompleteRebalance()\ntotalAssets()\n─────────────────────\npendingRebalances[]"]
+    end
+
+    subgraph Junior["SparkUSDCStrategy — strat[0]"]
+        SP["deposit / withdraw\n─────────────────────\nspVault.deposit()\nspVault.redeem()"]
+    end
+
+    subgraph Senior["MidasStrategy — strat[1]"]
+        MS["deposit / withdraw\n─────────────────────\ninstant: redeemInstant()\ndeferred: cooldown.transfer()"]
+    end
+
+    UC["UnstakeCooldown\n─────────────────────\ntransfer / finalize\nbalanceOf"]
+
+    Spark["Spark Protocol\nspVault ERC4626"]
+    Midas["Midas Protocol\ndepositVault / redemptionVault\nmToken mHYPER"]
+
+    User -->|"deposit / withdraw"| JRT
+    User -->|"deposit / withdraw"| SRT
+    Operator -->|"initiateRebalance\ncompleteRebalance"| Reb
+
+    JRT -->|"cdo.deposit()\ncdo.updateAccounting()"| CDO
+    SRT -->|"cdo.deposit()\ncdo.updateAccounting()"| CDO
+
+    CDO -->|"NAV splits / limits"| AcctBox
+    CDO -->|"deposit / withdraw\ntotalAssets"| Strat
+
+    AcctBox -->|"totalStrategyAssets"| CDO
+    AcctBox -->|"latestRoundData"| APR
+
+    Strat -->|"deposit / withdraw"| Junior
+    Strat -->|"deposit / withdraw"| Senior
+    Strat -->|"in-flight assets"| Reb
+
+    Reb -->|"withdrawForRebalance"| Strat
+    Reb -->|"depositForRebalance\nnotifyRebalanceComplete"| Strat
+    Reb -->|"finalize(shareToken)"| UC
+    Reb -->|"balanceOf(withdrawToken)"| UC
+
+    Junior -->|"deposit / redeem"| Spark
+
+    Senior -->|"depositInstant"| Midas
+    Senior -->|"redeemInstant"| Midas
+    Senior -->|"cooldown.transfer(mHYPER)"| UC
+
+    UC -->|"finalize → deliver baseAsset"| Midas
+  </div>
+  <script>mermaid.initialize({ startOnLoad: true, theme: "dark", flowchart: { nodeSpacing: 60, rankSpacing: 80 }, fontSize: 18 });</script>
+</body>
+</html>

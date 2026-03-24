@@ -24,4 +24,8 @@ interface IStrategy is ICDOComponent {
 
     function maxWithdraw(address tranche, address tokenIn, uint256 tokenAmount) external view returns (uint256 assets);
     function maxDeposit(address tranche, address tokenIn, uint256 tokenAmount) external view returns (uint256 assets);
+
+    function supportsToken(address token) external view returns (bool);
+    // Returns the protocol share token (e.g. mHYPER for Midas, spVault shares for Spark).
+    function shareToken() external view returns (address);
 }

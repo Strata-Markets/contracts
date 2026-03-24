@@ -163,7 +163,7 @@ contract CDOTest is Test {
         accounting = Accounting(
             address(
                 new ERC1967Proxy(
-                    address(new Accounting()),
+                    address(new Accounting(18)),
                     abi.encodeWithSelector(Accounting.initialize.selector, owner, address(acm), address(cdo), address(feed))
                 )
             )

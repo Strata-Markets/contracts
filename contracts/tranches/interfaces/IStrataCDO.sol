@@ -22,6 +22,7 @@ interface IStrataCDO {
     function totalAssets (address tranche) external view returns (uint256);
     function totalStrategyAssets () external view returns (uint256);
     function totalStrategyAssets (uint256 latestNav, uint256 timestamp) external view returns (uint256);
+    function totalStrategyAssetsByTranche () external view returns (uint256 jrtAssets, uint256 srtAssets);
     function updateAccounting () external;
     function updateBalanceFlow () external;
 
@@ -49,4 +50,3 @@ interface IStrataCDO {
 interface IStrataCDOSetters {
     function setExitFees (uint256 feeJrt, uint256 feeSrt) external;
 }
-

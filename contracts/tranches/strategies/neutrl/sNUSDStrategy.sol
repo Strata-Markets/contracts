@@ -237,4 +237,12 @@ contract sNUSDStrategy is Strategy {
         erc20Cooldown.setCooldownDisabled(sNUSD, isDisabled);
         emit CooldownsChanged(sNUSDCooldownJrt_, sNUSDCooldownSrt_);
     }
+
+    function shareToken() external view returns (address) {
+        return address(sNUSD);
+    }
+
+    function supportsToken(address token) external view returns (bool) {
+        return token == address(sNUSD) || token == address(NUSD);
+    }
 }
