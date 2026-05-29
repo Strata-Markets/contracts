@@ -631,6 +631,46 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // initiateRebalance debt cap
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function test_Integration_InitiateRebalance_Reverts_WhenExceedsDebtToJunior() public {
+        _depositToJrt(alice, DEPOSIT_AMOUNT);
+        _depositToSrt(alice, DEPOSIT_AMOUNT);
+
+        uint256 borrowAmount = DEPOSIT_AMOUNT / 2; // 500
+        vm.startPrank(alice);
+        srtVault.withdraw(borrowAmount, alice, alice);
+        vm.stopPrank();
+
+        assertEq(_debtToJunior(), borrowAmount, "Debt to junior recorded");
+
+        vm.startPrank(owner);
+        acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
+        vm.expectRevert("ExceedsDebt");
+        rebalancer.initiateRebalance(1, 0, address(baseAsset), address(baseAsset), borrowAmount + 1);
+        vm.stopPrank();
+    }
+
+    function test_Integration_InitiateRebalance_Reverts_WhenExceedsDebtToSenior() public {
+        _depositToJrt(alice, DEPOSIT_AMOUNT);
+        _depositToSrt(alice, DEPOSIT_AMOUNT);
+
+        uint256 borrowAmount = DEPOSIT_AMOUNT / 2; // 500
+        vm.startPrank(alice);
+        jrtVault.withdraw(borrowAmount, alice, alice);
+        vm.stopPrank();
+
+        assertEq(_debtToSenior(), borrowAmount, "Debt to senior recorded");
+
+        vm.startPrank(owner);
+        acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
+        vm.expectRevert("ExceedsDebt");
+        rebalancer.initiateRebalance(0, 1, address(baseAsset), address(baseAsset), borrowAmount + 1);
+        vm.stopPrank();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Oracle-gated discrete accounting
     // ─────────────────────────────────────────────────────────────────────────
 
