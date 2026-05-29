@@ -511,12 +511,15 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
     // Junior allocation floor — SRT deposit re-routing
     // ─────────────────────────────────────────────────────────────────────────
 
-    // Setup: JRT=100, SRT=500 → Junior holds 100/600 = 16.7% < 30% floor.
-    // The next SRT deposit must be routed to Junior (strat[0]) to restore the target allocation.
+    // Setup: JRT=100, SRT=500 → Junior holds 100/600 = 16.7% < 30% floor → toJunior=80.
+    // An SRT deposit smaller than the shortfall (50 < 80) must be routed to Junior.
+    // An SRT deposit larger than the shortfall (200 > 80) must NOT be rerouted — goes to Senior
+    // normally to avoid overshooting and creating debt in the opposite direction.
     function test_SrtDeposit_RoutesToJuniorStrat_WhenBelowAllocationFloor() public {
         uint256 jrtDeposit = 100 ether;
         uint256 srtDeposit1 = 500 ether;
-        uint256 srtDeposit2 = 200 ether;
+        uint256 smallDeposit = 50 ether;  // < toJunior(80) — should route to Junior
+        uint256 largeDeposit = 200 ether; // > toJunior(80) — should NOT be rerouted
 
         _depositToJrt(alice, jrtDeposit);
         _depositToSrt(alice, srtDeposit1); // Junior ratio = 100/600 = 16.7% — below 30% floor
@@ -524,47 +527,47 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         uint256 juniorBefore = baseAsset.balanceOf(address(juniorStrat));
         uint256 seniorBefore = baseAsset.balanceOf(address(seniorStrat));
 
-        _depositToSrt(alice, srtDeposit2); // Should route to Junior due to floor
-
+        _depositToSrt(alice, smallDeposit); // fits within shortfall → routes to Junior
         assertEq(
             baseAsset.balanceOf(address(juniorStrat)) - juniorBefore,
-            srtDeposit2,
+            smallDeposit,
             "SRT deposit should route to Junior strat when below floor"
         );
+        assertEq(baseAsset.balanceOf(address(seniorStrat)), seniorBefore, "Senior strat should not receive the deposit");
+
+        juniorBefore = baseAsset.balanceOf(address(juniorStrat));
+        seniorBefore = baseAsset.balanceOf(address(seniorStrat));
+
+        _depositToSrt(alice, largeDeposit); // exceeds shortfall → normal routing to Senior
         assertEq(
-            baseAsset.balanceOf(address(seniorStrat)),
-            seniorBefore,
-            "Senior strat should not receive the deposit"
+            baseAsset.balanceOf(address(seniorStrat)) - seniorBefore,
+            largeDeposit,
+            "Oversized SRT deposit should not be rerouted to Junior"
         );
+        assertEq(baseAsset.balanceOf(address(juniorStrat)), juniorBefore, "Junior strat should not receive oversized deposit");
     }
 
-    // After the floor routing brings Junior back above 30%, subsequent SRT deposits
-    // resume their natural routing to Senior.
+    // Setup: JRT=300, SRT=500 → Junior holds 300/800 = 37.5% > 30% floor → toJunior=0.
+    // SRT deposits must route to Senior normally when Junior is already above the floor.
     function test_SrtDeposit_ResumesNormalRouting_WhenAboveAllocationFloor() public {
-        uint256 jrtDeposit = 100 ether;
+        uint256 jrtDeposit = 300 ether;
         uint256 srtDeposit1 = 500 ether;
-        uint256 srtDeposit2 = 200 ether; // routes to Junior: ratio becomes 300/800 = 37.5% > 30%
-        uint256 srtDeposit3 = 100 ether; // Junior now above floor — should route to Senior again
+        uint256 srtDeposit2 = 100 ether;
 
         _depositToJrt(alice, jrtDeposit);
-        _depositToSrt(alice, srtDeposit1);
-        _depositToSrt(alice, srtDeposit2); // floor routing: goes to Junior
+        _depositToSrt(alice, srtDeposit1); // Junior ratio = 300/800 = 37.5% — above 30% floor
 
         uint256 juniorBefore = baseAsset.balanceOf(address(juniorStrat));
         uint256 seniorBefore = baseAsset.balanceOf(address(seniorStrat));
 
-        _depositToSrt(alice, srtDeposit3); // Junior ratio = 300/800 = 37.5% > 30% — normal routing
+        _depositToSrt(alice, srtDeposit2); // toJunior=0 → normal routing to Senior
 
         assertEq(
             baseAsset.balanceOf(address(seniorStrat)) - seniorBefore,
-            srtDeposit3,
-            "SRT deposit resumes routing to Senior strat once above floor"
+            srtDeposit2,
+            "SRT deposit routes to Senior strat once above floor"
         );
-        assertEq(
-            baseAsset.balanceOf(address(juniorStrat)),
-            juniorBefore,
-            "Junior strat should not receive this deposit"
-        );
+        assertEq(baseAsset.balanceOf(address(juniorStrat)), juniorBefore, "Junior strat should not receive this deposit");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

@@ -59,10 +59,15 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     }
 
     function _depositStratIndex(address tranche, address token, uint256 baseAssets) internal view override returns (uint256) {
-        if (!cdo.isJrt(tranche) && strats[0].supportsToken(token)) {
-            (uint256 toJunior,) = debts();
-            if (toJunior > 0) return 0;
+        (uint256 toJunior, uint256 toSenior) = debts();
+
+        if (toJunior > 0 && baseAssets <= toJunior && strats[0].supportsToken(token)) {
+            return 0;
         }
+        if (toSenior > 0 && baseAssets <= toSenior && strats[1].supportsToken(token)) {
+            return 1;
+        }
+
         return _depositStratIndex(tranche);
     }
 
