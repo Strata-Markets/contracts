@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 interface IRebalancer {
     function totalAssets() external view returns (uint256);
+    function pendingToStrat(uint256 stratIdx) external view returns (uint256);
 }
 
 // Subset of MultiStrategy that the Rebalancer calls back into.

@@ -33,6 +33,7 @@ contract Rebalancer is IRebalancer, AccessControlled {
     IUnstakeCooldown public unstakeCooldown;
 
     PendingRebalance[] public pendingRebalances;
+    mapping(uint256 => uint256) private _pendingToStrat;
 
     event RebalanceInitiated(uint256 indexed fromStratIdx, uint256 indexed toStratIdx, uint256 baseAssets);
     event RebalanceCompleted(uint256 indexed fromStratIdx, uint256 indexed toStratIdx, uint256 baseAssets);
@@ -110,6 +111,7 @@ contract Rebalancer is IRebalancer, AccessControlled {
                 depositToken: depositToken,
                 baseAssets: baseAssets
             }));
+            _pendingToStrat[toStratIdx] += baseAssets;
 
             emit RebalanceInitiated(fromStratIdx, toStratIdx, baseAssets);
         }
@@ -128,6 +130,8 @@ contract Rebalancer is IRebalancer, AccessControlled {
 
         IERC20(pending.depositToken).forceApprove(address(strategy), available);
         strategy.depositForRebalance(pending.toStratIdx, pending.depositToken, available, pending.baseAssets);
+
+        _pendingToStrat[pending.toStratIdx] -= pending.baseAssets;
 
         uint256 last = pendingRebalances.length - 1;
         if (idx < last) {
@@ -165,5 +169,9 @@ contract Rebalancer is IRebalancer, AccessControlled {
 
     function pendingCount() external view returns (uint256) {
         return pendingRebalances.length;
+    }
+
+    function pendingToStrat(uint256 stratIdx) external view returns (uint256) {
+        return _pendingToStrat[stratIdx];
     }
 }

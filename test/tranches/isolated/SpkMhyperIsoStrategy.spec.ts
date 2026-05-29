@@ -168,8 +168,8 @@ UTest.create({
             debtBefore
         );
 
-        // Debt unchanged: Midas redemption still pending
-        $require.eq((await strategy.debts()).toJunior, debtBefore, 'Debt unchanged during cooldown');
+        // Debt zeroed immediately: in-flight assets are credited to JR via pendingToStrat
+        $require.eq((await strategy.debts()).toJunior, 0n, 'Debt zeroed once rebalance is in-flight');
         $require.eq(await rebalancer.pendingCount(), 1n, '1 pending rebalance');
 
         // Advance time and fulfill the Midas redemption
