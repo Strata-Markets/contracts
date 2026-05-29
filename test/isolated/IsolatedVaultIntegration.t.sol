@@ -306,7 +306,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         _depositToJrt(alice, DEPOSIT_AMOUNT);
         _depositToSrt(alice, DEPOSIT_AMOUNT);
 
-        (uint256 jrtAssets, uint256 srtAssets) = cdo.totalStrategyAssetsByTranche();
+        (uint256 jrtAssets, uint256 srtAssets) = strategy.totalAssetsByTranche();
         assertEq(jrtAssets, DEPOSIT_AMOUNT, "JRT strategy assets should equal junior strat");
         assertEq(srtAssets, DEPOSIT_AMOUNT, "SRT strategy assets should equal senior strat");
         assertEq(cdo.totalStrategyAssets(), 2 * DEPOSIT_AMOUNT, "Total should be sum of both strats");

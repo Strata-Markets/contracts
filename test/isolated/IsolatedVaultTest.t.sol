@@ -43,7 +43,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         assertEq(juniorStrat.totalAssetsValue(), DEPOSIT_AMOUNT, "Junior strat assets should track JRT deposit");
         assertEq(seniorStrat.totalAssetsValue(), 0, "Senior strat assets should remain zero");
 
-        (uint256 jrtAssets, uint256 srtAssets) = cdo.totalStrategyAssetsByTranche();
+        (uint256 jrtAssets, uint256 srtAssets) = strategy.totalAssetsByTranche();
         assertEq(jrtAssets, DEPOSIT_AMOUNT, "JRT assets should be isolated in junior strat");
         assertEq(srtAssets, 0, "SRT assets should remain zero");
     }
@@ -71,7 +71,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         assertEq(juniorStrat.totalAssetsValue(), DEPOSIT_AMOUNT, "Junior strat assets should stay unchanged");
         assertEq(seniorStrat.totalAssetsValue(), DEPOSIT_AMOUNT, "Senior strat assets should track SRT deposit");
 
-        (uint256 jrtAssets, uint256 srtAssets) = cdo.totalStrategyAssetsByTranche();
+        (uint256 jrtAssets, uint256 srtAssets) = strategy.totalAssetsByTranche();
         assertEq(jrtAssets, DEPOSIT_AMOUNT, "JRT assets should stay in junior strat");
         assertEq(srtAssets, DEPOSIT_AMOUNT, "SRT assets should be isolated in senior strat");
     }
@@ -406,7 +406,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         _depositToJrt(alice, DEPOSIT_AMOUNT);
         _depositToSrt(alice, DEPOSIT_AMOUNT);
 
-        (uint256 jrtAssets, uint256 srtAssets) = cdo.totalStrategyAssetsByTranche();
+        (uint256 jrtAssets, uint256 srtAssets) = strategy.totalAssetsByTranche();
         uint256 totalFromStrats = juniorStrat.totalAssets() + seniorStrat.totalAssets();
 
         assertEq(jrtAssets + srtAssets, totalFromStrats, "Strategy total should equal sum of both strats");

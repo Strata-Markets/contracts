@@ -12,7 +12,6 @@ import {Strategy} from "../../Strategy.sol";
 
 abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     IStrategy[] public strats;
-    uint256[] public lastStratNavs;
 
     IRebalancer public rebalancer;
     IAccounting public accounting;
@@ -126,7 +125,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         uint256[] memory navs = new uint256[](len);
         for (uint256 i; i < len;) {
             uint256 nav = strats[i].totalAssets();
-            lastStratNavs[i] = nav;
             navs[i] = nav;
             unchecked { ++i; }
         }
@@ -230,10 +228,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         _resolveStratByToken(token).ensureRedeemable(caller, token, baseAssets);
     }
 
-    function ensureRedeemable(address tranche, address caller, address token, uint256 baseAssets) external view {
-        _resolveStratByToken(token).ensureRedeemable(caller, token, baseAssets);
-    }
-
     function _withdraw(
         address tranche,
         address token,
@@ -277,10 +271,8 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
             unchecked { ++i; }
         }
         delete strats;
-        delete lastStratNavs;
         for (uint256 i; i < strats_.length;) {
             strats.push(strats_[i]);
-            lastStratNavs.push(0);
             unchecked { ++i; }
         }
     }

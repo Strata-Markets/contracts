@@ -15,7 +15,6 @@ import { AccessControlled } from "../governance/AccessControlled.sol";
 import { IErrors } from "./interfaces/IErrors.sol";
 import { ITranche } from "./interfaces/ITranche.sol";
 import { IStrategy } from "./interfaces/IStrategy.sol";
-import { IIsolatedStrategy } from "./interfaces/IIsolatedStrategy.sol";
 import { IStrataCDO, IStrataCDOSetters } from "./interfaces/IStrataCDO.sol";
 import { TActionState } from "./structs/TActionState.sol";
 import { IAccounting } from "./interfaces/IAccounting.sol";
@@ -124,10 +123,6 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
 
     function totalStrategyAssets(uint256 latestNav, uint256 timestamp) public view returns (uint256) {
         return strategy.totalAssets(latestNav, timestamp);
-    }
-
-    function totalStrategyAssetsByTranche() public view returns (uint256 jrtAssets, uint256 srtAssets) {
-        return IIsolatedStrategy(address(strategy)).totalAssetsByTranche();
     }
 
     function pricePerShare(address tranche) public view returns (uint256) {

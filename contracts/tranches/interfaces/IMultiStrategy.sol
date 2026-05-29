@@ -10,5 +10,4 @@ interface IMultiStrategy is IStrategy {
     function getSupportedTokens(address tranche) external view returns (IERC20[] memory);
     function convertToAssets(address tranche, address token, uint256 tokenAmount, Math.Rounding rounding) external view returns (uint256);
     function convertToTokens(address tranche, address token, uint256 baseAssets, Math.Rounding rounding) external view returns (uint256);
-    function ensureRedeemable(address tranche, address caller, address token, uint256 baseAssets) external view;
 }
