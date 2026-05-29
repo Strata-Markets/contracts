@@ -8,17 +8,11 @@ import {IStrategy} from "../interfaces/IStrategy.sol";
 import {MultiStrategy} from "./base/MultiStrategy.sol";
 
 contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
-    uint256 public seniorDebtToJunior;
-    uint256 public juniorDebtToSenior;
     // When > 0, SRT deposits are routed to strat[0] if Junior's share of total TVL is below this floor.
     // WAD ratio 1e18 = 100%
     uint256 public juniorAllocationFloor;
 
     event StratsSet(address indexed juniorStrat, address indexed seniorStrat);
-    event SeniorBorrowedJuniorLiquidity(uint256 baseAssets);
-    event JuniorBorrowedSeniorLiquidity(uint256 baseAssets);
-    event SeniorDebtRepaid(uint256 baseAssets);
-    event JuniorDebtRepaid(uint256 baseAssets);
 
     function initialize(
         address owner_,
@@ -66,7 +60,8 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     function _depositStratIndex(address tranche, address token, uint256 baseAssets) internal view override returns (uint256) {
         if (!cdo.isJrt(tranche) && strats[0].supportsToken(token)) {
             // Senior has outstanding debt to Junior — repay it via deposit routing.
-            if (seniorDebtToJunior > 0) {
+            (uint256 toJunior,) = debts();
+            if (toJunior > 0) {
                 return 0;
             }
             // Junior's share of total TVL is below the configured floor — restore target allocation.
@@ -86,36 +81,15 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         return cdo.isJrt(tranche) ? 1 : 0;
     }
 
-    function _onCrossStratWithdraw(uint256 primaryIdx, uint256, uint256 borrowedAssets) internal override {
-        if (primaryIdx == 0) {
-            seniorDebtToJunior += borrowedAssets;
-            emit SeniorBorrowedJuniorLiquidity(borrowedAssets);
-        } else {
-            juniorDebtToSenior += borrowedAssets;
-            emit JuniorBorrowedSeniorLiquidity(borrowedAssets);
-        }
-    }
-
-    function _onCrossStratDeposit(uint256 depositedIdx, uint256 naturalIdx, uint256 baseAssets) internal override {
-        if (depositedIdx == 0 && naturalIdx == 1) {
-            uint256 repaid = Math.min(baseAssets, seniorDebtToJunior);
-            seniorDebtToJunior -= repaid;
-            emit SeniorDebtRepaid(repaid);
-        }
-    }
-
     function totalAssetsByTranche() public view returns (uint256 jrtAssets, uint256 srtAssets) {
         return (strats[0].totalAssets(), strats[1].totalAssets());
     }
 
-    function _onRebalanceComplete(uint256 fromStratIdx, uint256, uint256 baseAssets) internal override {
-        if (fromStratIdx == 1) {
-            seniorDebtToJunior -= baseAssets;
-            emit SeniorDebtRepaid(baseAssets);
-        } else {
-            juniorDebtToSenior -= baseAssets;
-            emit JuniorDebtRepaid(baseAssets);
-        }
+    function debts() public view returns (uint256 toJunior, uint256 toSenior) {
+        require(address(accounting) != address(0), "Accounting not set");
+        (uint256 jrtNavT0, uint256 srtNavT0,) = accounting.totalAssetsT0();
+        toJunior = Math.saturatingSub(jrtNavT0, strats[0].totalAssets());
+        toSenior = Math.saturatingSub(srtNavT0, strats[1].totalAssets());
     }
 
     function shareToken() external view returns (address) {

@@ -7,6 +7,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {IMultiStrategy} from "../../interfaces/IMultiStrategy.sol";
 import {IStrategy} from "../../interfaces/IStrategy.sol";
 import {IRebalancer, IRebalanceable} from "../../interfaces/IRebalancer.sol";
+import {IAccounting} from "../../interfaces/IAccounting.sol";
 import {Strategy} from "../../Strategy.sol";
 
 abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
@@ -14,9 +15,11 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     uint256[] public lastStratNavs;
 
     IRebalancer public rebalancer;
+    IAccounting public accounting;
 
     event StratNavSnapshot(uint256[] navs);
     event RebalancerSet(address indexed rebalancer);
+    event AccountingSet(address indexed accounting);
 
     modifier onlyRebalancer() {
         if (msg.sender != address(rebalancer)) revert InvalidCaller(msg.sender);
@@ -32,13 +35,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         return _depositStratIndex(tranche);
     }
 
-    // Hook called when a cross-strat borrow occurs during withdrawal.
-    // primaryIdx: strat borrowed from; secondaryIdx: tranche's own strat.
-    function _onCrossStratWithdraw(uint256 primaryIdx, uint256 secondaryIdx, uint256 borrowedAssets) internal virtual {}
-
-    // Hook called when a deposit is routed to a non-natural strat (cross-strat deposit).
-    // depositedIdx: strat that received the deposit; naturalIdx: tranche's own strat.
-    function _onCrossStratDeposit(uint256 depositedIdx, uint256 naturalIdx, uint256 baseAssets) internal virtual {}
 
     function deposit(address tranche, address token, uint256 tokenAmount, uint256 baseAssets, address owner)
         external
@@ -51,7 +47,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         SafeERC20.safeTransferFrom(IERC20(token), owner, address(this), tokenAmount);
         SafeERC20.forceApprove(IERC20(token), address(strat), tokenAmount);
         uint256 out = strat.deposit(address(0), token, tokenAmount, baseAssets, address(this));
-        if (idx != naturalIdx) _onCrossStratDeposit(idx, naturalIdx, baseAssets);
         _snapshotStratNav();
         return out;
     }
@@ -102,6 +97,11 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         emit RebalancerSet(address(rebalancer_));
     }
 
+    function setAccounting(IAccounting accounting_) external onlyOwner {
+        accounting = accounting_;
+        emit AccountingSet(address(accounting_));
+    }
+
     function withdrawForRebalance(uint256 stratIdx, address token, uint256 baseAssets, address receiver) external onlyRebalancer {
         IStrategy strat = strats[stratIdx];
         uint256 tokenAmount = strat.convertToTokens(token, baseAssets, Math.Rounding.Ceil);
@@ -115,15 +115,11 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         strat.deposit(address(0), token, tokenAmount, baseAssets, address(this));
     }
 
-    function notifyRebalanceComplete(uint256 fromStratIdx, uint256 toStratIdx, uint256 baseAssets) external onlyRebalancer {
-        _onRebalanceComplete(fromStratIdx, toStratIdx, baseAssets);
-    }
+    function notifyRebalanceComplete(uint256 fromStratIdx, uint256 toStratIdx, uint256 baseAssets) external onlyRebalancer {}
 
     function getStratShareToken(uint256 stratIdx) external view returns (address) {
         return strats[stratIdx].shareToken();
     }
-
-    function _onRebalanceComplete(uint256 fromStratIdx, uint256 toStratIdx, uint256 baseAssets) internal virtual {}
 
     function _snapshotStratNav() internal {
         uint256 len = strats.length;
@@ -260,7 +256,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         if (borrowedAssets > 0) {
             uint256 primaryTokenAmount = primaryStrat.convertToTokens(token, borrowedAssets, Math.Rounding.Ceil);
             tokenAmountOut += primaryStrat.withdraw(tranche, token, primaryTokenAmount, borrowedAssets, sender, receiver, true);
-            _onCrossStratWithdraw(primaryIdx, secondaryIdx, borrowedAssets);
         }
 
         uint256 secondaryAssets = baseAssets - borrowedAssets;

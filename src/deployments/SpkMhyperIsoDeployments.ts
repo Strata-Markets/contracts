@@ -254,6 +254,15 @@ export class SpkMhyperIsoDeployments extends DeploymentsBase<{
             },
         });
 
+        const accounting = await this.ensureAccounting(cdo.address);
+        await this.ds.configure(strategy, {
+            title: 'Set Accounting on IsolatedStrategy',
+            shouldUpdate: async () => $address.eq(await strategy.accounting(), $address.ZERO),
+            updater: async () => {
+                await strategy.$receipt().setAccounting(this.owner, accounting.address);
+            },
+        });
+
         return { strategy };
     }
 

@@ -100,42 +100,42 @@ UTest.create({
         l`JRT: cyan<${$bigint.toEther(jrtAssets, 6)}> SRT: cyan<${$bigint.toEther(srtAssets, 6)}>`;
     },
 
-    async 'SRT withdrawal borrows from Spark first (sets seniorDebtToJunior)' () {
+    async 'SRT withdrawal borrows from Spark first (records toJunior debt)' () {
         await $erc20.mint(USDC, deployer, deployer, 200);
         await $tranche.deposit(jrtVault, deployer, USDC, 150);
         await $tranche.deposit(srtVault, deployer, USDC, 50);
 
-        $require.eq(await strategy.seniorDebtToJunior(), 0n, 'No debt before withdrawal');
+        $require.eq((await strategy.debts()).toJunior, 0n, 'No debt before withdrawal');
 
         await $tranche.withdraw(srtVault, deployer, USDC, 30);
 
-        const debt = await strategy.seniorDebtToJunior();
+        const { toJunior: debt } = await strategy.debts();
         $require.gt(debt, 0n, 'SRT should owe JRT after borrowing from Spark');
-        l`seniorDebtToJunior after SRT withdrawal: cyan<${$bigint.toEther(debt, 6)}> USDC`;
+        l`toJunior debt after SRT withdrawal: cyan<${$bigint.toEther(debt, 6)}> USDC`;
     },
 
-    async 'JRT withdrawal borrows from Midas first (sets juniorDebtToSenior)' () {
+    async 'JRT withdrawal borrows from Midas first (records toSenior debt)' () {
         await $erc20.mint(USDC, deployer, deployer, 200);
         await $tranche.deposit(jrtVault, deployer, USDC, 100);
         await $tranche.deposit(srtVault, deployer, USDC, 100);
 
-        $require.eq(await strategy.juniorDebtToSenior(), 0n, 'No debt before withdrawal');
+        $require.eq((await strategy.debts()).toSenior, 0n, 'No debt before withdrawal');
 
         // JRT borrows from Midas (cross-strat, skip cooldown) → instant
         await $tranche.withdraw(jrtVault, deployer, USDC, 50);
 
-        const debt = await strategy.juniorDebtToSenior();
+        const { toSenior: debt } = await strategy.debts();
         $require.gt(debt, 0n, 'JRT should owe SRT after borrowing from Midas');
-        l`juniorDebtToSenior after JRT withdrawal: cyan<${$bigint.toEther(debt, 6)}> USDC`;
+        l`toSenior debt after JRT withdrawal: cyan<${$bigint.toEther(debt, 6)}> USDC`;
     },
 
-    async 'Rebalance Spark→Midas: instant, clears juniorDebtToSenior' () {
+    async 'Rebalance Spark→Midas: instant, clears toSenior debt' () {
         await $erc20.mint(USDC, deployer, deployer, 200);
         await $tranche.deposit(jrtVault, deployer, USDC, 100);
         await $tranche.deposit(srtVault, deployer, USDC, 100);
 
         await $tranche.withdraw(jrtVault, deployer, USDC, 50);
-        const debtBefore = await strategy.juniorDebtToSenior();
+        const { toSenior: debtBefore } = await strategy.debts();
         $require.gt(debtBefore, 0n, 'Debt must exist before rebalance');
 
         // Spark (0) → Midas (1): Spark is liquid so the whole rebalance completes in one tx
@@ -146,17 +146,17 @@ UTest.create({
             debtBefore
         );
 
-        $require.eq(await strategy.juniorDebtToSenior(), 0n, 'juniorDebtToSenior cleared after Spark→Midas rebalance');
+        $require.eq((await strategy.debts()).toSenior, 0n, 'toSenior debt cleared after Spark→Midas rebalance');
         l`Rebalance complete: debt cyan<${$bigint.toEther(debtBefore, 6)}> → 0`;
     },
 
-    async 'Rebalance Midas→Spark: async, clears seniorDebtToJunior after completeRebalance' () {
+    async 'Rebalance Midas→Spark: async, clears toJunior debt after completeRebalance' () {
         await $erc20.mint(USDC, deployer, deployer, 200);
         await $tranche.deposit(jrtVault, deployer, USDC, 150);
         await $tranche.deposit(srtVault, deployer, USDC, 50);
 
         await $tranche.withdraw(srtVault, deployer, USDC, 30);
-        const debtBefore = await strategy.seniorDebtToJunior();
+        const { toJunior: debtBefore } = await strategy.debts();
         $require.gt(debtBefore, 0n, 'Debt must exist before rebalance');
 
         // Midas (1) → Spark (0): withdraw as USDC (baseAsset path) to avoid MidasStrategy
@@ -169,7 +169,7 @@ UTest.create({
         );
 
         // Debt unchanged: Midas redemption still pending
-        $require.eq(await strategy.seniorDebtToJunior(), debtBefore, 'Debt unchanged during cooldown');
+        $require.eq((await strategy.debts()).toJunior, debtBefore, 'Debt unchanged during cooldown');
         $require.eq(await rebalancer.pendingCount(), 1n, '1 pending rebalance');
 
         // Advance time and fulfill the Midas redemption
@@ -180,7 +180,7 @@ UTest.create({
         // Complete rebalance: Rebalancer finalizes unstakeCooldown and deposits to Spark
         await rebalancer.$receipt().completeRebalance(deployer, 0n);
 
-        $require.eq(await strategy.seniorDebtToJunior(), 0n, 'seniorDebtToJunior cleared after Midas→Spark rebalance completes');
+        $require.eq((await strategy.debts()).toJunior, 0n, 'toJunior debt cleared after Midas→Spark rebalance completes');
         $require.eq(await rebalancer.pendingCount(), 0n, 'No pending rebalances');
         l`Async rebalance complete: debt cyan<${$bigint.toEther(debtBefore, 6)}> → 0`;
     },

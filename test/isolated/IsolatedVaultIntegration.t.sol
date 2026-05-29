@@ -213,6 +213,7 @@ contract IsolatedIntegrationDeploy is Test {
 
         acm.grantRole(PAUSER_ROLE, owner);
 
+        strategy.setAccounting(IAccounting(address(accounting)));
         cdo.configure(
             IAccounting(address(accounting)),
             IStrategy(address(strategy)),
@@ -223,6 +224,9 @@ contract IsolatedIntegrationDeploy is Test {
 
         vm.stopPrank();
     }
+
+    function _debtToJunior() internal view returns (uint256 d) { (d,) = strategy.debts(); }
+    function _debtToSenior() internal view returns (uint256 d) { (, d) = strategy.debts(); }
 
     function _deployTranche(string memory symbol, string memory name) internal returns (Tranche) {
         Tranche trancheImpl = new Tranche();
@@ -342,7 +346,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         assertEq(mHYPER.balanceOf(address(seniorStrat)), DEPOSIT_AMOUNT * 1e12, "Senior strat mHYPER unchanged");
 
         // Debt recorded
-        assertEq(strategy.seniorDebtToJunior(), withdrawAmount, "seniorDebtToJunior tracks borrowed amount");
+        assertEq(_debtToJunior(), withdrawAmount, "seniorDebtToJunior tracks borrowed amount");
     }
 
     function test_Integration_SrtWithdraw_FallsBackToMidas_WhenSparkInsufficient() public {
@@ -366,7 +370,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
 
         // Junior strat (Spark) fully drained
         assertApproxEqAbs(juniorStrat.totalAssets(), 0, 1, "Junior strat (Spark) fully drained");
-        assertEq(strategy.seniorDebtToJunior(), DEPOSIT_AMOUNT, "Debt equals full junior amount borrowed");
+        assertEq(_debtToJunior(), DEPOSIT_AMOUNT, "Debt equals full junior amount borrowed");
 
         // Senior strat (Midas) provided the remainder
         uint256 remainder = withdrawAmount - DEPOSIT_AMOUNT;
@@ -415,7 +419,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         assertApproxEqAbs(juniorStrat.totalAssets(), DEPOSIT_AMOUNT, 1, "Junior strat Spark unchanged");
 
         // Debt recorded
-        assertEq(strategy.juniorDebtToSenior(), withdrawAmount, "juniorDebtToSenior tracks borrowed amount");
+        assertEq(_debtToSenior(), withdrawAmount, "juniorDebtToSenior tracks borrowed amount");
     }
 
     function test_Integration_JrtWithdraw_FallsBackToSpark_WhenMidasInsufficient() public {
@@ -449,7 +453,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
             "Junior strat reduced by remainder"
         );
 
-        assertEq(strategy.juniorDebtToSenior(), srtDeposit, "Debt equals full senior amount borrowed");
+        assertEq(_debtToSenior(), srtDeposit, "Debt equals full senior amount borrowed");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -466,7 +470,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         srtVault.withdraw(borrowAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(strategy.seniorDebtToJunior(), borrowAmount);
+        assertEq(_debtToJunior(), borrowAmount);
 
         uint256 juniorAssetsBefore = juniorStrat.totalAssets();
         uint256 seniorAssetsBefore = seniorStrat.totalAssets();
@@ -488,7 +492,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
 
         assertEq(state.pending, borrowAmount, "Pending amount should be the borrowed amount");
 
-        assertEq(strategy.seniorDebtToJunior(), 0, "Debt cleared after repayment");
+        assertEq(_debtToJunior(), 0, "Debt cleared after repayment");
         assertApproxEqAbs(
             juniorStrat.totalAssets(),
             juniorAssetsBefore + borrowAmount,
@@ -513,7 +517,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         jrtVault.withdraw(borrowAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(strategy.juniorDebtToSenior(), borrowAmount);
+        assertEq(_debtToSenior(), borrowAmount);
 
         // Complete alice's Midas cooldown before recording baseline assets
         vm.warp(block.timestamp + 1 weeks);
@@ -530,7 +534,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         rebalancer.initiateRebalance(0, 1, address(baseAsset), address(baseAsset), borrowAmount);
         vm.stopPrank();
 
-        assertEq(strategy.juniorDebtToSenior(), 0, "Debt cleared after repayment");
+        assertEq(_debtToSenior(), 0, "Debt cleared after repayment");
         assertApproxEqAbs(
             seniorStrat.totalAssets(),
             seniorAssetsBefore + borrowAmount,

@@ -108,7 +108,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         assertEq(baseAsset.balanceOf(alice) - aliceBalBefore, withdrawAmount, "Alice should receive withdrawn assets");
 
         // Strategy should track the debt owed from senior to junior
-        assertEq(strategy.seniorDebtToJunior(), withdrawAmount, "Senior debt to junior should equal borrowed amount");
+        assertEq(_debtToJunior(), withdrawAmount, "Senior debt to junior should equal borrowed amount");
     }
 
     function test_SrtWithdraw_FallsBackToSeniorStrat_WhenJrtLiquidityInsufficient() public {
@@ -138,7 +138,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         // Junior strat should be fully drained, remainder from senior
         assertEq(juniorConsumed, DEPOSIT_AMOUNT, "All junior liquidity should be consumed first");
         assertEq(seniorConsumed, withdrawAmount - DEPOSIT_AMOUNT, "Senior strat covers the remainder");
-        assertEq(strategy.seniorDebtToJunior(), DEPOSIT_AMOUNT, "Debt should equal full junior amount borrowed");
+        assertEq(_debtToJunior(), DEPOSIT_AMOUNT, "Debt should equal full junior amount borrowed");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -163,7 +163,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
 
         assertEq(seniorConsumed, withdrawAmount, "Senior strat provides liquidity first for JRT withdrawals");
         assertEq(juniorConsumed, 0, "Junior strat should not be touched when senior has sufficient liquidity");
-        assertEq(strategy.juniorDebtToSenior(), withdrawAmount, "Junior owes senior for borrowed liquidity");
+        assertEq(_debtToSenior(), withdrawAmount, "Junior owes senior for borrowed liquidity");
     }
 
     function test_JrtWithdraw_FallsBackToJuniorStrat_WhenSeniorLiquidityInsufficient() public {
@@ -187,7 +187,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
 
         assertEq(seniorConsumed, srtDeposit, "Senior strat fully consumed first");
         assertEq(juniorConsumed, withdrawAmount - srtDeposit, "Junior strat covers the remainder");
-        assertEq(strategy.juniorDebtToSenior(), srtDeposit, "Debt equals the full senior liquidity borrowed");
+        assertEq(_debtToSenior(), srtDeposit, "Debt equals the full senior liquidity borrowed");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -277,7 +277,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         srtVault.withdraw(withdrawAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(strategy.seniorDebtToJunior(), withdrawAmount);
+        assertEq(_debtToJunior(), withdrawAmount);
         assertEq(baseAsset.balanceOf(address(juniorStrat)), DEPOSIT_AMOUNT - withdrawAmount);
         assertEq(baseAsset.balanceOf(address(seniorStrat)), DEPOSIT_AMOUNT);
 
@@ -289,7 +289,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         rebalancer.initiateRebalance(1, 0, address(baseAsset), address(baseAsset), withdrawAmount);
         vm.stopPrank();
 
-        assertEq(strategy.seniorDebtToJunior(), 0, "Debt cleared after repayment");
+        assertEq(_debtToJunior(), 0, "Debt cleared after repayment");
         assertEq(
             baseAsset.balanceOf(address(juniorStrat)),
             DEPOSIT_AMOUNT,
@@ -312,7 +312,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         jrtVault.withdraw(withdrawAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(strategy.juniorDebtToSenior(), withdrawAmount);
+        assertEq(_debtToSenior(), withdrawAmount);
         assertEq(baseAsset.balanceOf(address(juniorStrat)), DEPOSIT_AMOUNT);
         assertEq(baseAsset.balanceOf(address(seniorStrat)), DEPOSIT_AMOUNT - withdrawAmount);
 
@@ -324,7 +324,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         rebalancer.initiateRebalance(0, 1, address(baseAsset), address(baseAsset), withdrawAmount);
         vm.stopPrank();
 
-        assertEq(strategy.juniorDebtToSenior(), 0, "Debt cleared after repayment");
+        assertEq(_debtToSenior(), 0, "Debt cleared after repayment");
         assertEq(
             baseAsset.balanceOf(address(seniorStrat)),
             DEPOSIT_AMOUNT,
@@ -350,7 +350,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         rebalancer.initiateRebalance(1, 0, address(baseAsset), address(baseAsset), 200 ether); // partial repay
         vm.stopPrank();
 
-        assertEq(strategy.seniorDebtToJunior(), 300 ether, "Remaining debt after partial repayment");
+        assertEq(_debtToJunior(), 300 ether, "Remaining debt after partial repayment");
         assertEq(baseAsset.balanceOf(address(juniorStrat)), DEPOSIT_AMOUNT - 300 ether, "Junior partially restored");
     }
 
@@ -423,7 +423,7 @@ contract IsolatedVaultTest is IsolatedVaultDeploy {
         vm.stopPrank();
 
         // After cross-strat withdrawal: debt tracked correctly in strategy
-        uint256 strategySeniorDebt = strategy.seniorDebtToJunior();
+        uint256 strategySeniorDebt = _debtToJunior();
         assertEq(strategySeniorDebt, DEPOSIT_AMOUNT / 2, "Strategy debt should equal borrowed amount");
 
         // NAV invariant: jrtNav + srtNav == total deposited - total withdrawn

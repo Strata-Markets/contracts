@@ -128,11 +128,15 @@ contract IsolatedVaultDeploy is Test {
 
         acm.grantRole(PAUSER_ROLE, owner);
 
+        strategy.setAccounting(IAccounting(address(accounting)));
         cdo.configure(IAccounting(address(accounting)), IStrategy(address(strategy)), ITranche(address(jrtVault)), ITranche(address(srtVault)));
         cdo.setActionStates(address(0), true, true);
 
         vm.stopPrank();
     }
+
+    function _debtToJunior() internal view returns (uint256 d) { (d,) = strategy.debts(); }
+    function _debtToSenior() internal view returns (uint256 d) { (, d) = strategy.debts(); }
 
     function _deployTranche(string memory symbol, string memory name) internal returns (Tranche) {
         Tranche trancheImpl = new Tranche();
