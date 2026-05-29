@@ -12,16 +12,18 @@ Created: 2026-03-21
 
 ## 1. Abstract
 
-This specification defines a new tranche architecture where Senior and Junior assets are allocated to separate underlying strategy sleeves while preserving the existing top-level product shape of one `StrataCDO`, one Senior tranche vault, and one Junior tranche vault.
+This specification defines a new tranche architecture where Senior and Junior assets are allocated to separate underlying strategies while preserving the existing top-level product shape of one `StrataCDO`, one Senior tranche vault, and one Junior tranche vault.
 
-* Senior assets MUST be allocated to a dedicated base strategy sleeve.
-* Junior assets MUST be allocated to a dedicated liquid strategy sleeve.
+* Senior assets MUST be allocated to a dedicated base strategy.
+* Junior assets MUST be allocated to a dedicated liquid strategy.
 * Senior MUST pay a continuous risk premium to Junior.
-* Senior redemptions MUST consume Junior sleeve liquidity first, then fall back to Senior sleeve liquidity and the existing async/cooldown path.
-* Junior redemptions MUST consume Senior sleeve liquidity first, then fall back to Junior sleeve liquidity and the existing async/cooldown path.
-* Senior sleeve losses MUST be absorbed by Junior first, up to a configured protection capacity.
+* Senior redemptions MUST consume Junior strategy liquidity first, then fall back to Senior strategy liquidity and the existing async/cooldown path.
+* Junior redemptions MUST consume Senior strategy liquidity first and the existing async/cooldown path, then fall back to Junior strategy liquidity.
+* Senior strategy losses MUST be absorbed by Junior first, up to a configured protection capacity.
 
 Both tranches have symmetric liquidity access: Senior may borrow Junior liquidity, and Junior may borrow Senior liquidity.
+
+A privileged Rebalancer SHOULD be available to move assets between the two strategies in either direction, restoring target allocations and clearing inter-strategy debt. It SHOULD handle both instant and deferred (async cooldown) redemptions.
 
 ---
 
@@ -37,7 +39,7 @@ The implementation SHOULD preserve the following:
 
 The implementation MUST introduce the following:
 
-* separate raw NAV tracking for Junior and Senior sleeves,
+* separate entitlement NAV tracking for Junior (`jrtBaseNav`) and Senior (`srtBaseNav`) tranches,
 * isolated tranche-native yield,
 * explicit premium accrual,
 * explicit Senior debt to Junior when Junior liquidity is used for Senior redemptions,
@@ -49,45 +51,40 @@ The implementation MUST introduce the following:
 ## 3. High-Level Architecture
 
 ```text
-Users
-  |
-  v
-JRT / SRT Tranche Vaults
-  |
-  v
-StrataCDO
-  |
-  v
-IsolatedCompositeStrategy (IsolatedAccounting)
-  |                         |
-  v                         v
-JuniorLiquiditySleeve       SeniorBaseSleeve
-
+               Users
+                 |
+                 v
+         JRT / SRT Tranche Vaults
+                 |
+                 v
+        StrataCDO (AccountingIsolated)
+                 |
+                 v
+          IsolatedStrategy  -> Rebalancer
+         |                |
+         v                v
+JuniorLiquidStrategy   SeniorBaseStrategy
 ```
 
 Responsibilities:
 
 * `Tranche`: mint/burn shares, previews, cooldown integration.
 * `StrataCDO`: orchestration, access control, fees, accounting refresh, reserve management.
-* `IsolatedCompositeStrategy`: tranche-aware routing and liquidity sourcing.
-* `JuniorLiquiditySleeve`: holds Junior liquidity strategy assets.
-* `SeniorBaseSleeve`: holds Senior base strategy assets.
-* `IsolatedAccounting`: entitlement accounting based on split raw NAVs.
+* `IsolatedStrategy`: tranche-aware routing and liquidity sourcing.
+* `JuniorLiquidStrategy`: holds Junior liquidity strategy assets.
+* `SeniorBaseStrategy`: holds Senior base strategy assets.
+* `AccountingIsolated`: entitlement accounting split across Junior (`jrtBaseNav`) and Senior (`srtBaseNav`) tranches.
+* `Rebalancer`: moves assets between strategies; handles instant and deferred rebalances, clears inter-strategy debt on completion.
 
 ---
 
 ## 4. Economics
 
-### 4.1 Raw Sleeve NAV
+### 4.1 Per-Strategy NAV
 
-The system MUST distinguish between physical sleeve assets and tranche economic entitlements.
+The system MUST distinguish between assets physically held by each sub-strategy and tranche economic entitlements.
 
-Let:
-
-* `rawJrtNav` = assets physically held by the Junior sleeve.
-* `rawSrtNav` = assets physically held by the Senior sleeve.
-
-These values are strategy-layer facts.
+At reconciliation time, each sub-strategy is queried for its current `totalAssets()`. These per-strategy values are transient — they are not stored as state variables. The combined `navT1` equals the sum of both sub-strategy NAVs plus any in-flight assets held by the Rebalancer.
 
 ### 4.2 Tranche Entitlement NAV
 
@@ -124,10 +121,10 @@ Where:
 
 Premium transfer is the implied transfer from Senior to Junior derived from the difference between:
 
-* realized Senior sleeve economics, and
+* realized Senior strategy economics, and
 * Senior economics capped by `aprSrt` over the accrual interval.
 
-Operationally, this means Senior retains up to the target return implied by `aprSrt`, and any excess Senior sleeve return is transferred to Junior.
+Operationally, this means Senior retains up to the target return implied by `aprSrt`, and any excess Senior strategy return is transferred to Junior.
 
 For compatibility with existing accounting mechanics, implementations MAY use target-index accounting to realize this transfer.
 
@@ -146,11 +143,11 @@ srtNav += targetGainSrt
 jrtNav += (realizedSeniorGain - targetGainSrt)
 ```
 
-If `realizedSeniorGain < targetGainSrt` (Senior sleeve underperformed its target), the difference is negative and JRT is reduced to fund the shortfall. This guarantees Senior always receives its full target return as long as Junior has sufficient balance.
+If `realizedSeniorGain < targetGainSrt` (Senior strategy underperformed its target), the difference is negative and JRT is reduced to fund the shortfall. This guarantees Senior always receives its full target return as long as Junior has sufficient balance.
 
 ### 4.4 Senior Loss Waterfall
 
-If `rawSrtNav` decreases between accounting checkpoints, that loss MUST be allocated in the following waterfall order:
+If total NAV decreases between accounting checkpoints (`navT1 < navT0`), that loss MUST be allocated in the following waterfall order:
 
 1. Junior absorbs losses first (up to its full balance).
 2. Reserve absorbs any remaining loss.
@@ -160,63 +157,89 @@ This is consistent with the legacy `Accounting` contract loss allocation.
 
 ### 4.5 Senior Debt To Junior
 
-If Senior redeems using Junior sleeve liquidity, the accounting system MUST record:
+If Senior redeems using Junior strategy liquidity, an implicit debt arises: Junior physically paid but its accounting entitlement (`jrtBaseNav`) is unchanged, while Senior's accounting entitlement (`srtBaseNav`) decreases by the redeemed amount. This gap is exposed by `IsolatedStrategy.debts()`:
 
 ```text
-seniorDebtToJunior += amountBorrowed
+srSurplus = saturatingSub(srtAssets, srtBaseNav)
+jrDeficit = saturatingSub(jrtBaseNav, jrtAssets)
+toJunior  = min(srSurplus, jrDeficit)
 ```
 
-This debt represents value owed by Senior economics to Junior economics and MUST be considered during future accounting updates and redemptions.
+`toJunior > 0` signals outstanding Senior-to-Junior debt. No explicit state variable is stored; the debt is fully derived from live strategy balances and accounting NAV at query time.
 
-The debt MUST be repayable via a privileged `repaySeniorDebtToJunior()` function that withdraws from the Senior sleeve and re-deposits into the Junior sleeve.
+The debt is cleared by `Rebalancer.initiateRebalance(fromIdx=1, toIdx=0, ...)` or `Rebalancer.initiateRebalanceByDebt(...)`, which physically moves assets from the Senior strategy to the Junior strategy. It is also cleared passively via deposit routing when incoming SRT deposits are redirected to the Junior strategy (see §4.8).
 
 ### 4.6 Junior Debt To Senior
 
-If Junior redeems using Senior sleeve liquidity, the accounting system MUST record:
+If Junior redeems using Senior strategy liquidity, a symmetric implicit debt arises: Senior physically paid but its accounting entitlement (`srtBaseNav`) is unchanged, while Junior's accounting entitlement (`jrtBaseNav`) decreases. `IsolatedStrategy.debts()` exposes this as:
 
 ```text
-juniorDebtToSenior += amountBorrowed
+jrSurplus = saturatingSub(jrtAssets, jrtBaseNav)
+srDeficit = saturatingSub(srtBaseNav, srtAssets)
+toSenior  = min(jrSurplus, srDeficit)
 ```
 
-This debt represents value owed by Junior economics to Senior economics and MUST be considered during future accounting updates and redemptions.
+`toSenior > 0` signals outstanding Junior-to-Senior debt. No explicit state variable is stored.
 
-The net debt used in accounting delta calculations is:
+The debt is cleared by `Rebalancer.initiateRebalance(fromIdx=0, toIdx=1, ...)` or `Rebalancer.initiateRebalanceByDebt(...)`.
 
-```text
-netDebt = seniorDebtToJunior - juniorDebtToSenior
-```
-
-The debt MUST be repayable via a privileged `repayJuniorDebtToSenior()` function that withdraws from the Junior sleeve and re-deposits into the Senior sleeve.
+Note: `toSenior` and `toJunior` are mutually exclusive — `debts()` only returns a non-zero `toJunior` when `toSenior` is zero.
 
 ### 4.7 Junior Redemption Liquidity Sourcing
 
-Junior redemptions MUST attempt to source liquidity from the Senior sleeve first, before falling back to the Junior sleeve:
+Junior redemptions MUST attempt to source liquidity from the Senior strategy first, before falling back to the Junior strategy:
 
-1. If the Senior sleeve supports the requested token and has available liquidity, source up to `baseAssets` from the Senior sleeve.
-2. Record `juniorDebtToSenior += amountBorrowed`.
-3. Source any remaining amount from the Junior sleeve (via the normal cooldown path if needed).
+1. If the Senior strategy supports the requested token and has available liquidity, source up to `baseAssets` from the Senior strategy.
+2. Source any remaining amount from the Junior strategy (via the normal cooldown path if needed).
+
+The resulting debt is tracked implicitly (see §4.6) — no explicit recording step is required.
+
+### 4.8 Junior Allocation Floor
+
+A configurable `juniorAllocationFloor` (WAD ratio, `1e18 = 100%`, default `0` = disabled) MAY be set by the owner to enforce a minimum share of total TVL held by the Junior strategy.
+
+When `juniorAllocationFloor > 0`, `debts()` raises `jrTarget` above `jrtNavT0` to enforce the floor:
+
+```text
+jrTarget = max(jrtNavT0, navTotal * juniorAllocationFloor / 1e18)
+```
+
+This means `toJunior > 0` whenever Junior's physical assets fall below the floor-adjusted target, not just when a cross-strat borrow has occurred.
+
+On every deposit, `_depositStratIndex` checks `debts()` and applies the following routing:
+
+* If `toJunior > 0` and `baseAssets <= toJunior` and the Junior strategy supports the token → route to Junior.
+* If `toSenior > 0` and `baseAssets <= toSenior` and the Senior strategy supports the token → route to Senior.
+* Otherwise → route to the tranche's natural strategy.
+
+The `baseAssets <= toJunior/toSenior` guard prevents a single large deposit from overshooting the target and creating debt in the opposite direction. Deposits larger than the outstanding debt fall through to normal routing.
 
 ---
+
 ## 5. Accounting Update Algorithm
 
-On `updateAccounting(rawJrtNavT1, rawSrtNavT1)` the implementation SHOULD follow this order:
+On `updateAccounting()` the implementation SHOULD follow this order:
 
-1. Recompute risk-premium inputs and Senior target APR:
-   * `tvlRatioSrt = srtNav / (srtNav + jrtNav)`
-   * `riskPremium = riskX + riskY * (tvlRatioSrt ^ riskK)`
-   * `aprSrt = max(aprTarget, aprBase * (1 - riskPremium))`
-2. Accrue premium from Senior to Junior using the legacy target-return approach for the elapsed interval.
-3. Compute `netDebt = seniorDebtToJunior - juniorDebtToSenior`.
-4. Compute raw sleeve deltas adjusted for net debt:
-   * `jrtDelta = (rawJrtNavT1 - rawJrtNav) + netDebtDelta`
-   * `srtDelta = (rawSrtNavT1 - rawSrtNav) - netDebtDelta`
-5. If Senior sleeve lost value, apply the waterfall:
-   * Junior absorbs first (up to its full balance),
-   * Reserve absorbs any remaining loss,
-   * Senior absorbs any remaining loss.
-6. If Junior sleeve lost value:
-   * allocate the loss to Junior.
-7. Apply reserve fee logic if configured.
-8. Persist the new raw NAV snapshot.
-9. Persist the new entitlement NAV snapshot.
+1. **Fetch combined NAV** — the strategy SHOULD be queried with the `lastReconciliation` timestamp anchor rather than `navTimestamp`. Each sub-strategy SHOULD be queried with `latestNav=0`:
+   * If any sub-strategy returns `0` (its oracle has not updated since `lastReconciliation`), the strategy SHOULD return `navT0` unchanged — no reconciliation SHOULD occur.
+   * Otherwise, `navT1` SHOULD equal the sum of all sub-strategy NAVs plus any in-flight rebalance assets held by the Rebalancer.
 
+2. **Reconciliation gate** — if `navT1 == navT0`, the implementation SHOULD take the projection path (step 3). Otherwise it SHOULD take the full reconciliation path (step 4).
+
+3. **Projection path** — when no new rewards are detected, the implementation SHOULD accrue a projected gain using target indices (`navTargetIndex`, `srtTargetIndex`) over the elapsed interval and distribute between Junior and Senior. `lastReconciliation` SHOULD NOT advance.
+
+4. **Full reconciliation** — when new rewards are detected (`navT1 != navT0`), the implementation SHOULD:
+   * Recompute Senior target APR:
+     ```text
+     tvlRatioSrt = srtNav / (srtNav + jrtNav)
+     riskPremium = riskX + riskY * (tvlRatioSrt ^ riskK)
+     aprSrt = max(aprTarget, aprBase * (1 - riskPremium))
+     ```
+   * Accrue Senior target gain using `srtTargetIndex` over the elapsed interval; transfer any excess to Junior.
+   * Apply loss waterfall if `navT1 < navT0`:
+     * Junior SHOULD absorb first (up to its full balance),
+     * Reserve SHOULD absorb any remaining loss,
+     * Senior SHOULD absorb any remaining loss.
+   * Apply reserve fee if configured.
+   * Persist updated entitlement NAVs (`jrtBaseNav`, `srtBaseNav`, `reserveNav`, `nav`).
+   * `lastReconciliation` SHOULD advance to the current block timestamp.
