@@ -59,19 +59,8 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
 
     function _depositStratIndex(address tranche, address token, uint256 baseAssets) internal view override returns (uint256) {
         if (!cdo.isJrt(tranche) && strats[0].supportsToken(token)) {
-            // Senior has outstanding debt to Junior — repay it via deposit routing.
             (uint256 toJunior,) = debts();
-            if (toJunior > 0) {
-                return 0;
-            }
-            // Junior's share of total TVL is below the configured floor — restore target allocation.
-            if (juniorAllocationFloor > 0) {
-                uint256 jrtAssets = strats[0].totalAssets();
-                uint256 total = jrtAssets + strats[1].totalAssets();
-                if (total > 0 && jrtAssets * 1e18 / total < juniorAllocationFloor) {
-                    return 0;
-                }
-            }
+            if (toJunior > 0) return 0;
         }
         return _depositStratIndex(tranche);
     }
@@ -85,11 +74,26 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         return (strats[0].totalAssets(), strats[1].totalAssets());
     }
 
+    /// @notice Returns the net amount of assets that need to be moved into each tranche's strategy.
+    /// @dev toJunior is the larger of: (a) actual cross-strat debt — senior borrowed junior liquidity,
+    ///      and (b) floor shortfall — junior's share of TVL is below juniorAllocationFloor.
+    ///      toSenior reflects the symmetric case where junior borrowed senior liquidity.
+    ///      Both values are zero when each strategy holds exactly its accounting entitlement
+    ///      and junior's allocation is at or above the configured floor.
     function debts() public view returns (uint256 toJunior, uint256 toSenior) {
         require(address(accounting) != address(0), "Accounting not set");
         (uint256 jrtNavT0, uint256 srtNavT0,) = accounting.totalAssetsT0();
-        toJunior = Math.saturatingSub(jrtNavT0, strats[0].totalAssets());
-        toSenior = Math.saturatingSub(srtNavT0, strats[1].totalAssets());
+        uint256 jrtAssets = strats[0].totalAssets();
+        uint256 srtAssets = strats[1].totalAssets();
+        toJunior = Math.saturatingSub(jrtNavT0, jrtAssets);
+        toSenior = Math.saturatingSub(srtNavT0, srtAssets);
+        if (juniorAllocationFloor > 0) {
+            uint256 total = jrtAssets + srtAssets;
+            if (total > 0) {
+                uint256 floorShortfall = Math.saturatingSub(juniorAllocationFloor * total / 1e18, jrtAssets);
+                if (floorShortfall > toJunior) toJunior = floorShortfall;
+            }
+        }
     }
 
     function shareToken() external view returns (address) {
