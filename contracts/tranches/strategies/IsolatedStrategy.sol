@@ -5,6 +5,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IStrataCDO} from "../interfaces/IStrataCDO.sol";
 import {IIsolatedStrategy} from "../interfaces/IIsolatedStrategy.sol";
 import {IStrategy} from "../interfaces/IStrategy.sol";
+import {IRebalanceable} from "../interfaces/IRebalancer.sol";
 import {MultiStrategy} from "./base/MultiStrategy.sol";
 
 contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
@@ -80,7 +81,7 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     ///      toSenior reflects the symmetric case where junior borrowed senior liquidity.
     ///      Both values are zero when each strategy holds exactly its accounting entitlement
     ///      and junior's allocation is at or above the configured floor.
-    function debts() public view returns (uint256 toJunior, uint256 toSenior) {
+    function debts() public view override(IIsolatedStrategy, IRebalanceable) returns (uint256 toJunior, uint256 toSenior) {
         require(address(accounting) != address(0), "Accounting not set");
         (uint256 jrtNavT0, uint256 srtNavT0,) = accounting.totalAssetsT0();
         uint256 jrtAssets = strats[0].totalAssets();

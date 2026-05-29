@@ -40,7 +40,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         onlyCDO
         returns (uint256)
     {
-        uint256 naturalIdx = _depositStratIndex(tranche);
         uint256 idx = _depositStratIndex(tranche, token, baseAssets);
         IStrategy strat = strats[idx];
         SafeERC20.safeTransferFrom(IERC20(token), owner, address(this), tokenAmount);
@@ -113,8 +112,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         SafeERC20.forceApprove(IERC20(token), address(strat), tokenAmount);
         strat.deposit(address(0), token, tokenAmount, baseAssets, address(this));
     }
-
-    function notifyRebalanceComplete(uint256 fromStratIdx, uint256 toStratIdx, uint256 baseAssets) external onlyRebalancer {}
 
     function getStratShareToken(uint256 stratIdx) external view returns (address) {
         return strats[stratIdx].shareToken();

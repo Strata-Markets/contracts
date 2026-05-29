@@ -47,6 +47,7 @@ contract Rebalancer is IRebalancer, AccessControlled {
     // withdrawToken: token to pull from the source strat (must be supported by that strat).
     // depositToken:  token to deposit to the destination strat (may differ if a swap is
     //                needed; for same-base-asset strategies they are the same).
+    // baseAssets must not exceed the outstanding debt in the given direction, if any.
     // Detects deferral by checking whether depositToken arrived at this contract after the
     // withdrawal. If not (deferred cooldown), tracks as pending until completeRebalance.
     function initiateRebalance(
@@ -56,6 +57,40 @@ contract Rebalancer is IRebalancer, AccessControlled {
         address depositToken,
         uint256 baseAssets
     ) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
+        require(fromStratIdx != toStratIdx, "SameStrat");
+        (uint256 toJunior, uint256 toSenior) = strategy.debts();
+
+        if (fromStratIdx == 1 && toStratIdx == 0 && toJunior > 0) {
+            require(baseAssets <= toJunior, "ExceedsDebt");
+        } else if (fromStratIdx == 0 && toStratIdx == 1 && toSenior > 0) {
+            require(baseAssets <= toSenior, "ExceedsDebt");
+        }
+
+        _initiateRebalance(fromStratIdx, toStratIdx, withdrawToken, depositToken, baseAssets);
+    }
+
+    /// @notice Reads the outstanding debt from the strategy and initiates a rebalance for the
+    ///         full amount in the correct direction. Caller only needs to supply the tokens.
+    function initiateRebalanceByDebt(
+        address withdrawToken,
+        address depositToken
+    ) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
+        (uint256 toJunior, uint256 toSenior) = strategy.debts();
+        require(toJunior > 0 || toSenior > 0, "NoDebt");
+        if (toJunior >= toSenior) {
+            _initiateRebalance(1, 0, withdrawToken, depositToken, toJunior);
+        } else {
+            _initiateRebalance(0, 1, withdrawToken, depositToken, toSenior);
+        }
+    }
+
+    function _initiateRebalance(
+        uint256 fromStratIdx,
+        uint256 toStratIdx,
+        address withdrawToken,
+        address depositToken,
+        uint256 baseAssets
+    ) private {
         uint256 balBefore = IERC20(depositToken).balanceOf(address(this));
         strategy.withdrawForRebalance(fromStratIdx, withdrawToken, baseAssets, address(this));
         uint256 received = IERC20(depositToken).balanceOf(address(this)) - balBefore;
@@ -63,7 +98,6 @@ contract Rebalancer is IRebalancer, AccessControlled {
         if (received > 0) {
             IERC20(depositToken).forceApprove(address(strategy), received);
             strategy.depositForRebalance(toStratIdx, depositToken, received, baseAssets);
-            strategy.notifyRebalanceComplete(fromStratIdx, toStratIdx, baseAssets);
 
             emit RebalanceCompleted(fromStratIdx, toStratIdx, baseAssets);
         } else {
@@ -94,7 +128,6 @@ contract Rebalancer is IRebalancer, AccessControlled {
 
         IERC20(pending.depositToken).forceApprove(address(strategy), available);
         strategy.depositForRebalance(pending.toStratIdx, pending.depositToken, available, pending.baseAssets);
-        strategy.notifyRebalanceComplete(pending.fromStratIdx, pending.toStratIdx, pending.baseAssets);
 
         uint256 last = pendingRebalances.length - 1;
         if (idx < last) {

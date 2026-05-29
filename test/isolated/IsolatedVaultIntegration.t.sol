@@ -550,6 +550,87 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // initiateRebalanceByDebt — auto-resolved direction and amount
+    // ─────────────────────────────────────────────────────────────────────────
+
+    function test_Integration_InitiateRebalanceByDebt_Reverts_WhenNoDebt() public {
+        _depositToJrt(alice, DEPOSIT_AMOUNT);
+        _depositToSrt(alice, DEPOSIT_AMOUNT);
+
+        vm.startPrank(owner);
+        acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
+        vm.expectRevert("NoDebt");
+        rebalancer.initiateRebalanceByDebt(address(baseAsset), address(baseAsset));
+        vm.stopPrank();
+    }
+
+    // SRT borrowed Spark liquidity (toJunior) → rebalancer routes Midas→Spark automatically (async).
+    function test_Integration_InitiateRebalanceByDebt_ToJunior_AsyncMidasRebalance() public {
+        _depositToJrt(alice, DEPOSIT_AMOUNT);
+        _depositToSrt(alice, DEPOSIT_AMOUNT);
+
+        uint256 borrowAmount = DEPOSIT_AMOUNT / 2;
+        vm.startPrank(alice);
+        srtVault.withdraw(borrowAmount, alice, alice);
+        vm.stopPrank();
+
+        assertEq(_debtToJunior(), borrowAmount, "Debt to junior recorded");
+
+        uint256 juniorAssetsBefore = juniorStrat.totalAssets();
+        uint256 seniorAssetsBefore = seniorStrat.totalAssets();
+
+        // No manual direction or amount — rebalancer reads debts() and routes Midas(1)→Spark(0)
+        vm.startPrank(owner);
+        acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
+        rebalancer.initiateRebalanceByDebt(address(baseAsset), address(baseAsset));
+        vm.stopPrank();
+
+        assertEq(rebalancer.pendingCount(), 1, "Rebalance pending in Midas cooldown");
+
+        vm.warp(block.timestamp + 1 weeks);
+        redemptionVault.fulfillRequest(0);
+        vm.prank(owner);
+        rebalancer.completeRebalance(0);
+
+        assertEq(_debtToJunior(), 0, "Debt cleared after rebalance completes");
+        assertApproxEqAbs(juniorStrat.totalAssets(), juniorAssetsBefore + borrowAmount, 1, "Junior strat restored");
+        assertApproxEqAbs(seniorStrat.totalAssets(), seniorAssetsBefore - borrowAmount, 1, "Senior strat decremented");
+    }
+
+    // JRT borrowed Midas liquidity (toSenior) → rebalancer routes Spark→Midas automatically (instant).
+    function test_Integration_InitiateRebalanceByDebt_ToSenior_InstantSparkRebalance() public {
+        _depositToJrt(alice, DEPOSIT_AMOUNT);
+        _depositToSrt(alice, DEPOSIT_AMOUNT);
+
+        uint256 borrowAmount = DEPOSIT_AMOUNT / 2;
+        vm.startPrank(alice);
+        jrtVault.withdraw(borrowAmount, alice, alice);
+        vm.stopPrank();
+
+        assertEq(_debtToSenior(), borrowAmount, "Debt to senior recorded");
+
+        // Settle alice's async Midas cooldown before snapshotting baseline
+        vm.warp(block.timestamp + 1 weeks);
+        redemptionVault.fulfillRequest(0);
+        unstakeCooldown.finalize(IERC20(address(mHYPER)), address(alice));
+
+        uint256 juniorAssetsBefore = juniorStrat.totalAssets();
+        uint256 seniorAssetsBefore = seniorStrat.totalAssets();
+
+        // No manual direction or amount — rebalancer reads debts() and routes Spark(0)→Midas(1)
+        vm.startPrank(owner);
+        acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
+        rebalancer.initiateRebalanceByDebt(address(baseAsset), address(baseAsset));
+        vm.stopPrank();
+
+        // Spark is liquid — rebalance completes in same tx, no pending
+        assertEq(rebalancer.pendingCount(), 0, "No pending rebalance Spark is instant");
+        assertEq(_debtToSenior(), 0, "Debt cleared immediately");
+        assertApproxEqAbs(seniorStrat.totalAssets(), seniorAssetsBefore + borrowAmount, 1, "Senior strat restored");
+        assertApproxEqAbs(juniorStrat.totalAssets(), juniorAssetsBefore - borrowAmount, 1, "Junior strat decremented");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Oracle-gated discrete accounting
     // ─────────────────────────────────────────────────────────────────────────
 
