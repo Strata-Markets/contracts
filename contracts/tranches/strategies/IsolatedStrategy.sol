@@ -20,11 +20,11 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         IStrataCDO cdo_,
         IStrategy juniorStrat_,
         IStrategy seniorStrat_,
-        uint256 juniorAllocationFloor_
+        uint256 liquidAllocationFloor_
     ) external initializer {
         AccessControlled_init(owner_, acm_);
         cdo = cdo_;
-        juniorAllocationFloor = juniorAllocationFloor_;
+        liquidAllocationFloor = liquidAllocationFloor_;
         juniorStrat = juniorStrat_;
         seniorStrat = seniorStrat_;
         IStrategy[] memory strats_ = new IStrategy[](2);
@@ -34,8 +34,8 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         emit StratsSet(address(juniorStrat_), address(seniorStrat_));
     }
 
-    function setJuniorAllocationFloor(uint256 floor_) external onlyOwner {
-        juniorAllocationFloor = floor_;
+    function setLiquidAllocationFloor(uint256 floor_) external onlyOwner {
+        liquidAllocationFloor = floor_;
     }
 
     function setStrats(IStrategy juniorStrat_, IStrategy seniorStrat_) external onlyOwner {
@@ -76,7 +76,7 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     }
 
     /// @notice Returns the net amount of assets that need to move between strategies.
-    /// @dev JR allocation ratio is derived from accounting NAV; juniorAllocationFloor may raise it.
+    /// @dev JR allocation ratio is derived from accounting NAV; liquidAllocationFloor may raise it.
     ///      In-flight Rebalancer assets are credited to their destination strategy so that an
     ///      ongoing rebalance zeroes out the corresponding debt without querying pending state.
     ///      toSenior takes priority: if both would be non-zero (e.g. unreconciled losses),
@@ -88,6 +88,8 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         uint256 navTotal = jrtNavT0 + srtNavT0;
         if (navTotal == 0) return (0, 0);
 
+        uint256 strat1Ratio = Math.mulDiv(jrtNavT0, 1e18, navTotal);
+
         uint256 jrtAssets = juniorStrat.totalAssets();
         uint256 srtAssets = seniorStrat.totalAssets();
         if (address(rebalancer) != address(0)) {
@@ -96,7 +98,7 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
             srtAssets += pendingToSenior;
         }
 
-        return _computeDebts(jrtNavT0, navTotal, jrtAssets, srtAssets);
+        return _compute2StratsDebts(strat1Ratio, jrtAssets, srtAssets);
     }
 
     function shareToken() external view returns (address) {

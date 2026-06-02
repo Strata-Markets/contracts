@@ -16,8 +16,8 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     IRebalancer public rebalancer;
     IAccounting public accounting;
 
-    // WAD ratio (1e18 = 100%). When > 0, junior target is raised to at least this share of total assets.
-    uint256 public juniorAllocationFloor;
+    // WAD ratio (1e18 = 100%). When > 0, strat1 target is raised to at least this share of total assets.
+    uint256 public liquidAllocationFloor;
 
     mapping(address => bool) private _supportedTokens;
     IERC20[] private _supportedTokenList;
@@ -242,28 +242,27 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         }
     }
 
-    /// @dev Computes rebalance debts given junior's accounting entitlement and actual strategy assets.
-    ///      juniorTarget must be the raw accounting value (jrtNavT0), not a pre-divided ratio —
-    ///      converting to a WAD ratio and back loses precision due to integer truncation.
-    ///      navTotal is used only for the floor comparison and the senior target remainder.
-    ///      Raises the junior target to juniorAllocationFloor * navTotal when the floor exceeds the
-    ///      natural entitlement.
-    function _computeDebts(
-        uint256 juniorTarget,
-        uint256 navTotal,
-        uint256 jrtAssets,
-        uint256 srtAssets
-    ) internal view returns (uint256 toJunior, uint256 toSenior) {
-        uint256 floor = juniorAllocationFloor;
-        uint256 jrTarget = juniorTarget;
-        if (floor > 0) {
-            uint256 floorTarget = Math.mulDiv(navTotal, floor, 1e18);
-            if (floorTarget > jrTarget) jrTarget = floorTarget;
-        }
-        uint256 srTarget = navTotal - Math.min(jrTarget, navTotal);
-        toJunior = Math.saturatingSub(jrTarget, jrtAssets);
-        toSenior = Math.saturatingSub(srTarget, srtAssets);
-        if (toSenior > 0) toJunior = 0;
+    /// @dev Computes rebalance debts given strat1's WAD allocation ratio and actual strategy assets.
+    ///      strat1Ratio is a WAD proportion (1e18 = 100%) of total assets that strat1 should hold.
+    ///      Raises strat1Ratio to liquidAllocationFloor when the floor exceeds the natural ratio.
+    ///      toStrat2 takes priority: if both would be non-zero (e.g. unreconciled losses), toStrat1 is zeroed.
+    function _compute2StratsDebts(
+        uint256 strat1Ratio,
+        uint256 strat1Assets,
+        uint256 strat2Assets
+    ) internal view returns (uint256 toStrat1, uint256 toStrat2) {
+        uint256 floor = liquidAllocationFloor;
+        uint256 s1Ratio = strat1Ratio;
+
+        if (floor > 0 && s1Ratio < floor) s1Ratio = floor;
+
+        uint256 navTotal = strat1Assets + strat2Assets;
+        uint256 strat1Target = Math.mulDiv(navTotal, s1Ratio, 1e18);
+        uint256 strat2Target = navTotal - Math.min(strat1Target, navTotal);
+        toStrat1 = Math.saturatingSub(strat1Target, strat1Assets);
+        toStrat2 = Math.saturatingSub(strat2Target, strat2Assets);
+
+        if (toStrat2 > 0) toStrat1 = 0;
     }
 
     function supportsToken(address token) external view returns (bool) {

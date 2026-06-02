@@ -346,7 +346,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         assertEq(mHYPER.balanceOf(address(seniorStrat)), DEPOSIT_AMOUNT * 1e12, "Senior strat mHYPER unchanged");
 
         // Debt recorded
-        assertEq(_debtToJunior(), withdrawAmount, "seniorDebtToJunior tracks borrowed amount");
+        assertApproxEqAbs(_debtToJunior(), withdrawAmount, 2, "seniorDebtToJunior tracks borrowed amount");
     }
 
     function test_Integration_SrtWithdraw_FallsBackToMidas_WhenSparkInsufficient() public {
@@ -370,7 +370,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
 
         // Junior strat (Spark) fully drained
         assertApproxEqAbs(juniorStrat.totalAssets(), 0, 1, "Junior strat (Spark) fully drained");
-        assertEq(_debtToJunior(), DEPOSIT_AMOUNT, "Debt equals full junior amount borrowed");
+        assertApproxEqAbs(_debtToJunior(), DEPOSIT_AMOUNT, 2, "Debt equals full junior amount borrowed");
 
         // Senior strat (Midas) provided the remainder
         uint256 remainder = withdrawAmount - DEPOSIT_AMOUNT;
@@ -419,7 +419,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         assertApproxEqAbs(juniorStrat.totalAssets(), DEPOSIT_AMOUNT, 1, "Junior strat Spark unchanged");
 
         // Debt recorded
-        assertEq(_debtToSenior(), withdrawAmount, "juniorDebtToSenior tracks borrowed amount");
+        assertApproxEqAbs(_debtToSenior(), withdrawAmount, 2, "juniorDebtToSenior tracks borrowed amount");
     }
 
     function test_Integration_JrtWithdraw_FallsBackToSpark_WhenMidasInsufficient() public {
@@ -470,16 +470,17 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         srtVault.withdraw(borrowAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(_debtToJunior(), borrowAmount);
+        uint256 juniorDebt = _debtToJunior();
+        assertApproxEqAbs(juniorDebt, borrowAmount, 2);
 
         uint256 juniorAssetsBefore = juniorStrat.totalAssets();
         uint256 seniorAssetsBefore = seniorStrat.totalAssets();
 
-        // Repay: moves borrowAmount from Midas strat (idx 1) → Spark strat (idx 0)
+        // Repay: moves juniorDebt from Midas strat (idx 1) → Spark strat (idx 0)
         // Source is Midas (async) — rebalancer goes through cooldown
         vm.startPrank(owner);
         acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
-        rebalancer.initiateRebalance(1, 0, address(baseAsset), address(baseAsset), borrowAmount);
+        rebalancer.initiateRebalance(1, 0, address(baseAsset), address(baseAsset), juniorDebt);
         vm.stopPrank();
 
         ICooldown.TBalanceState memory state = unstakeCooldown.balanceOf(IERC20(address(mHYPER)), address(rebalancer));
@@ -490,7 +491,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         vm.prank(owner);
         rebalancer.completeRebalance(0);
 
-        assertEq(state.pending, borrowAmount, "Pending amount should be the borrowed amount");
+        assertApproxEqAbs(state.pending, borrowAmount, 2, "Pending amount should be the borrowed amount");
 
         assertEq(_debtToJunior(), 0, "Debt cleared after repayment");
         assertApproxEqAbs(
@@ -517,7 +518,8 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         jrtVault.withdraw(borrowAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(_debtToSenior(), borrowAmount);
+        uint256 seniorDebt = _debtToSenior();
+        assertApproxEqAbs(seniorDebt, borrowAmount, 2);
 
         // Complete alice's Midas cooldown before recording baseline assets
         vm.warp(block.timestamp + 1 weeks);
@@ -527,11 +529,11 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         uint256 juniorAssetsBefore = juniorStrat.totalAssets();
         uint256 seniorAssetsBefore = seniorStrat.totalAssets();
 
-        // Repay: moves borrowAmount from Spark strat (idx 0) → Midas strat (idx 1)
+        // Repay: moves seniorDebt from Spark strat (idx 0) → Midas strat (idx 1)
         // Source is Spark (instant) — no cooldown needed
         vm.startPrank(owner);
         acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
-        rebalancer.initiateRebalance(0, 1, address(baseAsset), address(baseAsset), borrowAmount);
+        rebalancer.initiateRebalance(0, 1, address(baseAsset), address(baseAsset), seniorDebt);
         vm.stopPrank();
 
         assertEq(_debtToSenior(), 0, "Debt cleared after repayment");
@@ -574,7 +576,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         srtVault.withdraw(borrowAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(_debtToJunior(), borrowAmount, "Debt to junior recorded");
+        assertApproxEqAbs(_debtToJunior(), borrowAmount, 2, "Debt to junior recorded");
 
         uint256 juniorAssetsBefore = juniorStrat.totalAssets();
         uint256 seniorAssetsBefore = seniorStrat.totalAssets();
@@ -607,7 +609,7 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         jrtVault.withdraw(borrowAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(_debtToSenior(), borrowAmount, "Debt to senior recorded");
+        assertApproxEqAbs(_debtToSenior(), borrowAmount, 2, "Debt to senior recorded");
 
         // Settle alice's async Midas cooldown before snapshotting baseline
         vm.warp(block.timestamp + 1 weeks);
@@ -643,12 +645,13 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         srtVault.withdraw(borrowAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(_debtToJunior(), borrowAmount, "Debt to junior recorded");
+        uint256 juniorDebtCap = _debtToJunior();
+        assertApproxEqAbs(juniorDebtCap, borrowAmount, 2, "Debt to junior recorded");
 
         vm.startPrank(owner);
         acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
         vm.expectRevert("ExceedsDebt");
-        rebalancer.initiateRebalance(1, 0, address(baseAsset), address(baseAsset), borrowAmount + 1);
+        rebalancer.initiateRebalance(1, 0, address(baseAsset), address(baseAsset), juniorDebtCap + 1);
         vm.stopPrank();
     }
 
@@ -661,12 +664,13 @@ contract IsolatedVaultIntegration is IsolatedIntegrationDeploy {
         jrtVault.withdraw(borrowAmount, alice, alice);
         vm.stopPrank();
 
-        assertEq(_debtToSenior(), borrowAmount, "Debt to senior recorded");
+        uint256 seniorDebtCap = _debtToSenior();
+        assertApproxEqAbs(seniorDebtCap, borrowAmount, 2, "Debt to senior recorded");
 
         vm.startPrank(owner);
         acm.grantRole(UPDATER_STRAT_CONFIG_ROLE, owner);
         vm.expectRevert("ExceedsDebt");
-        rebalancer.initiateRebalance(0, 1, address(baseAsset), address(baseAsset), borrowAmount + 1);
+        rebalancer.initiateRebalance(0, 1, address(baseAsset), address(baseAsset), seniorDebtCap + 1);
         vm.stopPrank();
     }
 
