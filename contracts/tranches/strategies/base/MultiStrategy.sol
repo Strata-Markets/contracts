@@ -45,7 +45,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         SafeERC20.safeTransferFrom(IERC20(token), owner, address(this), tokenAmount);
         SafeERC20.forceApprove(IERC20(token), address(strat), tokenAmount);
         uint256 out = strat.deposit(address(0), token, tokenAmount, baseAssets, address(this));
-        _snapshotStratNav();
         return out;
     }
 
@@ -115,17 +114,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
 
     function getStratShareToken(uint256 stratIdx) external view returns (address) {
         return strats[stratIdx].shareToken();
-    }
-
-    function _snapshotStratNav() internal {
-        uint256 len = strats.length;
-        uint256[] memory navs = new uint256[](len);
-        for (uint256 i; i < len;) {
-            uint256 nav = strats[i].totalAssets();
-            navs[i] = nav;
-            unchecked { ++i; }
-        }
-        emit StratNavSnapshot(navs);
     }
 
     function reduceReserve(address token, uint256 tokenAmount, address receiver) external onlyCDO {
@@ -258,7 +246,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
                 tranche, token, secondaryTokenAmount, secondaryAssets, sender, receiver, shouldSkipCooldown
             );
         }
-        _snapshotStratNav();
     }
 
     function _setStrats(IStrategy[] memory strats_) internal {
@@ -272,6 +259,27 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
             strats.push(strats_[i]);
             unchecked { ++i; }
         }
+    }
+
+    /// @dev Computes rebalance debts from a WAD junior allocation ratio and actual strategy assets.
+    ///      Applies juniorAllocationFloor_ to raise the effective ratio when needed.
+    ///      navTotal is derived from jrtAssets + srtAssets so the helper is self-contained.
+    function _computeDebts(
+        uint256 juniorAllocationRatio,
+        uint256 juniorAllocationFloor_,
+        uint256 jrtAssets,
+        uint256 srtAssets
+    ) internal pure returns (uint256 toJunior, uint256 toSenior) {
+        uint256 navTotal = jrtAssets + srtAssets;
+        if (navTotal == 0) return (0, 0);
+        uint256 effectiveRatio = juniorAllocationFloor_ > juniorAllocationRatio
+            ? juniorAllocationFloor_
+            : juniorAllocationRatio;
+        uint256 jrTarget = Math.mulDiv(navTotal, effectiveRatio, 1e18);
+        uint256 srTarget = navTotal - Math.min(jrTarget, navTotal);
+        toJunior = Math.saturatingSub(jrTarget, jrtAssets);
+        toSenior = Math.saturatingSub(srTarget, srtAssets);
+        if (toSenior > 0) toJunior = 0;
     }
 
     function _resolveStratByToken(address token) internal view returns (IStrategy) {
