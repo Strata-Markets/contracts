@@ -9,10 +9,6 @@ import {IRebalanceable} from "../interfaces/IRebalancer.sol";
 import {MultiStrategy} from "./base/MultiStrategy.sol";
 
 contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
-    // When > 0, SRT deposits are routed to strat[0] if Junior's share of total TVL is below this floor.
-    // WAD ratio 1e18 = 100%
-    uint256 public juniorAllocationFloor;
-
     event StratsSet(address indexed juniorStrat, address indexed seniorStrat);
 
     function initialize(
@@ -81,10 +77,7 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     }
 
     /// @notice Returns the net amount of assets that need to move between strategies.
-    /// @dev JR target defaults to jrtNavT0 (its accounting entitlement); juniorAllocationFloor
-    ///      raises it when the floor exceeds the natural ratio. SR target is the remainder.
-    ///      Using navTotal-based targets avoids intermediate ratio division and keeps results
-    ///      exact relative to accounting NAV.
+    /// @dev JR allocation ratio is derived from accounting NAV; juniorAllocationFloor may raise it.
     ///      In-flight Rebalancer assets are credited to their destination strategy so that an
     ///      ongoing rebalance zeroes out the corresponding debt without querying pending state.
     ///      toSenior takes priority: if both would be non-zero (e.g. unreconciled losses),
@@ -96,13 +89,6 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         uint256 navTotal = jrtNavT0 + srtNavT0;
         if (navTotal == 0) return (0, 0);
 
-        uint256 jrTarget = jrtNavT0;
-        if (juniorAllocationFloor > 0) {
-            uint256 floorTarget = Math.mulDiv(navTotal, juniorAllocationFloor, 1e18);
-            if (floorTarget > jrTarget) jrTarget = floorTarget;
-        }
-        uint256 srTarget = navTotal - Math.min(jrTarget, navTotal);
-
         uint256 jrtAssets = strats[0].totalAssets();
         uint256 srtAssets = strats[1].totalAssets();
         if (address(rebalancer) != address(0)) {
@@ -110,9 +96,7 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
             srtAssets += rebalancer.pendingToStrat(1);
         }
 
-        toJunior = Math.saturatingSub(jrTarget, jrtAssets);
-        toSenior = Math.saturatingSub(srTarget, srtAssets);
-        if (toSenior > 0) toJunior = 0;
+        return _computeDebts(jrtNavT0, navTotal, jrtAssets, srtAssets);
     }
 
     function shareToken() external view returns (address) {

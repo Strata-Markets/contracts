@@ -16,6 +16,9 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     IRebalancer public rebalancer;
     IAccounting public accounting;
 
+    // WAD ratio (1e18 = 100%). When > 0, junior target is raised to at least this share of total assets.
+    uint256 public juniorAllocationFloor;
+
     event StratNavSnapshot(uint256[] navs);
     event RebalancerSet(address indexed rebalancer);
     event AccountingSet(address indexed accounting);
@@ -261,21 +264,24 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         }
     }
 
-    /// @dev Computes rebalance debts from a WAD junior allocation ratio and actual strategy assets.
-    ///      Applies juniorAllocationFloor_ to raise the effective ratio when needed.
-    ///      navTotal is derived from jrtAssets + srtAssets so the helper is self-contained.
+    /// @dev Computes rebalance debts given junior's accounting entitlement and actual strategy assets.
+    ///      juniorTarget must be the raw accounting value (jrtNavT0), not a pre-divided ratio —
+    ///      converting to a WAD ratio and back loses precision due to integer truncation.
+    ///      navTotal is used only for the floor comparison and the senior target remainder.
+    ///      Raises the junior target to juniorAllocationFloor * navTotal when the floor exceeds the
+    ///      natural entitlement.
     function _computeDebts(
-        uint256 juniorAllocationRatio,
-        uint256 juniorAllocationFloor_,
+        uint256 juniorTarget,
+        uint256 navTotal,
         uint256 jrtAssets,
         uint256 srtAssets
-    ) internal pure returns (uint256 toJunior, uint256 toSenior) {
-        uint256 navTotal = jrtAssets + srtAssets;
-        if (navTotal == 0) return (0, 0);
-        uint256 effectiveRatio = juniorAllocationFloor_ > juniorAllocationRatio
-            ? juniorAllocationFloor_
-            : juniorAllocationRatio;
-        uint256 jrTarget = Math.mulDiv(navTotal, effectiveRatio, 1e18);
+    ) internal view returns (uint256 toJunior, uint256 toSenior) {
+        uint256 floor = juniorAllocationFloor;
+        uint256 jrTarget = juniorTarget;
+        if (floor > 0) {
+            uint256 floorTarget = Math.mulDiv(navTotal, floor, 1e18);
+            if (floorTarget > jrTarget) jrTarget = floorTarget;
+        }
         uint256 srTarget = navTotal - Math.min(jrTarget, navTotal);
         toJunior = Math.saturatingSub(jrTarget, jrtAssets);
         toSenior = Math.saturatingSub(srTarget, srtAssets);
