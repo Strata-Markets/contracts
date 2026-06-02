@@ -92,8 +92,9 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         uint256 jrtAssets = strats[0].totalAssets();
         uint256 srtAssets = strats[1].totalAssets();
         if (address(rebalancer) != address(0)) {
-            jrtAssets += rebalancer.pendingToStrat(0);
-            srtAssets += rebalancer.pendingToStrat(1);
+            (uint256 pendingToJunior, uint256 pendingToSenior) = rebalancer.pendingToStrats();
+            jrtAssets += pendingToJunior;
+            srtAssets += pendingToSenior;
         }
 
         return _computeDebts(jrtNavT0, navTotal, jrtAssets, srtAssets);

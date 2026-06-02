@@ -171,7 +171,7 @@ contract Rebalancer is IRebalancer, AccessControlled {
         return pendingRebalances.length;
     }
 
-    function pendingToStrat(uint256 stratIdx) external view returns (uint256) {
-        return _pendingToStrat[stratIdx];
+    function pendingToStrats() external view returns (uint256 toJunior, uint256 toSenior) {
+        return (_pendingToStrat[0], _pendingToStrat[1]);
     }
 }
