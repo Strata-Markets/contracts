@@ -9,6 +9,9 @@ import {IRebalanceable} from "../interfaces/IRebalancer.sol";
 import {MultiStrategy} from "./base/MultiStrategy.sol";
 
 contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
+    IStrategy public juniorStrat;
+    IStrategy public seniorStrat;
+
     event StratsSet(address indexed juniorStrat, address indexed seniorStrat);
 
     function initialize(
@@ -22,6 +25,8 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         AccessControlled_init(owner_, acm_);
         cdo = cdo_;
         juniorAllocationFloor = juniorAllocationFloor_;
+        juniorStrat = juniorStrat_;
+        seniorStrat = seniorStrat_;
         IStrategy[] memory strats_ = new IStrategy[](2);
         strats_[0] = juniorStrat_;
         strats_[1] = seniorStrat_;
@@ -34,19 +39,13 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     }
 
     function setStrats(IStrategy juniorStrat_, IStrategy seniorStrat_) external onlyOwner {
+        juniorStrat = juniorStrat_;
+        seniorStrat = seniorStrat_;
         IStrategy[] memory strats_ = new IStrategy[](2);
         strats_[0] = juniorStrat_;
         strats_[1] = seniorStrat_;
         _setStrats(strats_);
         emit StratsSet(address(juniorStrat_), address(seniorStrat_));
-    }
-
-    function juniorStrat() public view returns (IStrategy) {
-        return strats[0];
-    }
-
-    function seniorStrat() public view returns (IStrategy) {
-        return strats[1];
     }
 
     // JRT deposits go to junior strat (index 0), SRT to senior strat (index 1).
@@ -57,10 +56,10 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     function _depositStratIndex(address tranche, address token, uint256 baseAssets) internal view override returns (uint256) {
         (uint256 toJunior, uint256 toSenior) = debts();
 
-        if (toJunior > 0 && baseAssets <= toJunior && perStrategyTokens[address(juniorStrat())][token]) {
+        if (toJunior > 0 && baseAssets <= toJunior && perStrategyTokens[address(juniorStrat)][token]) {
             return 0;
         }
-        if (toSenior > 0 && baseAssets <= toSenior && perStrategyTokens[address(seniorStrat())][token]) {
+        if (toSenior > 0 && baseAssets <= toSenior && perStrategyTokens[address(seniorStrat)][token]) {
             return 1;
         }
 
@@ -73,7 +72,7 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     }
 
     function totalAssetsByTranche() public view returns (uint256 jrtAssets, uint256 srtAssets) {
-        return (juniorStrat().totalAssets(), seniorStrat().totalAssets());
+        return (juniorStrat.totalAssets(), seniorStrat.totalAssets());
     }
 
     /// @notice Returns the net amount of assets that need to move between strategies.
@@ -89,8 +88,8 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         uint256 navTotal = jrtNavT0 + srtNavT0;
         if (navTotal == 0) return (0, 0);
 
-        uint256 jrtAssets = juniorStrat().totalAssets();
-        uint256 srtAssets = seniorStrat().totalAssets();
+        uint256 jrtAssets = juniorStrat.totalAssets();
+        uint256 srtAssets = seniorStrat.totalAssets();
         if (address(rebalancer) != address(0)) {
             (uint256 pendingToJunior, uint256 pendingToSenior) = rebalancer.pendingToStrats();
             jrtAssets += pendingToJunior;
@@ -101,6 +100,6 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     }
 
     function shareToken() external view returns (address) {
-        return juniorStrat().shareToken();
+        return juniorStrat.shareToken();
     }
 }
