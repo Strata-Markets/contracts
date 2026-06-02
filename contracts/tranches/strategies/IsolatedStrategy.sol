@@ -41,11 +41,11 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         emit StratsSet(address(juniorStrat_), address(seniorStrat_));
     }
 
-    function juniorStrat() external view returns (IStrategy) {
+    function juniorStrat() public view returns (IStrategy) {
         return strats[0];
     }
 
-    function seniorStrat() external view returns (IStrategy) {
+    function seniorStrat() public view returns (IStrategy) {
         return strats[1];
     }
 
@@ -57,10 +57,10 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     function _depositStratIndex(address tranche, address token, uint256 baseAssets) internal view override returns (uint256) {
         (uint256 toJunior, uint256 toSenior) = debts();
 
-        if (toJunior > 0 && baseAssets <= toJunior && strats[0].supportsToken(token)) {
+        if (toJunior > 0 && baseAssets <= toJunior && perStrategyTokens[address(juniorStrat())][token]) {
             return 0;
         }
-        if (toSenior > 0 && baseAssets <= toSenior && strats[1].supportsToken(token)) {
+        if (toSenior > 0 && baseAssets <= toSenior && perStrategyTokens[address(seniorStrat())][token]) {
             return 1;
         }
 
@@ -73,7 +73,7 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     }
 
     function totalAssetsByTranche() public view returns (uint256 jrtAssets, uint256 srtAssets) {
-        return (strats[0].totalAssets(), strats[1].totalAssets());
+        return (juniorStrat().totalAssets(), seniorStrat().totalAssets());
     }
 
     /// @notice Returns the net amount of assets that need to move between strategies.
@@ -89,8 +89,8 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
         uint256 navTotal = jrtNavT0 + srtNavT0;
         if (navTotal == 0) return (0, 0);
 
-        uint256 jrtAssets = strats[0].totalAssets();
-        uint256 srtAssets = strats[1].totalAssets();
+        uint256 jrtAssets = juniorStrat().totalAssets();
+        uint256 srtAssets = seniorStrat().totalAssets();
         if (address(rebalancer) != address(0)) {
             (uint256 pendingToJunior, uint256 pendingToSenior) = rebalancer.pendingToStrats();
             jrtAssets += pendingToJunior;
@@ -101,10 +101,6 @@ contract IsolatedStrategy is MultiStrategy, IIsolatedStrategy {
     }
 
     function shareToken() external view returns (address) {
-        return strats[0].shareToken();
-    }
-
-    function supportsToken(address token) external view returns (bool) {
-        return strats[0].supportsToken(token) || strats[1].supportsToken(token);
+        return juniorStrat().shareToken();
     }
 }

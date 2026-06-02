@@ -19,6 +19,10 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     // WAD ratio (1e18 = 100%). When > 0, junior target is raised to at least this share of total assets.
     uint256 public juniorAllocationFloor;
 
+    mapping(address => bool) private _supportedTokens;
+    IERC20[] private _supportedTokenList;
+    mapping(address strat => mapping(address token => bool)) public perStrategyTokens;
+
     event StratNavSnapshot(uint256[] navs);
     event RebalancerSet(address indexed rebalancer);
     event AccountingSet(address indexed accounting);
@@ -75,19 +79,17 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     }
 
     function totalAssets() public view returns (uint256 total) {
-        for (uint256 i; i < strats.length;) {
+        for (uint256 i; i < strats.length; i++) {
             total += strats[i].totalAssets();
-            unchecked { ++i; }
         }
         if (address(rebalancer) != address(0)) total += rebalancer.totalAssets();
     }
 
     function totalAssets(uint256 navT0, uint256 timestamp) public view returns (uint256 total) {
-        for (uint256 i; i < strats.length;) {
+        for (uint256 i; i < strats.length; i++) {
             uint256 nav = strats[i].totalAssets(0, timestamp);
             if (nav == 0) return navT0;
             total += nav;
-            unchecked { ++i; }
         }
         if (address(rebalancer) != address(0)) total += rebalancer.totalAssets();
     }
@@ -121,22 +123,20 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
 
     function reduceReserve(address token, uint256 tokenAmount, address receiver) external onlyCDO {
         uint256 len = strats.length;
-        for (uint256 i; i < len;) {
-            if (strats[i].supportsToken(token)) {
+        for (uint256 i; i < len; i++) {
+            if (perStrategyTokens[address(strats[i])][token]) {
                 uint256 baseAssets = strats[i].convertToAssets(token, tokenAmount, Math.Rounding.Floor);
                 if (strats[i].totalAssets() >= baseAssets) {
                     strats[i].reduceReserve(token, tokenAmount, receiver);
                     return;
                 }
             }
-            unchecked { ++i; }
         }
-        for (uint256 i; i < len;) {
-            if (strats[i].supportsToken(token)) {
+        for (uint256 i; i < len; i++) {
+            if (perStrategyTokens[address(strats[i])][token]) {
                 strats[i].reduceReserve(token, tokenAmount, receiver);
                 return;
             }
-            unchecked { ++i; }
         }
         revert UnsupportedToken(token);
     }
@@ -145,35 +145,8 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         return address(strats[_depositStratIndex(tranche)]);
     }
 
-    function getSupportedTokens() external view returns (IERC20[] memory tokens) {
-        uint256 len = strats.length;
-        IERC20[][] memory allTokens = new IERC20[][](len);
-        uint256 totalLen = 0;
-        for (uint256 i; i < len;) {
-            allTokens[i] = strats[i].getSupportedTokens();
-            totalLen += allTokens[i].length;
-            unchecked { ++i; }
-        }
-        tokens = new IERC20[](totalLen);
-        uint256 count = 0;
-        for (uint256 i; i < len;) {
-            for (uint256 j; j < allTokens[i].length;) {
-                bool exists = false;
-                for (uint256 k; k < count;) {
-                    if (address(tokens[k]) == address(allTokens[i][j])) {
-                        exists = true;
-                        break;
-                    }
-                    unchecked { ++k; }
-                }
-                if (!exists) {
-                    tokens[count++] = allTokens[i][j];
-                }
-                unchecked { ++j; }
-            }
-            unchecked { ++i; }
-        }
-        assembly { mstore(tokens, count) }
+    function getSupportedTokens() external view returns (IERC20[] memory) {
+        return _supportedTokenList;
     }
 
     function getSupportedTokens(address tranche) external view returns (IERC20[] memory) {
@@ -215,7 +188,7 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         IStrategy secondaryStrat = strats[secondaryIdx];
 
         uint256 borrowedAssets = 0;
-        if (primaryStrat.supportsToken(token)) {
+        if (perStrategyTokens[address(primaryStrat)][token]) {
             borrowedAssets = Math.min(baseAssets, primaryStrat.totalAssets());
         }
 
@@ -237,14 +210,31 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
 
     function _setStrats(IStrategy[] memory strats_) internal {
         require(strats_.length >= 2, "MinTwoStrats");
-        for (uint256 i; i < strats_.length;) {
-            require(address(strats_[i]) != address(0), "ZeroAddress");
-            unchecked { ++i; }
+        for (uint256 i; i < strats.length; i++) {
+            address strat = address(strats[i]);
+            IERC20[] memory old = strats[i].getSupportedTokens();
+            for (uint256 j; j < old.length; j++) {
+                _supportedTokens[address(old[j])] = false;
+                perStrategyTokens[strat][address(old[j])] = false;
+            }
         }
+
         delete strats;
-        for (uint256 i; i < strats_.length;) {
+        delete _supportedTokenList;
+
+        for (uint256 i; i < strats_.length; i++) {
+            require(address(strats_[i]) != address(0), "ZeroAddress");
             strats.push(strats_[i]);
-            unchecked { ++i; }
+            address strat = address(strats_[i]);
+            IERC20[] memory tokens = strats_[i].getSupportedTokens();
+            for (uint256 j; j < tokens.length; j++) {
+                address token = address(tokens[j]);
+                if (!_supportedTokens[token]) {
+                    _supportedTokens[token] = true;
+                    _supportedTokenList.push(tokens[j]);
+                }
+                perStrategyTokens[strat][token] = true;
+            }
         }
     }
 
@@ -273,12 +263,15 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     }
 
     function _resolveStratByToken(address token) internal view returns (IStrategy) {
-        for (uint256 i; i < strats.length;) {
-            if (strats[i].supportsToken(token)) {
+        for (uint256 i; i < strats.length; i++) {
+            if (perStrategyTokens[address(strats[i])][token]) {
                 return strats[i];
             }
-            unchecked { ++i; }
         }
         revert UnsupportedToken(token);
+    }
+
+    function supportsToken(address token) external view returns (bool) {
+        return _supportedTokens[token];
     }
 }
