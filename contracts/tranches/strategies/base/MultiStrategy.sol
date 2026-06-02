@@ -196,22 +196,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         return _resolveStratByToken(token).convertToTokens(token, baseAssets, rounding);
     }
 
-    function convertToAssets(address tranche, address token, uint256 tokenAmount, Math.Rounding rounding)
-        external
-        view
-        returns (uint256)
-    {
-        return strats[_depositStratIndex(tranche)].convertToAssets(token, tokenAmount, rounding);
-    }
-
-    function convertToTokens(address tranche, address token, uint256 baseAssets, Math.Rounding rounding)
-        external
-        view
-        returns (uint256)
-    {
-        return strats[_depositStratIndex(tranche)].convertToTokens(token, baseAssets, rounding);
-    }
-
     function ensureRedeemable(address caller, address token, uint256 baseAssets) external view {
         _resolveStratByToken(token).ensureRedeemable(caller, token, baseAssets);
     }
