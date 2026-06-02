@@ -22,6 +22,7 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     mapping(address => bool) private _supportedTokens;
     IERC20[] private _supportedTokenList;
     mapping(address strat => mapping(address token => bool)) public perStrategyTokens;
+    mapping(address token => IStrategy) public converters;
 
     event StratNavSnapshot(uint256[] navs);
     event RebalancerSet(address indexed rebalancer);
@@ -158,7 +159,7 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         view
         returns (uint256)
     {
-        return _resolveStratByToken(token).convertToAssets(token, tokenAmount, rounding);
+        return converters[token].convertToAssets(token, tokenAmount, rounding);
     }
 
     function convertToTokens(address token, uint256 baseAssets, Math.Rounding rounding)
@@ -166,11 +167,11 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         view
         returns (uint256)
     {
-        return _resolveStratByToken(token).convertToTokens(token, baseAssets, rounding);
+        return converters[token].convertToTokens(token, baseAssets, rounding);
     }
 
     function ensureRedeemable(address caller, address token, uint256 baseAssets) external view {
-        _resolveStratByToken(token).ensureRedeemable(caller, token, baseAssets);
+        converters[token].ensureRedeemable(caller, token, baseAssets);
     }
 
     function _withdraw(
@@ -214,8 +215,10 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
             address strat = address(strats[i]);
             IERC20[] memory old = strats[i].getSupportedTokens();
             for (uint256 j; j < old.length; j++) {
-                _supportedTokens[address(old[j])] = false;
-                perStrategyTokens[strat][address(old[j])] = false;
+                address token = address(old[j]);
+                _supportedTokens[token] = false;
+                perStrategyTokens[strat][token] = false;
+                delete converters[token];
             }
         }
 
@@ -232,6 +235,7 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
                 if (!_supportedTokens[token]) {
                     _supportedTokens[token] = true;
                     _supportedTokenList.push(tokens[j]);
+                    converters[token] = strats_[i];
                 }
                 perStrategyTokens[strat][token] = true;
             }
@@ -260,15 +264,6 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
         toJunior = Math.saturatingSub(jrTarget, jrtAssets);
         toSenior = Math.saturatingSub(srTarget, srtAssets);
         if (toSenior > 0) toJunior = 0;
-    }
-
-    function _resolveStratByToken(address token) internal view returns (IStrategy) {
-        for (uint256 i; i < strats.length; i++) {
-            if (perStrategyTokens[address(strats[i])][token]) {
-                return strats[i];
-            }
-        }
-        revert UnsupportedToken(token);
     }
 
     function supportsToken(address token) external view returns (bool) {
