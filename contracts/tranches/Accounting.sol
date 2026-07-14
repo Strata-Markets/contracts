@@ -45,6 +45,7 @@ contract Accounting is IAccounting, CDOComponent {
 
     uint256 constant PERCENTAGE_100 = 1e18;
     uint256 constant RESERVE_BPS_MAX = 0.2e18;
+    uint256 constant PREMIUM_BPS_MAX = 0.2e18;
 
     /// @dev Latest balances at T0 (latest protocol interrogation)
     uint256 public nav;
@@ -112,12 +113,45 @@ contract Accounting is IAccounting, CDOComponent {
     /// @notice High-water mark used to charge performance fees only on new NAV gains.
     uint256 public feeWatermarkNav;
 
+    /// Coverage Premium (Symbiotic) Parameters
+
+    /// @notice The portion of gains diverted to the coverage premium bucket (1e18 = 100%)
+    /// @dev Applied to the same total gain as reserveBps. See `calculateNAVSplit()`.
+    uint256 public premiumBps;
+
+    /// @notice Accrued coverage premium owed to underwriters, not yet paid out
+    /// @dev Reduced by `reducePremium()` when the CDO pays premium to the network middleware
+    uint256 public premiumNav;
+
+    /// @notice Cumulative shortfall that the Symbiotic coverage should absorb
+    /// @dev Current policy: accrued in `updateAccountingInner()` whenever the realized Senior NAV
+    ///      ends up below its target-index path (losses reaching SRT, or JRT unable to fund the
+    ///      target gain). The covered tranche may change as the waterfall design evolves.
+    ///      Read by the network middleware to size coverage slashes; reduced by the future
+    ///      true-up injection when slashed collateral re-enters the CDO.
+    uint256 public pendingCoverageDeficit;
+
+    /// @notice Position of the Symbiotic coverage in the loss waterfall
+    /// @dev false (default): Jrt absorbs losses first; the deficit accrues only for the Senior
+    ///      shortfall below its target path (coverage sits behind Jrt and the reserve).
+    ///      true: coverage sits in front of Jrt; any Jrt NAV decline accrues to the deficit,
+    ///      whether caused by a strategy loss or by Jrt subsidizing the Senior target yield.
+    ///      Jrt still carries the book loss until the true-up injection repays it, as external
+    ///      coverage capital cannot arrive atomically.
+    bool public coverageFirst;
+
     error InvalidNavSplit(uint256 navT1, uint256 jrtAssets, uint256 srtAssets, uint256 reserveAssets);
     error ReserveTooLow(uint256 reserveNav, uint256 requestedNav);
+    error PremiumTooLow(uint256 premiumNav, uint256 requestedNav);
 
     event AprPairFeedChanged(address aprPairFeed);
     event AprDataChangedViaPush(UD60x18 aprTarget, UD60x18 aprBase);
     event ReservePercentageChanged(uint256 reserveBps);
+    event PremiumPercentageChanged(uint256 premiumBps);
+    event PremiumReduced(uint256 amount);
+    event CoverageDeficitAccrued(uint256 amount, uint256 pendingCoverageDeficit);
+    event CoverageFirstChanged(bool coverageFirst);
+    event TrueUpApplied(uint256 amount, bool jrtCredited, uint256 pendingCoverageDeficit);
     event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
     event MinimumJrtSrtRatioChanged(uint256 ratio);
     event MinimumJrtSrtRatioBufferChanged(uint256 ratio);
@@ -179,8 +213,9 @@ contract Accounting is IAccounting, CDOComponent {
         (
             jrtNavT1,
             srtNavT1,
-            reserveNavT1
-        ) = calculateNAVSplit(nav, jrtBaseNav, srtBaseNav, reserveNav, navT1);
+            reserveNavT1,
+            /* premiumNavT1 */
+        ) = calculateNAVSplit(nav, jrtBaseNav, srtBaseNav, reserveNav, premiumNav, navT1);
 
         (jrtNavT1, srtNavT1) = calcEffectiveNav(jrtNavT1, srtNavT1);
     }
@@ -218,6 +253,13 @@ contract Accounting is IAccounting, CDOComponent {
         return reserveNavT1;
     }
 
+    /// @notice Returns the current accrued coverage premium value
+    /// @dev This method returns the maximum amount that `reducePremium` can handle
+    /// @return premiumNavT1 The current premium Net Asset Value (NAV)
+    function totalPremium () external view returns (uint256 premiumNavT1) {
+        (,,, premiumNavT1) = calculateNAVSplit(nav, jrtBaseNav, srtBaseNav, reserveNav, premiumNav, cdo.totalStrategyAssets());
+    }
+
     function srtNav () external view returns (uint256 srtNavEffective) {
         (, srtNavEffective) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
     }
@@ -253,6 +295,49 @@ contract Accounting is IAccounting, CDOComponent {
             // Recalculates aprSrt based on new TVL ratio and old APRs
             updateAprSrt(aprTarget_, aprBase_);
         }
+    }
+
+    /// @notice Books a coverage true-up: slashed collateral proceeds re-entering the protocol
+    /// @dev Called by the CDO BEFORE depositing the injected tokens into the strategy, so the
+    ///      accounting is settled against the pre-injection TVL and the injection is not
+    ///      misread as a strategy gain. Credits the tranche that carried the covered loss,
+    ///      chosen by the {coverageFirst} flag.
+    /// @param baseAssets The injected amount in base assets
+    /// @return jrtCredited True when the Junior tranche was credited (coverageFirst mode)
+    function trueUp (uint256 baseAssets) external onlyCDO returns (bool jrtCredited) {
+        updateAccountingInner(cdo.totalStrategyAssets());
+        jrtCredited = coverageFirst;
+        if (jrtCredited) {
+            jrtBaseNav += baseAssets;
+        } else {
+            srtBaseNav += baseAssets;
+        }
+        nav += baseAssets;
+        pendingCoverageDeficit = Math.saturatingSub(pendingCoverageDeficit, baseAssets);
+
+        // Fetch APRs and force recalculate aprSrt, as the JRT/SRT TVL ratio changed.
+        (bool modified, UD60x18 aprTarget_, UD60x18 aprBase_) = fetchAprs();
+        if (modified == false) {
+            updateAprSrt(aprTarget_, aprBase_);
+        }
+        emit TrueUpApplied(baseAssets, jrtCredited, pendingCoverageDeficit);
+    }
+
+    /// @notice Reduces the accrued coverage premium by the specified amount
+    /// @dev This function is called by the CDO contract when paying premium to the network middleware
+    /// @dev The CDO contract is responsible for withdrawing the corresponding tokens to the middleware
+    /// @param amount The amount by which to reduce the premium NAV
+    function reducePremium (uint256 amount) external onlyCDO {
+        updateAccountingInner(cdo.totalStrategyAssets());
+
+        if (amount > premiumNav) {
+            revert PremiumTooLow(premiumNav, amount);
+        }
+
+        premiumNav -= amount;
+        nav -= amount;
+
+        emit PremiumReduced(amount);
     }
 
     function maxWithdraw(bool isJrt) external view returns (uint256) {
@@ -390,7 +475,8 @@ contract Accounting is IAccounting, CDOComponent {
     /// @notice Calculates the updated Net Asset Values (NAVs) for Junior, Senior tranches, and Reserve
     /// @dev This function performs the following operations:
     /// 1. Calculates and distributes gains or losses across tranches
-    /// 2. Allocates a portion of gains to the Reserve based on reserveBps
+    /// 2. Allocates a portion of gains to the Reserve based on reserveBps,
+    ///    then a portion of the remaining gain to the Premium bucket based on premiumBps
     /// 3. Junior tranche initially receives all gain, but this is later adjusted
     /// 4. Ensures the Senior tranche reaches its target APR using Junior tranche funds
     /// 5. Verifies the final NAV split is consistent with the total NAV
@@ -398,26 +484,31 @@ contract Accounting is IAccounting, CDOComponent {
     /// @param jrtNavT0 Junior tranche NAV at the previous timestamp
     /// @param srtNavT0 Senior tranche NAV at the previous timestamp
     /// @param reserveNavT0 Reserve NAV at the previous timestamp
+    /// @param premiumNavT0 Premium NAV at the previous timestamp
     /// @param navT1 Current total Net Asset Value
     /// @return jrtNavT1 Updated Junior tranche NAV
     /// @return srtNavT1 Updated Senior tranche NAV
     /// @return reserveNavT1 Updated Reserve NAV
+    /// @return premiumNavT1 Updated Premium NAV
     function calculateNAVSplit (
         uint256 navT0,
         uint256 jrtNavT0,
         uint256 srtNavT0,
         uint256 reserveNavT0,
+        uint256 premiumNavT0,
 
         uint256 navT1
-    ) public view returns (uint256 jrtNavT1, uint256 srtNavT1, uint256 reserveNavT1) {
+    ) public view returns (uint256 jrtNavT1, uint256 srtNavT1, uint256 reserveNavT1, uint256 premiumNavT1) {
         if (jrtNavT0 == 0 && srtNavT0 == 0 && navT1 > 0) {
-            // No deposits yet, however Strategy reports gain, move all to reserve.
-            return (0, 0, navT1);
+            // No deposits yet, however Strategy reports gain, move all to reserve; keep accrued premium.
+            return (0, 0, navT1 - premiumNavT0, premiumNavT0);
         }
         int256 gain_dT = int256(navT1) - int256(navT0);
 
         if (gain_dT < 0) {
             // Should never happen to USDe, jic: cover by Jrt, then Reserve, then Srt
+            // The premium bucket is owed to underwriters (swept out periodically) and never
+            // absorbs losses. Srt losses are made whole by coverage slashing + true-up.
             uint256 loss = uint256(-gain_dT);
 
             uint256 jrtLoss = Math.min(
@@ -440,6 +531,10 @@ contract Accounting is IAccounting, CDOComponent {
         }
         uint256 gain_dTAbs = uint256(gain_dT);
 
+        // Both the reserve and the premium skim from the same total gain.
+        // reserveBps and premiumBps are each capped at 20%, so the skims cannot exceed the gain.
+        uint256 gainTotal = gain_dTAbs;
+
         // #1 Final new reserve
         uint256 reserve_dT = 0;
         if (navT1 > feeWatermarkNav && reserveBps > 0) {
@@ -448,6 +543,14 @@ contract Accounting is IAccounting, CDOComponent {
             gain_dTAbs -= reserve_dT;
         }
         reserveNavT1 = reserveNavT0 + reserve_dT;
+
+        // #1b Final new premium
+        uint256 premium_dT = 0;
+        if (gainTotal > 0 && premiumBps > 0) {
+            premium_dT = gainTotal * premiumBps / PERCENTAGE_100;
+            gain_dTAbs -= premium_dT;
+        }
+        premiumNavT1 = premiumNavT0 + premium_dT;
 
         // Give the total gain (if any) to Juniors, later here, we subtract from Juniors the desired Gain of Seniors
         jrtNavT1 = jrtNavT0 + gain_dTAbs;
@@ -478,19 +581,23 @@ contract Accounting is IAccounting, CDOComponent {
         srtNavT1 = srtNavT0 + srtGainTargetAbs;
 
 
-        if (navT1 != (jrtNavT1 + srtNavT1 + reserveNavT1)) {
-            revert InvalidNavSplit(navT1, jrtNavT1, srtNavT1, reserveNavT1);
+        if (navT1 != (jrtNavT1 + srtNavT1 + reserveNavT1 + premiumNavT1)) {
+            revert InvalidNavSplit(navT1, jrtNavT1, srtNavT1, reserveNavT1, premiumNavT1);
         }
 
-        return (jrtNavT1, srtNavT1, reserveNavT1);
+        return (jrtNavT1, srtNavT1, reserveNavT1, premiumNavT1);
     }
 
     function updateAccountingInner (uint256 navT1) internal {
+        uint256 jrtNavT0 = jrtBaseNav;
+        // Senior target NAV for the elapsed period; used to detect a coverage deficit below
+        uint256 srtTargetNavT1 = srtBaseNav * getSrtTargetIndexT1() / srtTargetIndex;
         (
             uint256 jrtNavT1,
             uint256 srtNavT1,
-            uint256 reserveNavT1
-        ) = calculateNAVSplit(nav, jrtBaseNav, srtBaseNav, reserveNav, navT1);
+            uint256 reserveNavT1,
+            uint256 premiumNavT1
+        ) = calculateNAVSplit(nav, jrtBaseNav, srtBaseNav, reserveNav, premiumNav, navT1);
         updateIndex();
         if (navT1 > feeWatermarkNav) {
             feeWatermarkNav = navT1;
@@ -499,6 +606,20 @@ contract Accounting is IAccounting, CDOComponent {
         jrtBaseNav = jrtNavT1;
         srtBaseNav = srtNavT1;
         reserveNav = reserveNavT1;
+        premiumNav = premiumNavT1;
+
+        // Accrue the deficit that the Symbiotic coverage should absorb; see {coverageFirst}
+        uint256 deficit_dT = coverageFirst
+            // Coverage in front of Jrt: any Jrt NAV decline is covered, whether caused by a
+            // strategy loss or by Jrt subsidizing the Senior target yield.
+            // Losses deeper than the Jrt NAV (hitting the reserve or Srt) are not accrued.
+            ? Math.saturatingSub(jrtNavT0, jrtNavT1)
+            // Coverage behind Jrt and the reserve: only the Senior shortfall below its target path
+            : Math.saturatingSub(srtTargetNavT1, srtNavT1);
+        if (deficit_dT > 0) {
+            pendingCoverageDeficit += deficit_dT;
+            emit CoverageDeficitAccrued(deficit_dT, pendingCoverageDeficit);
+        }
     }
 
     /// @notice Calculates the target index for the current block
@@ -646,6 +767,26 @@ contract Accounting is IAccounting, CDOComponent {
         updateAccountingInner(cdo.totalStrategyAssets());
         reserveBps = bps;
         emit ReservePercentageChanged(reserveBps);
+    }
+
+    /// @notice Sets the percentage of gains allocated to the coverage premium bucket
+    /// @param bps The new premium percentage in basis points (1e18 = 100%)
+    /// @dev Only callable by the protocol owner
+    /// @dev The maximum allowed value is defined by PREMIUM_BPS_MAX
+    function setPremiumBps (uint256 bps) external onlyOwner {
+        require(bps <= PREMIUM_BPS_MAX && bps != premiumBps, "InvalidNewPremium");
+        updateAccountingInner(cdo.totalStrategyAssets());
+        premiumBps = bps;
+        emit PremiumPercentageChanged(premiumBps);
+    }
+
+    /// @notice Sets the position of the Symbiotic coverage in the loss waterfall
+    /// @dev See {coverageFirst}. Settles accounting first so the new mode only applies to
+    ///      losses accrued after this change.
+    function setCoverageFirst (bool coverageFirst_) external onlyOwner {
+        updateAccountingInner(cdo.totalStrategyAssets());
+        coverageFirst = coverageFirst_;
+        emit CoverageFirstChanged(coverageFirst_);
     }
 
     /// @notice Sets the portion of fees from each tranche that is returned to its TVL. The remainder goes to the reserve.

@@ -470,6 +470,24 @@ contract DYSAccounting is IAccounting, CDOComponent {
      *                  State-Mutating Methods (called by CDO)                    *
      *****************************************************************************/
 
+    /// @notice Returns the current accrued coverage premium value
+    function totalPremium () external pure returns (uint256) {
+        // TODO implement
+        return 0;
+    }
+
+    /// @notice Reduces the accrued coverage premium by the specified amount
+    function reducePremium (uint256) external pure {
+        // TODO implement
+        revert("PremiumNotSupported");
+    }
+
+    /// @notice Books a coverage true-up injection
+    function trueUp (uint256) external pure returns (bool) {
+        // TODO implement
+        revert("TrueUpNotSupported");
+    }
+
     /// @notice Reduces the reserve by the specified amount
     function reduceReserve(
         uint256 amount,

@@ -10,7 +10,9 @@ pragma solidity ^0.8.28;
 */
 
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { AccessControlled } from "../governance/AccessControlled.sol";
 import { IErrors } from "./interfaces/IErrors.sol";
 import { ITranche } from "./interfaces/ITranche.sol";
@@ -19,6 +21,7 @@ import { IStrataCDO, IStrataCDOSetters } from "./interfaces/IStrataCDO.sol";
 import { TActionState } from "./structs/TActionState.sol";
 import { IAccounting } from "./interfaces/IAccounting.sol";
 import { ISharesCooldown } from "./interfaces/cooldown/ISharesCooldown.sol";
+import { INetworkMiddleware } from "./symbiotic/interfaces/INetworkMiddleware.sol";
 import { RoundingGuard } from "./utils/RoundingGuard.sol";
 
 
@@ -65,12 +68,18 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
 
     ISharesCooldown public sharesCooldown;
 
+    /// @dev The Symbiotic network middleware receiving coverage premium payments
+    INetworkMiddleware public networkMiddleware;
+
     uint256 public immutable baseAssetDecimals;
 
     event DepositsStateChanged(address indexed tranche, bool enabled);
     event WithdrawalsStateChanged(address indexed tranche, bool enabled);
     event ReserveReduced(address token, uint256 amount);
     event ReserveDistributed(uint256 jrtAmount, uint256 srtAmount);
+    event PremiumPaid(address token, uint256 tokenAmount, uint256 baseAssets);
+    event NetworkMiddlewareSet(address networkMiddleware);
+    event TrueUpExecuted(uint256 shareAmount, uint256 baseAssets, bool jrtCredited);
     event TreasurySet(address treasury);
     event ShortfallPaused();
     event JrtShortfallPausePriceSet(uint256 pricePerShare);
@@ -407,6 +416,68 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         // The accounting contract reverts if reserves are insufficient.
         accounting.reduceReserve(jrtAmountIn + srtAmountIn, jrtAmountIn, srtAmountIn);
         emit ReserveDistributed(jrtAmountIn, srtAmountIn);
+    }
+
+    /// @notice Pays accrued coverage premium directly to the Symbiotic AppAdapter
+    /// @dev Only callable by RESERVE_MANAGER_ROLE. Books the outflow against the premium bucket,
+    ///      then transfers the tokens from the strategy straight to the AppAdapter (resolved via
+    ///      the network middleware). A plain transfer is equivalent to AppAdapter.reward(), which
+    ///      only pulls tokens without any state change.
+    /// @param token The token to pay the premium in
+    function payPremium (address token) external onlyRole(RESERVE_MANAGER_ROLE) {
+        if (address(networkMiddleware) == address(0)) {
+            revert ZeroAddress();
+        }
+        address appAdapter = address(networkMiddleware.appAdapter());
+        if (appAdapter == address(0)) {
+            revert ZeroAddress();
+        }
+        // The full accrued premium bucket, in base assets
+        uint256 baseAssets = accounting.totalPremium();
+        if (baseAssets == 0) {
+            revert ZeroAmount();
+        }
+        // Reverts if the token is not supported. Convert to tokens and back so the booked
+        // reduction matches the transferred amount exactly; rounding dust stays in the bucket.
+        uint256 tokenAmount = strategy.convertToTokens(token, baseAssets, Math.Rounding.Floor);
+        uint256 baseAssetsNet = strategy.convertToAssets(token, tokenAmount, Math.Rounding.Floor);
+        accounting.reducePremium(baseAssetsNet);
+        // Transfers tokens out instantly if possible, or through the cooldown process
+        strategy.reduceReserve(token, tokenAmount, appAdapter);
+        emit PremiumPaid(token, tokenAmount, baseAssetsNet);
+    }
+
+    /// @notice Injects coverage funds (slashed collateral proceeds) back into the protocol
+    /// @dev Only callable by RESERVE_MANAGER_ROLE. The injection is provided in the strategy's
+    ///      share token (not the base asset): a raw base-asset transfer would not be reflected in
+    ///      the strategy's totalAssets(), and depositing would dilute existing shares. The caller
+    ///      MUST approve this contract for shareAmount of the strategy share token beforehand.
+    ///      The credited tranche is chosen by the accounting's coverageFirst flag: Jrt when
+    ///      coverage sits in front of the juniors, Srt otherwise.
+    /// @param shareAmount The injected amount in strategy share tokens
+    function trueUp (uint256 shareAmount) external onlyRole(RESERVE_MANAGER_ROLE) nonReentrant {
+        if (shareAmount == 0) {
+            revert ZeroAmount();
+        }
+        if (address(networkMiddleware) == address(0)) {
+            revert ZeroAddress();
+        }
+        address shareToken = strategy.shareToken();
+        // Value the injected shares in base assets for the accounting and the middleware
+        uint256 baseAssets = strategy.convertToAssets(shareToken, shareAmount, Math.Rounding.Floor);
+        // Book the injection first so it is not misread as a strategy gain
+        bool jrtCredited = accounting.trueUp(baseAssets);
+        // Transfer the share token straight into the strategy; totalAssets() counts it immediately
+        // with no share minting, so no dilution.
+        SafeERC20.safeTransferFrom(IERC20(shareToken), msg.sender, address(strategy), shareAmount);
+        networkMiddleware.confirmTrueUp(address(this), baseAssets);
+        emit TrueUpExecuted(shareAmount, baseAssets, jrtCredited);
+    }
+
+    /// @notice Sets the Symbiotic network middleware that receives premium payments
+    function setNetworkMiddleware (INetworkMiddleware networkMiddleware_) external onlyOwner {
+        networkMiddleware = networkMiddleware_;
+        emit NetworkMiddlewareSet(address(networkMiddleware_));
     }
 
     /// @notice Sets the address of the reserve treasury
