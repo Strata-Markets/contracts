@@ -69,7 +69,7 @@ contract MockStrataAccounting is IStrataAccounting {
 contract NetworkMiddlewareTest is Test {
 
     // Mirrors of the middleware's events for expectEmit
-    event MarketSet(address indexed cdo, address accounting, address baseAsset, address oracle, bool enabled);
+    event MarketSet(address indexed cdo, address accounting, address baseAsset, address oracle, uint256 bufferBps, bool enabled);
     event CoverageSlashed(address indexed cdo, uint256 requested, uint256 slashed);
     event TrueUpConfirmed(address indexed cdo, uint256 amount);
 
@@ -107,7 +107,7 @@ contract NetworkMiddlewareTest is Test {
         )));
 
         vm.prank(owner);
-        middleware.setMarket(cdo, accounting, address(usde), IOracleAdapter(address(oracle)), true);
+        middleware.setMarket(cdo, accounting, address(usde), IOracleAdapter(address(oracle)), 0, true);
     }
 
     /// @dev Expected conversion: baseAssets(18 dec, $1) -> uniBTC(8 dec, $60k), floor.
@@ -119,11 +119,11 @@ contract NetworkMiddlewareTest is Test {
     function test_setMarket_storesFieldsAndEmits() public {
         address cdo2 = makeAddr("cdo2");
         vm.expectEmit(true, false, false, true);
-        emit MarketSet(cdo2, address(accounting), address(usde), address(oracle), true);
+        emit MarketSet(cdo2, address(accounting), address(usde), address(oracle), 0, true);
         vm.prank(owner);
-        middleware.setMarket(cdo2, accounting, address(usde), IOracleAdapter(address(oracle)), true);
+        middleware.setMarket(cdo2, accounting, address(usde), IOracleAdapter(address(oracle)), 0, true);
 
-        (IStrataAccounting acc, address baseAsset, IOracleAdapter orc,,, bool enabled) = middleware.markets(cdo2);
+        (IStrataAccounting acc, address baseAsset, IOracleAdapter orc,,, bool enabled,) = middleware.markets(cdo2);
         assertEq(address(acc), address(accounting));
         assertEq(baseAsset, address(usde));
         assertEq(address(orc), address(oracle));
@@ -133,7 +133,7 @@ contract NetworkMiddlewareTest is Test {
     function test_setMarket_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vm.prank(stranger);
-        middleware.setMarket(cdo, accounting, address(usde), IOracleAdapter(address(oracle)), true);
+        middleware.setMarket(cdo, accounting, address(usde), IOracleAdapter(address(oracle)), 0, true);
     }
 
     function test_slash_convertsDeficitAndBooks() public {
@@ -148,7 +148,7 @@ contract NetworkMiddlewareTest is Test {
         vm.prank(owner);
         middleware.slash(cdo);
 
-        (,,, uint256 totalSlashed, uint256 pendingTrueUp,) = middleware.markets(cdo);
+        (,,, uint256 totalSlashed, uint256 pendingTrueUp,,) = middleware.markets(cdo);
         assertEq(adapter.lastSlashAmount(), expected);
         assertEq(totalSlashed, expected);
         assertEq(pendingTrueUp, expected);
@@ -172,7 +172,7 @@ contract NetworkMiddlewareTest is Test {
         vm.prank(owner);
         middleware.slash(cdo);
 
-        (,,, uint256 totalSlashed, uint256 pendingTrueUp,) = middleware.markets(cdo);
+        (,,, uint256 totalSlashed, uint256 pendingTrueUp,,) = middleware.markets(cdo);
         // Only the executed amount is booked
         assertEq(totalSlashed, 0.5e8);
         assertEq(pendingTrueUp, 0.5e8);
@@ -200,7 +200,7 @@ contract NetworkMiddlewareTest is Test {
         vm.prank(owner);
         middleware.slash(cdo);
 
-        (,,, uint256 totalSlashed, uint256 pendingTrueUp,) = middleware.markets(cdo);
+        (,,, uint256 totalSlashed, uint256 pendingTrueUp,,) = middleware.markets(cdo);
         assertEq(totalSlashed, 1.5e8);
         assertEq(pendingTrueUp, 1.5e8);
     }
@@ -213,7 +213,7 @@ contract NetworkMiddlewareTest is Test {
 
     function test_slash_revertsWhenMarketDisabled() public {
         vm.prank(owner);
-        middleware.setMarket(cdo, accounting, address(usde), IOracleAdapter(address(oracle)), false);
+        middleware.setMarket(cdo, accounting, address(usde), IOracleAdapter(address(oracle)), 0, false);
 
         accounting.setPendingCoverageDeficit(60_000e18);
         vm.expectRevert(abi.encodeWithSelector(NetworkMiddleware.MarketNotEnabled.selector, cdo));
@@ -255,7 +255,7 @@ contract NetworkMiddlewareTest is Test {
         vm.prank(cdo);
         middleware.confirmTrueUp(cdo, 30_000e18);
 
-        (,,,, uint256 pendingTrueUp,) = middleware.markets(cdo);
+        (,,,, uint256 pendingTrueUp,,) = middleware.markets(cdo);
         assertEq(pendingTrueUp, 0.5e8);
     }
 
@@ -267,7 +267,7 @@ contract NetworkMiddlewareTest is Test {
         vm.prank(owner);
         middleware.confirmTrueUp(cdo, 60_000e18);
 
-        (,,,, uint256 pendingTrueUp,) = middleware.markets(cdo);
+        (,,,, uint256 pendingTrueUp,,) = middleware.markets(cdo);
         assertEq(pendingTrueUp, 0);
     }
 
@@ -286,7 +286,7 @@ contract NetworkMiddlewareTest is Test {
         vm.prank(cdo);
         middleware.confirmTrueUp(cdo, 120_000e18);
 
-        (,,,, uint256 pendingTrueUp,) = middleware.markets(cdo);
+        (,,,, uint256 pendingTrueUp,,) = middleware.markets(cdo);
         assertEq(pendingTrueUp, 0);
     }
 
@@ -309,7 +309,7 @@ contract NetworkMiddlewareTest is Test {
         vm.prank(owner);
         middleware.slash(cdo);
 
-        (,,, uint256 totalSlashed,,) = middleware.markets(cdo);
+        (,,, uint256 totalSlashed,,,) = middleware.markets(cdo);
         assertEq(totalSlashed, 1.5e8);
     }
 

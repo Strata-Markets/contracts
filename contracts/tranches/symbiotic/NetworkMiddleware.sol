@@ -28,9 +28,13 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
         uint256 pendingTrueUp;
         // per-market pause flag
         bool enabled;
-
-        // TODO: do we need a haircut param - buffer add when slashing in order to counteract price movements ?
+        // Extra buffer (in bps) added to the slashed amount to pre-fund the vault-asset -> base-asset
+        // swap discount during the true-up (e.g. a uniBTC market depeg). 0 = no buffer.
+        uint256 bufferBps;
     }
+
+    uint256 constant BPS = 10_000;
+    uint256 constant MAX_BUFFER_BPS = 5_000; // 50%
 
     IAppAdapter public override appAdapter;
 
@@ -44,7 +48,7 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     error MarketNotEnabled(address cdo);
     error NotAuthorized(address sender);
 
-    event MarketSet(address indexed cdo, address accounting, address baseAsset, address oracle, bool enabled);
+    event MarketSet(address indexed cdo, address accounting, address baseAsset, address oracle, uint256 bufferBps, bool enabled);
     event CoverageSlashed(address indexed cdo, uint256 requested, uint256 slashed);
     event TrueUpConfirmed(address indexed cdo, uint256 amount);
 
@@ -112,14 +116,17 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
         IStrataAccounting accounting,
         address baseAsset,
         IOracleAdapter oracle,
+        uint256 bufferBps,
         bool enabled
     ) external onlyOwner {
+        require(bufferBps <= MAX_BUFFER_BPS, "InvalidBuffer");
         TMarket storage market = markets[cdo];
         market.accounting = accounting;
         market.baseAsset = baseAsset;
         market.oracle = oracle;
+        market.bufferBps = bufferBps;
         market.enabled = enabled;
-        emit MarketSet(cdo, address(accounting), baseAsset, address(oracle), enabled);
+        emit MarketSet(cdo, address(accounting), baseAsset, address(oracle), bufferBps, enabled);
     }
 
     // Releases slashable coverage back to the vault without penalizing underwriters.
@@ -144,6 +151,7 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     function _getNeededAmount(address cdo) internal view returns (uint256) {
         TMarket storage market = markets[cdo];
         uint256 deficit = _toVaultAsset(market, market.accounting.pendingCoverageDeficit());
+        deficit = Math.mulDiv(deficit, BPS + market.bufferBps, BPS);
         return Math.saturatingSub(deficit, market.pendingTrueUp);
     }
 

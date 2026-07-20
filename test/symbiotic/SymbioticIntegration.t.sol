@@ -222,7 +222,7 @@ contract SymbioticIntegrationTest is Test {
 
         vm.prank(strataOps);
         middleware.setMarket(
-            CDO_PROXY, IStrataAccounting(ACCOUNTING_PROXY), USDE, IOracleAdapter(address(oracle)), true
+            CDO_PROXY, IStrataAccounting(ACCOUNTING_PROXY), USDE, IOracleAdapter(address(oracle)), 0, true
         );
 
         address cdoOwner = IOwnableLike(CDO_PROXY).owner();
@@ -283,7 +283,7 @@ contract SymbioticIntegrationTest is Test {
         uint256 slashedUniBtc = IERC20(UNIBTC).balanceOf(multisig) - multisigBefore;
         assertGt(slashedUniBtc, 0, "slashed collateral must reach the burner multisig");
 
-        (,,, uint256 totalSlashed, uint256 pendingTrueUp,) = middleware.markets(CDO_PROXY);
+        (,,, uint256 totalSlashed, uint256 pendingTrueUp,,) = middleware.markets(CDO_PROXY);
         assertEq(totalSlashed, slashedUniBtc);
         assertEq(pendingTrueUp, slashedUniBtc);
 
@@ -307,7 +307,7 @@ contract SymbioticIntegrationTest is Test {
         assertApproxEqRel(accounting.jrtNav(), jrtNavBefore, 0.001e18, "Jrt should be made whole");
 
         // Middleware in-flight amount cleared
-        (,,,, uint256 pendingAfter,) = middleware.markets(CDO_PROXY);
+        (,,,, uint256 pendingAfter,,) = middleware.markets(CDO_PROXY);
         assertLt(pendingAfter, pendingTrueUp / 100, "pendingTrueUp should be (almost) cleared");
     }
 
