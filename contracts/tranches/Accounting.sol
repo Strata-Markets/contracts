@@ -140,7 +140,7 @@ contract Accounting is IAccounting, CDOComponent {
     ///      coverage capital cannot arrive atomically.
     bool public coverageFirst;
 
-    error InvalidNavSplit(uint256 navT1, uint256 jrtAssets, uint256 srtAssets, uint256 reserveAssets);
+    error InvalidNavSplit(uint256 navT1, uint256 jrtAssets, uint256 srtAssets, uint256 reserveAssets, uint256 premiumAssets);
     error ReserveTooLow(uint256 reserveNav, uint256 requestedNav);
     error PremiumTooLow(uint256 premiumNav, uint256 requestedNav);
 
