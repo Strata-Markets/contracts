@@ -20,8 +20,6 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
         IStrataAccounting accounting;
         // The market's base asset, in which the coverage deficit is denominated
         address baseAsset;
-        // baseAsset oracle
-        IOracleAdapter oracle;
         // Cumulative amount slashed for this market, in vault asset
         uint256 totalSlashed;
         // Slashed but not yet injected back into the CDO (true-up in flight), in vault asset
@@ -38,6 +36,11 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
 
     IAppAdapter public override appAdapter;
 
+    /// @notice Shared, project-wide price source for the deficit -> vault-asset conversion.
+    ///         Keyed by asset internally, so a single instance prices every market's base asset
+    ///         and the vault asset.
+    IOracleAdapter public oracle;
+
     /// @notice Coverage registry of the Strata markets sharing this middleware's AppAdapter
     mapping(address cdo => TMarket) public markets;
 
@@ -48,7 +51,8 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     error MarketNotEnabled(address cdo);
     error NotAuthorized(address sender);
 
-    event MarketSet(address indexed cdo, address accounting, address baseAsset, address oracle, uint256 bufferBps, bool enabled);
+    event MarketSet(address indexed cdo, address accounting, address baseAsset, uint256 bufferBps, bool enabled);
+    event OracleSet(address indexed oracle);
     event CoverageSlashed(address indexed cdo, uint256 requested, uint256 slashed);
     event TrueUpConfirmed(address indexed cdo, uint256 amount);
 
@@ -59,11 +63,12 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
         _disableInitializers();
     }
 
-    function initialize(address owner_, address appAdapter_) external initializer {
+    function initialize(address owner_, address appAdapter_, address oracle_) external initializer {
         __Ownable_init(owner_);
         __Ownable2Step_init();
         __Pausable_init();
         appAdapter = IAppAdapter(appAdapter_);
+        oracle = IOracleAdapter(oracle_);
     }
 
     // ===============================================
@@ -115,7 +120,6 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
         address cdo,
         IStrataAccounting accounting,
         address baseAsset,
-        IOracleAdapter oracle,
         uint256 bufferBps,
         bool enabled
     ) external onlyOwner {
@@ -123,10 +127,15 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
         TMarket storage market = markets[cdo];
         market.accounting = accounting;
         market.baseAsset = baseAsset;
-        market.oracle = oracle;
         market.bufferBps = bufferBps;
         market.enabled = enabled;
-        emit MarketSet(cdo, address(accounting), baseAsset, address(oracle), bufferBps, enabled);
+        emit MarketSet(cdo, address(accounting), baseAsset, bufferBps, enabled);
+    }
+
+    /// @notice Sets the shared price source used for all deficit -> vault-asset conversions.
+    function setOracle(IOracleAdapter oracle_) external onlyOwner {
+        oracle = oracle_;
+        emit OracleSet(address(oracle_));
     }
 
     // Releases slashable coverage back to the vault without penalizing underwriters.
@@ -160,8 +169,8 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     ///      token decimals on both sides. Rounds down (in favor of the underwriters).
     function _toVaultAsset(TMarket storage market, uint256 baseAssets) internal view returns (uint256) {
         address vaultAsset = appAdapter.asset();
-        (uint256 basePrice, uint256 basePriceDecimals) = market.oracle.getPrice(market.baseAsset);
-        (uint256 vaultPrice, uint256 vaultPriceDecimals) = market.oracle.getPrice(vaultAsset);
+        (uint256 basePrice, uint256 basePriceDecimals) = oracle.getPrice(market.baseAsset);
+        (uint256 vaultPrice, uint256 vaultPriceDecimals) = oracle.getPrice(vaultAsset);
         return Math.mulDiv(
             baseAssets,
             basePrice * 10 ** (IERC20Metadata(vaultAsset).decimals() + vaultPriceDecimals),

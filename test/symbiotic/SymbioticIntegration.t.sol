@@ -16,8 +16,8 @@ import { IStrategy } from "../../contracts/tranches/interfaces/IStrategy.sol";
 import { NetworkMiddleware } from "../../contracts/tranches/symbiotic/NetworkMiddleware.sol";
 import { INetworkMiddleware } from "../../contracts/tranches/symbiotic/interfaces/INetworkMiddleware.sol";
 import { IStrataAccounting } from "../../contracts/tranches/symbiotic/interfaces/IStrataAccounting.sol";
-import { IOracleAdapter } from "../../contracts/tranches/symbiotic/interfaces/IOracleAdapter.sol";
-import { MockOracleAdapter } from "../../contracts/test/MockOracleAdapter.sol";
+import { OracleAdapter } from "../../contracts/tranches/symbiotic/OracleAdapter.sol";
+import { IRoundDataOracle } from "../../contracts/tranches/oracles/interfaces/IRoundDataOracle.sol";
 
 /* Minimal local interfaces for the Symbiotic V2 mainnet contracts (avoids importing
    symbiotic/core, whose OZ version differs from this repo's). */
@@ -76,6 +76,12 @@ contract SymbioticIntegrationTest is Test {
     address constant SUSDE = 0x9D39A5DE30e57443BfF2A8307A4256c8797A3497;
     address constant UNIBTC = 0x004E9C3EF86bc1ca1f0bB5C7662861Ee93350568;
 
+    // Chainlink push feeds (Ethereum mainnet): USDe/USD (single hop), uniBTC via uniBTC/BTC x BTC/USD
+    IRoundDataOracle constant USDE_USD = IRoundDataOracle(0xa569d910839Ae8865Da8F8e70FfFb0cBA869F961);   // 8 dec
+    IRoundDataOracle constant UNIBTC_BTC = IRoundDataOracle(0x861d15F8a4059cb918bD6F3670adAEB1220B298f); // 18 dec
+    IRoundDataOracle constant BTC_USD = IRoundDataOracle(0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c);    // 8 dec
+    uint256 constant FEED_HEARTBEAT = 7 days;
+
     // Symbiotic V2 (Ethereum mainnet)
     ISymFactory constant VAULT_FACTORY = ISymFactory(0xAEb6bdd95c502390db8f52c8909F703E9Af6a346);
     uint64 constant VAULT_V2_VERSION = 3;
@@ -115,7 +121,7 @@ contract SymbioticIntegrationTest is Test {
     ISymUniversalDelegator delegator;
     ISymAppAdapter adapter;
     NetworkMiddleware middleware;
-    MockOracleAdapter oracle;
+    OracleAdapter oracle;
 
     function setUp() public {
         vm.createSelectFork(vm.envOr("MAINNET_RPC_URL", string("https://ethereum-rpc.publicnode.com")));
@@ -206,23 +212,30 @@ contract SymbioticIntegrationTest is Test {
         delegator.allocate(address(adapter), DEPOSIT);
         vm.stopPrank();
 
-        // 0/2. Deploy the middleware and register it for the network
+        // 0/2. Deploy the shared oracle (real mainnet Chainlink feeds) + middleware, and register
+        //      it for the network. USDe prices single-hop; uniBTC two-hop via uniBTC/BTC x BTC/USD.
+        oracle = OracleAdapter(address(new ERC1967Proxy(
+            address(new OracleAdapter()),
+            abi.encodeCall(OracleAdapter.initialize, (strataOps))
+        )));
+        vm.startPrank(strataOps);
+        oracle.setFeed(USDE, USDE_USD, 8, IRoundDataOracle(address(0)), 0, FEED_HEARTBEAT);
+        oracle.setFeed(UNIBTC, UNIBTC_BTC, 18, BTC_USD, 8, FEED_HEARTBEAT);
+        vm.stopPrank();
+
         NetworkMiddleware impl = new NetworkMiddleware();
         middleware = NetworkMiddleware(address(new ERC1967Proxy(
             address(impl),
-            abi.encodeCall(NetworkMiddleware.initialize, (strataOps, address(adapter)))
+            abi.encodeCall(NetworkMiddleware.initialize, (strataOps, address(adapter), address(oracle)))
         )));
         vm.prank(network);
         MIDDLEWARE_SERVICE.setMiddleware(address(middleware));
     }
 
     function _wireStrataToSymbiotic() internal {
-        oracle = new MockOracleAdapter();
-        oracle.setPrice(UNIBTC, UNIBTC_PRICE, 18); // base assets default to $1
-
         vm.prank(strataOps);
         middleware.setMarket(
-            CDO_PROXY, IStrataAccounting(ACCOUNTING_PROXY), USDE, IOracleAdapter(address(oracle)), 0, true
+            CDO_PROXY, IStrataAccounting(ACCOUNTING_PROXY), USDE, 0, true
         );
 
         address cdoOwner = IOwnableLike(CDO_PROXY).owner();
@@ -283,7 +296,7 @@ contract SymbioticIntegrationTest is Test {
         uint256 slashedUniBtc = IERC20(UNIBTC).balanceOf(multisig) - multisigBefore;
         assertGt(slashedUniBtc, 0, "slashed collateral must reach the burner multisig");
 
-        (,,, uint256 totalSlashed, uint256 pendingTrueUp,,) = middleware.markets(CDO_PROXY);
+        (,, uint256 totalSlashed, uint256 pendingTrueUp,,) = middleware.markets(CDO_PROXY);
         assertEq(totalSlashed, slashedUniBtc);
         assertEq(pendingTrueUp, slashedUniBtc);
 
@@ -307,7 +320,7 @@ contract SymbioticIntegrationTest is Test {
         assertApproxEqRel(accounting.jrtNav(), jrtNavBefore, 0.001e18, "Jrt should be made whole");
 
         // Middleware in-flight amount cleared
-        (,,,, uint256 pendingAfter,,) = middleware.markets(CDO_PROXY);
+        (,,, uint256 pendingAfter,,) = middleware.markets(CDO_PROXY);
         assertLt(pendingAfter, pendingTrueUp / 100, "pendingTrueUp should be (almost) cleared");
     }
 
