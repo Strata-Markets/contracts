@@ -74,19 +74,6 @@
     "timestamp": 1761920499
   },
   {
-    "id": "StrataConfigTimelock",
-    "name": "StrataMasterChef",
-    "main": "./0xc/hardhat/StrataMasterChef/StrataMasterChef.ts",
-    "bytecodeHash": "0xad12c3687b669d059df400d985dbc773bdfb64936fc0ae0f4bd3405e57eb3dff",
-    "address": "0x4f2682b78F37910704fB1AFF29358A1da07E022d",
-    "block": 23698004,
-    "tx": "0x6baafecfe76b0bff23dc8e273dde622cded2939a2288b9f129ee853e23cf63ae",
-    "gas": "1369615",
-    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
-    "timestamp": 1761921744,
-    "verified": "2025-10-31T14:42:36.708Z"
-  },
-  {
     "id": "CDOLens",
     "name": "CDOLens",
     "main": "./0xc/hardhat/CDOLens/CDOLens.ts",
@@ -317,5 +304,18 @@
     "gas": "656598",
     "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
     "timestamp": 1783631676
+  },
+  {
+    "id": "StrataConfigTimelock",
+    "name": "StrataMasterChef",
+    "main": "./0xc/hardhat/StrataMasterChef/StrataMasterChef.ts",
+    "bytecodeHash": "0xad12c3687b669d059df400d985dbc773bdfb64936fc0ae0f4bd3405e57eb3dff",
+    "address": "0x90de209907c5a4BF527A75fC16aBD639c77aaff4",
+    "block": 25737921,
+    "tx": "0xf9b14a51adaa8b6c851fdbcb62e1399cbd7009c44b3db86e134f50dcd5bd56a3",
+    "gas": "1397043",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1786525729,
+    "verified": "2026-08-12T09:09:18.564Z"
   }
 ]

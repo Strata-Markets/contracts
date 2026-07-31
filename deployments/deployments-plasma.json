@@ -1,0 +1,28 @@
+[
+  {
+    "id": "StrataAdminTimelock",
+    "name": "StrataMasterChef",
+    "main": "./0xc/hardhat/StrataMasterChef/StrataMasterChef.ts",
+    "bytecodeHash": "0xad12c3687b669d059df400d985dbc773bdfb64936fc0ae0f4bd3405e57eb3dff",
+    "address": "0xA62B204099277762d1669d283732dCc1B3AA96CE",
+    "block": 30062800,
+    "tx": "0x155e9976ff7bf9593fde42bc0a8fed3d7c48d3715666b044f6668379cb286c78",
+    "gas": "1397031",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1787003346,
+    "verified": "2026-08-17T21:49:22.000Z"
+  },
+  {
+    "id": "StrataConfigTimelock",
+    "name": "StrataMasterChef",
+    "main": "./0xc/hardhat/StrataMasterChef/StrataMasterChef.ts",
+    "bytecodeHash": "0xad12c3687b669d059df400d985dbc773bdfb64936fc0ae0f4bd3405e57eb3dff",
+    "address": "0x1516d031CcaE6c73f4cC106474Ae87628a403660",
+    "block": 30062817,
+    "tx": "0x673979cf1fcf3126a6b8fb4ab0a78556f5daedd6d4e9eaa3adb92e34a6ec8f66",
+    "gas": "1397043",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1787003363,
+    "verified": "2026-08-17T21:49:29.113Z"
+  }
+]

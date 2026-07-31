@@ -22,7 +22,7 @@ export namespace PlatformFactory {
         @memd.deco.memoize()
         static async fetch() {
             return await Config.fetch({
-                configGlobal: './config/*.yml',
+                configGlobal: './config/*.yml'
             });
         }
     }
@@ -33,7 +33,7 @@ export namespace PlatformFactory {
         deployments?: 'throw' | 'redeploy',
         whenUpgradeRequired?: 'ignore'
         cdo: TKey
-        accounts?: TKey | 'operator' | 'deployer'
+        accounts?: TKey | 'operator' | 'deployer' | Partial<ICDO['accounts']>
         cdoInfo?: Partial<ICDO>
         initialDeposit?: boolean
         isTest?: boolean
@@ -46,7 +46,7 @@ export namespace PlatformFactory {
 
         const accounts = await getAccounts(client, params.accounts ?? params.cdo);
 
-        if (accounts.safe?.admin.type === 'safe') {
+        if (accounts.safe?.admin?.type === 'safe') {
             TxWriter.defaultOptions({
                 safeTransport: new InMemoryServiceTransport(client, accounts.deployer as EoAccount)
             });
@@ -73,11 +73,11 @@ export namespace PlatformFactory {
         }
     }
 
-    async function getAccounts(client: Web3Client, group: TCDOKey | 'operator' | 'deployer') {
+    async function getAccounts(client: Web3Client, group: TCDOKey | 'operator' | 'deployer' | Partial<ICDO['accounts']>) {
         const { platform, network } = client;
         const hh = new HardhatProvider();
 
-        const accounts = Tranches[group]?.accounts?.[network] ?? {
+        let accounts = {
             deployer: `${network}/deployer`,
             timelockAdmin: `timelock/${network}/strata`,
             timelockConfig: `timelock/${network}/config`,
@@ -85,6 +85,14 @@ export namespace PlatformFactory {
             safeOperator: `safe/${network}/owner`,
             safeWorker: `safe/${network}/worker`,
         };
+        if (typeof group === 'string') {
+            accounts = Tranches[group]?.accounts?.[network] ?? accounts;
+        } else if (group != null) {
+            accounts = {
+                ...accounts,
+                ...group,
+            };
+        }
 
         let deployer = await ChainAccountService.get(accounts.deployer);
         let timelockAdmin = await ChainAccountService.get(accounts.timelockAdmin);

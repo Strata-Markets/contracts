@@ -125,7 +125,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
 
         let info = JSON.parse(JSON.stringify(Tranches[params.cdo])) as ICDO;
 
-        if (this.platform.Tranches?.ethena) {
+        if (this.platform?.Tranches?.ethena) {
             info.jrt = { ...info.jrt, ...(this.platform.Tranches?.[params.cdo]?.jrt ?? {}) } as any;
             info.srt = { ...info.srt, ...(this.platform.Tranches?.[params.cdo]?.srt ?? {}) } as any;
         }

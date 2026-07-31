@@ -14,6 +14,21 @@ blockchainExplorer:
       api: 'https://api.etherscan.io/v2/api?chainid=1'
       www: 'https://etherscan.io'
 
+  'plasma':
+      key: ${{ ETHERSCAN_KEY }}
+      api: 'https://api.etherscan.io/v2/api?chainid=9745'
+      www: 'https://plasmascan.to'
+
+  'monad':
+      key: ${{ ETHERSCAN_KEY }}
+      api: 'https://api.etherscan.io/v2/api?chainid=143'
+      www: 'https://monadscan.com'
+
+  'mantle':
+      key: ${{ ETHERSCAN_KEY }}
+      api: 'https://api.etherscan.io/v2/api?chainid=5000'
+      www: 'https://mantlescan.xyz/'
+
 
 web3:
   'hoodi':
@@ -56,6 +71,33 @@ accounts:
       - 'eth/deployer'
       - 'eth/strata2'
 
+  - name: safe/monad/strata
+    type: safe
+    address: '0xA27cA9292268ee0f0258B749f1D5740c9Bb68B50'
+    platform: 'monad'
+    operator: 'eth/deployer'
+    owners:
+      - 'eth/deployer'
+      - 'eth/strata2'
+
+  - name: safe/plasma/strata
+    type: safe
+    address: '0xA27cA9292268ee0f0258B749f1D5740c9Bb68B50'
+    platform: 'plasma'
+    operator: 'eth/deployer'
+    owners:
+      - 'eth/deployer'
+      - 'eth/strata2'
+
+  - name: safe/mantle/strata
+    type: safe
+    address: '0xA27cA9292268ee0f0258B749f1D5740c9Bb68B50'
+    platform: 'mantle'
+    operator: 'eth/deployer'
+    owners:
+      - 'eth/deployer'
+      - 'eth/strata2'
+
   - name: safe/eth/worker
     type: safe
     address: '0xe0A1F371eA77e18C1eA79126327D0fa1A6B4F943'
@@ -71,20 +113,15 @@ accounts:
     operator:
       - 'safe/eth/strata'
 
-  - name: timelock/plasma/strata
-    address: '0xFbb6821bf80EB463a8C63633De837a79E5B0B8Bf'
-    platform: 'plasma'
-    operator:
-      - 'safe/plasma/strata'
 
   - name: timelock/monad/strata
-    address: '0xFbb6821bf80EB463a8C63633De837a79E5B0B8Bf'
+    address: '0x28AB384D2E064BdA3ebeD85eE63c140BDb8cE118'
     platform: 'monad'
     operator:
       - 'safe/monad/strata'
 
   - name: timelock/eth/config
-    address: '0x4f2682b78F37910704fB1AFF29358A1da07E022d'
+    address: '0x90de209907c5a4BF527A75fC16aBD639c77aaff4'
     platform: 'eth'
     operator:
       - 'safe/eth/strata'
