@@ -71,6 +71,14 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     /// @dev The Symbiotic network middleware receiving coverage premium payments
     INetworkMiddleware public networkMiddleware;
 
+    /// @dev When true, accrued premium is sent to `premiumRewardSafe` for manual distribution in
+    ///      Strata assets (via the Symbiotic UI). When false (default), it flows to the Symbiotic
+    ///      AppAdapter for the automatic CoWSwap convert-to-vault-asset reward flow.
+    bool public manualPremiumDistribution;
+
+    /// @dev Receiver of the premium when `manualPremiumDistribution` is true (a dedicated safe).
+    address public premiumRewardSafe;
+
     uint256 public immutable baseAssetDecimals;
 
     event DepositsStateChanged(address indexed tranche, bool enabled);
@@ -79,6 +87,8 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     event ReserveDistributed(uint256 jrtAmount, uint256 srtAmount);
     event PremiumPaid(address token, uint256 tokenAmount, uint256 baseAssets);
     event NetworkMiddlewareSet(address networkMiddleware);
+    event ManualPremiumDistributionSet(bool enabled);
+    event PremiumRewardSafeSet(address safe);
     event TrueUpExecuted(uint256 shareAmount, uint256 baseAssets, bool jrtCredited);
     event TreasurySet(address treasury);
     event ShortfallPaused();
@@ -418,20 +428,15 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         emit ReserveDistributed(jrtAmountIn, srtAmountIn);
     }
 
-    /// @notice Pays accrued coverage premium directly to the Symbiotic AppAdapter
+    /// @notice Pays the accrued coverage premium to the Symbiotic underwriters
     /// @dev Only callable by RESERVE_MANAGER_ROLE. Books the outflow against the premium bucket,
-    ///      then transfers the tokens from the strategy straight to the AppAdapter (resolved via
-    ///      the network middleware). A plain transfer is equivalent to AppAdapter.reward(), which
-    ///      only pulls tokens without any state change.
+    ///      then transfers the tokens from the strategy to the receiver chosen by
+    ///      `manualPremiumDistribution`: the AppAdapter (automatic CoWSwap convert flow, default) or
+    ///      `premiumRewardSafe` (manual distribution in Strata assets via the Symbiotic UI). A plain
+    ///      transfer to the AppAdapter is equivalent to AppAdapter.reward(), which only pulls tokens.
     /// @param token The token to pay the premium in
     function payPremium (address token) external onlyRole(RESERVE_MANAGER_ROLE) {
-        if (address(networkMiddleware) == address(0)) {
-            revert ZeroAddress();
-        }
-        address appAdapter = address(networkMiddleware.appAdapter());
-        if (appAdapter == address(0)) {
-            revert ZeroAddress();
-        }
+        address receiver = _premiumReceiver();
         // The full accrued premium bucket, in base assets
         uint256 baseAssets = accounting.totalPremium();
         if (baseAssets == 0) {
@@ -443,8 +448,28 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         uint256 baseAssetsNet = strategy.convertToAssets(token, tokenAmount, Math.Rounding.Floor);
         accounting.reducePremium(baseAssetsNet);
         // Transfers tokens out instantly if possible, or through the cooldown process
-        strategy.reduceReserve(token, tokenAmount, appAdapter);
+        strategy.reduceReserve(token, tokenAmount, receiver);
         emit PremiumPaid(token, tokenAmount, baseAssetsNet);
+    }
+
+    /// @notice Resolves the premium receiver from `manualPremiumDistribution`.
+    /// @dev Manual mode routes to the dedicated safe; automatic mode to the Symbiotic AppAdapter
+    ///      (resolved via the network middleware). Reverts if the selected target is unset.
+    function _premiumReceiver () internal view returns (address) {
+        if (manualPremiumDistribution) {
+            if (premiumRewardSafe == address(0)) {
+                revert ZeroAddress();
+            }
+            return premiumRewardSafe;
+        }
+        if (address(networkMiddleware) == address(0)) {
+            revert ZeroAddress();
+        }
+        address appAdapter = address(networkMiddleware.appAdapter());
+        if (appAdapter == address(0)) {
+            revert ZeroAddress();
+        }
+        return appAdapter;
     }
 
     /// @notice Injects coverage funds (slashed collateral proceeds) back into the protocol
@@ -478,6 +503,19 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     function setNetworkMiddleware (INetworkMiddleware networkMiddleware_) external onlyOwner {
         networkMiddleware = networkMiddleware_;
         emit NetworkMiddlewareSet(address(networkMiddleware_));
+    }
+
+    /// @notice Toggles premium routing between the AppAdapter (automatic) and the reward safe (manual)
+    /// @param enabled True routes premium to `premiumRewardSafe`; false to the Symbiotic AppAdapter
+    function setManualPremiumDistribution (bool enabled) external onlyOwner {
+        manualPremiumDistribution = enabled;
+        emit ManualPremiumDistributionSet(enabled);
+    }
+
+    /// @notice Sets the dedicated safe that receives the premium in manual distribution mode
+    function setPremiumRewardSafe (address safe) external onlyOwner {
+        premiumRewardSafe = safe;
+        emit PremiumRewardSafeSet(safe);
     }
 
     /// @notice Sets the address of the reserve treasury

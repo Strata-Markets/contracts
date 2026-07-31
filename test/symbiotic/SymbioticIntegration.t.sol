@@ -361,4 +361,31 @@ contract SymbioticIntegrationTest is Test {
         assertGe(vault.totalAssets(), assetsBefore + uniBtcProceeds, "vault assets must grow by the premium");
         assertEq(vault.totalSupply(), supplyBefore, "no shares minted: underwriters appreciate");
     }
+
+    function test_premium_manualMode_routesToSafe() public {
+        // Switch to manual distribution: premium goes to a dedicated safe, not the AppAdapter.
+        address rewardSafe = makeAddr("rewardSafe");
+        address cdoOwner = IOwnableLike(CDO_PROXY).owner();
+        vm.startPrank(cdoOwner);
+        cdo.setPremiumRewardSafe(rewardSafe);
+        cdo.setManualPremiumDistribution(true);
+        vm.stopPrank();
+
+        address accountingOwner = IOwnableLike(ACCOUNTING_PROXY).owner();
+        vm.prank(accountingOwner);
+        accounting.setPremiumBps(0.1e18);
+
+        _induceGain(strategy.totalAssets() / 50); // 2% gain
+        assertGt(accounting.totalPremium(), 0, "premium should accrue on gains");
+
+        uint256 safeBefore = IERC20(SUSDE).balanceOf(rewardSafe);
+        uint256 adapterBefore = IERC20(SUSDE).balanceOf(address(adapter));
+
+        vm.prank(multisig);
+        cdo.payPremium(SUSDE);
+
+        assertGt(IERC20(SUSDE).balanceOf(rewardSafe) - safeBefore, 0, "premium sUSDe must reach the safe");
+        assertEq(IERC20(SUSDE).balanceOf(address(adapter)), adapterBefore, "AppAdapter must not receive premium in manual mode");
+        assertLt(accounting.totalPremium(), 1e18, "premium bucket should be swept");
+    }
 }

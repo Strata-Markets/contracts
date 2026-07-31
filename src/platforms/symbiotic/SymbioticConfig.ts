@@ -19,6 +19,10 @@ export interface ISymbioticConfig {
     /// The Symbiotic AppAdapter this middleware drives (deployed on the Symbiotic side).
     /// Leave unset until it exists; the deploy then requires it to be passed explicitly.
     appAdapter?: TEth.Address;
+    /// Dedicated safe that receives the premium in manual distribution mode. When set, the deploy
+    /// registers it on each market's CDO (setPremiumRewardSafe). Does NOT switch the CDO to manual
+    /// mode; it only pre-provisions the receiver. Leave unset to skip.
+    premiumRewardSafe?: TEth.Address;
     /// Markets sharing the AppAdapter.
     markets: ISymbioticMarketConfig[];
 }
@@ -26,8 +30,10 @@ export interface ISymbioticConfig {
 /// Per-network Symbiotic coverage config, read by SymbioticNMDeployments.
 export const SymbioticConfig = {
     eth: {
-        // TODO: set once the AppAdapter is deployed on the Symbiotic side.
+        // TODO: Check AppAdapter deployment and set once the AppAdapter is deployed on the Symbiotic side.
         appAdapter: undefined,
+        // TODO: set the dedicated safe address for manual premium distribution.
+        premiumRewardSafe: undefined,
         markets: [
             {
                 name: 'Ethena',

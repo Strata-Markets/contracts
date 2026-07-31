@@ -4,6 +4,7 @@ import { TEth } from 'dequanto/models/TEth';
 import { $require } from 'dequanto/utils/$require';
 import { NetworkMiddleware } from '@0xc/hardhat/NetworkMiddleware/NetworkMiddleware';
 import { OracleAdapter } from '@0xc/hardhat/OracleAdapter/OracleAdapter';
+import { StrataCDO } from '@0xc/hardhat/StrataCDO/StrataCDO';
 import { Addresses, ChainlinkFeeds } from '@s/constants';
 import { SymbioticConfig } from '@s/platforms/symbiotic/SymbioticConfig';
 
@@ -46,6 +47,9 @@ export interface ISymbioticNMParams {
     feeds?: ISymbioticFeed[];
     /// Markets sharing this middleware's AppAdapter. Defaults to SymbioticConfig[network].markets.
     markets?: ISymbioticMarket[];
+    /// Dedicated safe for manual premium distribution, registered on every market's CDO
+    /// (setPremiumRewardSafe). Defaults to SymbioticConfig[network].premiumRewardSafe. Unset = skip.
+    premiumRewardSafe?: TEth.Address;
     /// Behaviour when the deployed bytecode differs; mirrors DeploymentsBase.
     deployments?: 'throw' | 'redeploy';
     isTest?: boolean;
@@ -164,7 +168,27 @@ export class SymbioticNMDeployments {
         for (const market of markets) {
             await this.configureMarket(middleware, market);
         }
+
+        // Pre-provision the manual-distribution premium safe on each CDO (does not switch to manual mode).
+        const network = this.ds.client.network;
+        const premiumSafe = this.params.premiumRewardSafe ?? SymbioticConfig[network]?.premiumRewardSafe;
+        if (premiumSafe != null) {
+            for (const market of markets) {
+                await this.configurePremiumRewardSafe(market.cdo, premiumSafe);
+            }
+        }
         return { middleware, oracle };
+    }
+
+    /// Registers the manual-distribution premium safe on a market's CDO, idempotently.
+    /// @dev setPremiumRewardSafe is owner-gated on the CDO, so `this.owner` must be the CDO owner.
+    async configurePremiumRewardSafe(cdo: TEth.Address, safe: TEth.Address): Promise<void> {
+        const contract = new StrataCDO(cdo, this.ds.client);
+        const current = await contract.premiumRewardSafe();
+        if (current.toLowerCase() === safe.toLowerCase()) {
+            return;
+        }
+        await contract.$receipt().setPremiumRewardSafe(this.owner, safe);
     }
 
     /// Registers or updates a single asset feed in the shared OracleAdapter, idempotently.
