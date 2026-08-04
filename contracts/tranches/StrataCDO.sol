@@ -477,8 +477,8 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     ///      share token (not the base asset): a raw base-asset transfer would not be reflected in
     ///      the strategy's totalAssets(), and depositing would dilute existing shares. The caller
     ///      MUST approve this contract for shareAmount of the strategy share token beforehand.
-    ///      The credited tranche is chosen by the accounting's coverageFirst flag: Jrt when
-    ///      coverage sits in front of the juniors, Srt otherwise.
+    ///      Settlement closes the outstanding insuranceAmount claim; no tranche is credited, as the
+    ///      covered tranche was already held whole while the claim was open.
     /// @param shareAmount The injected amount in strategy share tokens
     function trueUp (uint256 shareAmount) external onlyRole(RESERVE_MANAGER_ROLE) nonReentrant {
         if (shareAmount == 0) {

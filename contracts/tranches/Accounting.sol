@@ -133,16 +133,8 @@ contract Accounting is IAccounting, CDOComponent {
     ///      re-enters the strategy. Read by the network middleware to size coverage slashes.
     uint256 public insuranceAmount;
 
-    /// @notice Coverage role flag (mezzanine vs Senior-insurance framing)
-    /// @dev In this base (floored, sequential) waterfall both roles produce the same numbers: Jrt
-    ///      absorbs first and coverage takes only the Senior-bound remainder, so the flag does not
-    ///      change the loss math here. Kept for the conceptual distinction (whom insuranceAmount is
-    ///      owed to) and for future gain-side handling (e.g. Senior-profit-first unwinding).
-    bool public coverageFirst;
-
     /// @notice The Symbiotic network middleware (insurance pool) queried for coverage
     /// @dev When unset (address(0)) no coverage is requested and losses hit the tranches as usual.
-    /// @dev Appended after coverageFirst to preserve the upgrade storage layout.
     address public networkMiddleware;
 
     error InvalidNavSplit(uint256 navT1, uint256 jrtAssets, uint256 srtAssets, uint256 reserveAssets, uint256 premiumAssets);
@@ -155,7 +147,6 @@ contract Accounting is IAccounting, CDOComponent {
     event PremiumPercentageChanged(uint256 premiumBps);
     event PremiumReduced(uint256 amount);
     event CoverageClaimed(uint256 amount, uint256 insuranceAmount);
-    event CoverageFirstChanged(bool coverageFirst);
     event NetworkMiddlewareSet(address networkMiddleware);
     event TrueUpApplied(uint256 amount, uint256 insuranceAmount);
     event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
@@ -803,15 +794,6 @@ contract Accounting is IAccounting, CDOComponent {
         updateAccountingInner(cdo.totalStrategyAssets());
         premiumBps = bps;
         emit PremiumPercentageChanged(premiumBps);
-    }
-
-    /// @notice Sets the position of the Symbiotic coverage in the loss waterfall
-    /// @dev See {coverageFirst}. Settles accounting first so the new mode only applies to
-    ///      losses accrued after this change.
-    function setCoverageFirst (bool coverageFirst_) external onlyOwner {
-        updateAccountingInner(cdo.totalStrategyAssets());
-        coverageFirst = coverageFirst_;
-        emit CoverageFirstChanged(coverageFirst_);
     }
 
     /// @notice Sets the Symbiotic network middleware (insurance pool) queried for coverage.

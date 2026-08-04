@@ -78,10 +78,8 @@ contract TrueUp is Test {
         accounting.updateBalanceFlow(1000e18, 0, 1000e18, 0);
     }
 
-    /// Mezzanine (coverageFirst=false): Jrt absorbs first, coverage holds the Srt shortfall whole.
+    /// Mezzanine: Jrt absorbs first, coverage holds the Srt shortfall whole.
     function test_mezzanine_coverageHoldsSrtWhole_thenTrueUpSettles() public {
-        assertFalse(accounting.coverageFirst());
-
         // Loss 1050: Jrt wiped to its floor (999 absorbed); the remaining 51 that would reach Srt
         // is instead absorbed by coverage, so Srt stays whole.
         mockStrategyTvl = 950e18;
@@ -119,11 +117,9 @@ contract TrueUp is Test {
         assertEq(accounting.srtBaseNav(), srtBefore, "Srt stays whole");
     }
 
-    /// Senior-insurance framing (coverageFirst=true): coverage only covers the Senior-bound loss,
-    /// so a loss that stays within Jrt's capacity is absorbed by Jrt with no claim created.
-    function test_coverageFirst_smallLossHitsJrt_noClaim() public {
-        accounting.setCoverageFirst(true);
-
+    /// Coverage only covers the Senior-bound loss, so a loss that stays within Jrt's capacity is
+    /// absorbed by Jrt with no claim created.
+    function test_smallLossHitsJrt_noClaim() public {
         // Loss 100, fully within Jrt's capacity: Jrt eats it, nothing reaches Srt, no coverage.
         mockStrategyTvl = 1900e18;
         accounting.updateAccounting(1900e18);
@@ -131,26 +127,6 @@ contract TrueUp is Test {
         assertEq(accounting.jrtBaseNav(), 900e18, "Jrt absorbs the loss it can cover");
         assertEq(accounting.srtBaseNav(), 1000e18, "Srt untouched");
         assertEq(accounting.insuranceAmount(), 0, "no claim: nothing reached Srt");
-    }
-
-    /// Under coverageFirst=true a loss deep enough to reach Srt is covered identically to mezzanine.
-    function test_coverageFirst_seniorBoundLossIsCovered() public {
-        accounting.setCoverageFirst(true);
-
-        // Loss 1050: Jrt wiped to floor (999), the Srt-bound 51 is covered.
-        mockStrategyTvl = 950e18;
-        accounting.updateAccounting(950e18);
-
-        assertEq(accounting.jrtBaseNav(), ONE_ASSET, "Jrt wiped to its floor");
-        assertEq(accounting.srtBaseNav(), 1000e18, "Srt held whole by coverage");
-        assertEq(accounting.insuranceAmount(), 51e18, "claim equals the Srt-bound loss");
-
-        vm.expectEmit(false, false, false, true);
-        emit TrueUpApplied(51e18, 0);
-        accounting.trueUp(51e18);
-
-        assertEq(accounting.insuranceAmount(), 0, "claim fully settled");
-        assertEq(accounting.nav(), 950e18 + 51e18, "nav rises by exactly the settled amount");
     }
 
     /// A recovery gain first unwinds the outstanding claim before any reserve/premium skim.

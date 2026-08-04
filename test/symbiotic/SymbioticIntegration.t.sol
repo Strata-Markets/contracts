@@ -246,10 +246,9 @@ contract SymbioticIntegrationTest is Test {
         vm.prank(cdoOwner);
         cdo.setNetworkMiddleware(INetworkMiddleware(address(middleware)));
 
-        // Symbiotic covers Jrt declines (coverage-first mode) and is queried as the insurance pool
+        // Point the accounting at the middleware so it is queried as the insurance pool
         address accountingOwner = IOwnableLike(ACCOUNTING_PROXY).owner();
         vm.startPrank(accountingOwner);
-        accounting.setCoverageFirst(true);
         accounting.setNetworkMiddleware(address(middleware));
         vm.stopPrank();
 
