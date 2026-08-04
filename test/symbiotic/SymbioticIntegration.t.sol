@@ -142,8 +142,12 @@ contract SymbioticIntegrationTest is Test {
         // rollout must upgrade the strategy implementation together with the CDO and Accounting.
         address newStrategyImpl = address(new sUSDeStrategy(IERC4626(SUSDE)));
 
+        // Run the V2 migration atomically with the upgrade (sets feeWatermarkNav = nav), matching
+        // the production rollout. Without it the reserve/premium skim underflows on the next update.
         vm.prank(IProxyAdminLike(ACCOUNTING_PROXY_ADMIN).owner());
-        IProxyAdminLike(ACCOUNTING_PROXY_ADMIN).upgradeAndCall(ACCOUNTING_PROXY, newAccountingImpl, "");
+        IProxyAdminLike(ACCOUNTING_PROXY_ADMIN).upgradeAndCall(
+            ACCOUNTING_PROXY, newAccountingImpl, abi.encodeCall(Accounting.initializeV2, ())
+        );
 
         vm.prank(IProxyAdminLike(CDO_PROXY_ADMIN).owner());
         IProxyAdminLike(CDO_PROXY_ADMIN).upgradeAndCall(CDO_PROXY, newCdoImpl, "");
@@ -242,10 +246,12 @@ contract SymbioticIntegrationTest is Test {
         vm.prank(cdoOwner);
         cdo.setNetworkMiddleware(INetworkMiddleware(address(middleware)));
 
-        // Symbiotic covers Jrt declines (coverage-first mode)
+        // Symbiotic covers Jrt declines (coverage-first mode) and is queried as the insurance pool
         address accountingOwner = IOwnableLike(ACCOUNTING_PROXY).owner();
-        vm.prank(accountingOwner);
+        vm.startPrank(accountingOwner);
         accounting.setCoverageFirst(true);
+        accounting.setNetworkMiddleware(address(middleware));
+        vm.stopPrank();
 
         // Grant RESERVE_MANAGER_ROLE to the multisig directly in ACM storage
         // (OZ AccessControl: _roles[role].hasMember[account] at slot 0)
@@ -279,14 +285,21 @@ contract SymbioticIntegrationTest is Test {
 
     function test_endToEnd_lossSlashTrueUp() public {
         uint256 strategyTvl = strategy.totalAssets();
-        uint256 loss = strategyTvl / 100; // 1% strategy loss
 
-        uint256 jrtNavBefore = accounting.jrtNav();
-        _induceLoss(loss);
+        // Coverage only absorbs the Senior-bound loss, so the strategy NAV must drop past Jrt AND
+        // the reserve, then a small amount (within the coverage capacity) into Srt.
+        uint256 srtNavBefore = accounting.srtNav();
+        uint256 targetStrategyLoss = accounting.jrtNav() + accounting.reserveNav() + strategyTvl / 500;
+        // The strategy holds only a fraction of the sUSDe supply, so removing X USDe of backing
+        // reduces the strategy NAV by X * strategyNav / totalUsdeBacking. Invert to hit the target.
+        uint256 totalUsdeBacking = IERC20(USDE).balanceOf(SUSDE);
+        uint256 usdeToRemove = targetStrategyLoss * totalUsdeBacking / strategyTvl;
+        _induceLoss(usdeToRemove);
 
-        // Deficit accrued for the Jrt decline (coverage-first mode)
-        uint256 deficit = accounting.pendingCoverageDeficit();
-        assertGt(deficit, 0, "deficit should accrue on loss");
+        // Jrt absorbs down to its floor; the Srt-bound remainder is covered and booked as a claim.
+        uint256 deficit = accounting.insuranceAmount();
+        assertGt(deficit, 0, "an insurance claim should accrue for the Srt-bound loss");
+        assertApproxEqRel(accounting.srtNav(), srtNavBefore, 0.001e18, "Srt held whole by coverage");
 
         // Slash: converts the USDe deficit to uniBTC and takes it from the adapter
         uint256 multisigBefore = IERC20(UNIBTC).balanceOf(multisig);
@@ -315,9 +328,9 @@ contract SymbioticIntegrationTest is Test {
         cdo.trueUp(shareAmount);
         vm.stopPrank();
 
-        // Deficit cleared, Jrt restored (approximately: conversion rounding only)
-        assertLt(accounting.pendingCoverageDeficit(), 1e18, "deficit should be (almost) cleared");
-        assertApproxEqRel(accounting.jrtNav(), jrtNavBefore, 0.001e18, "Jrt should be made whole");
+        // Claim settled; Srt stays whole (it was held whole by coverage throughout)
+        assertLt(accounting.insuranceAmount(), 1e18, "insurance claim should be (almost) cleared");
+        assertApproxEqRel(accounting.srtNav(), srtNavBefore, 0.001e18, "Srt should remain whole");
 
         // Middleware in-flight amount cleared
         (,,, uint256 pendingAfter,,) = middleware.markets(CDO_PROXY);

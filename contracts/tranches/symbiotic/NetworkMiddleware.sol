@@ -11,12 +11,13 @@ import { INetworkMiddleware } from "./interfaces/INetworkMiddleware.sol";
 import { IAppAdapter } from "./interfaces/IAppAdapter.sol";
 import { IStrataAccounting } from "./interfaces/IStrataAccounting.sol";
 import { IOracleAdapter } from "./interfaces/IOracleAdapter.sol";
+import { IInsurancePool } from "./interfaces/IInsurancePool.sol";
 
-contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, INetworkMiddleware {
+contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUpgradeable, INetworkMiddleware, IInsurancePool {
 
     // Per-market coverage configuration and state, keyed by the market's CDO address
     struct TMarket {
-        // The market's accounting contract; source of pendingCoverageDeficit
+        // The market's accounting contract; source of the insuranceAmount claim
         IStrataAccounting accounting;
         // The market's base asset, in which the coverage deficit is denominated
         address baseAsset;
@@ -44,6 +45,9 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     /// @notice Coverage registry of the Strata markets sharing this middleware's AppAdapter
     mapping(address cdo => TMarket) public markets;
 
+    /// @notice Enumerable list of registered market CDOs, used to net shared coverage capacity
+    address[] public marketCdos;
+
     // ===============================================
     // Events and Errors
 
@@ -56,7 +60,7 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     event CoverageSlashed(address indexed cdo, uint256 requested, uint256 slashed);
     event TrueUpConfirmed(address indexed cdo, uint256 amount);
 
-    uint256[48] private __gap;
+    uint256[47] private __gap;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -125,6 +129,9 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     ) external onlyOwner {
         require(bufferBps <= MAX_BUFFER_BPS, "InvalidBuffer");
         TMarket storage market = markets[cdo];
+        if (address(market.accounting) == address(0)) {
+            marketCdos.push(cdo);
+        }
         market.accounting = accounting;
         market.baseAsset = baseAsset;
         market.bufferBps = bufferBps;
@@ -152,6 +159,40 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     }
 
     // ===============================================
+    // IInsurancePool
+
+    /// @inheritdoc IInsurancePool
+    /// @dev View: returns how much of `lossAmount` (in the market's base asset) the shared pool can
+    ///      currently cover. Capacity is the adapter's slashable stake minus the coverage already
+    ///      committed to every market (their outstanding claims not yet slashed), so simultaneous
+    ///      multi-market stress cannot over-commit the shared stake.
+    function request(address cdo, uint256 lossAmount) external view returns (uint256 covered) {
+        TMarket storage market = markets[cdo];
+        if (!market.enabled || lossAmount == 0) {
+            return 0;
+        }
+        uint256 availableVault = Math.saturatingSub(appAdapter.slashable(), _committedVault());
+        uint256 availableBase = _toBaseAsset(market, availableVault);
+        covered = Math.min(lossAmount, availableBase);
+    }
+
+    /// @notice Total coverage already committed across all markets, in vault asset.
+    /// @dev Per market: the outstanding claim (accounting.insuranceAmount) converted to vault asset,
+    ///      less what has already been slashed for it (pendingTrueUp). The remainder is a claim that
+    ///      will still consume the shared slashable stake, so it is reserved out of new requests.
+    function _committedVault() internal view returns (uint256 total) {
+        uint256 len = marketCdos.length;
+        for (uint256 i; i < len; ++i) {
+            TMarket storage m = markets[marketCdos[i]];
+            if (!m.enabled) {
+                continue;
+            }
+            uint256 claimVault = _toVaultAsset(m, m.accounting.insuranceAmount());
+            total += Math.saturatingSub(claimVault, m.pendingTrueUp);
+        }
+    }
+
+    // ===============================================
     // Internal functions
 
     /// @notice Returns the amount to slash for a market, in vault asset terms.
@@ -159,7 +200,7 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     ///      The adapter additionally caps the executed amount to the currently slashable stake.
     function _getNeededAmount(address cdo) internal view returns (uint256) {
         TMarket storage market = markets[cdo];
-        uint256 deficit = _toVaultAsset(market, market.accounting.pendingCoverageDeficit());
+        uint256 deficit = _toVaultAsset(market, market.accounting.insuranceAmount());
         deficit = Math.mulDiv(deficit, BPS + market.bufferBps, BPS);
         return Math.saturatingSub(deficit, market.pendingTrueUp);
     }
@@ -175,6 +216,19 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
             baseAssets,
             basePrice * 10 ** (IERC20Metadata(vaultAsset).decimals() + vaultPriceDecimals),
             vaultPrice * 10 ** (IERC20Metadata(market.baseAsset).decimals() + basePriceDecimals)
+        );
+    }
+
+    /// @notice Converts an amount of the Symbiotic vault asset into the market's base asset.
+    /// @dev Inverse of {_toVaultAsset}. Rounds down (in favor of the underwriters).
+    function _toBaseAsset(TMarket storage market, uint256 vaultAssets) internal view returns (uint256) {
+        address vaultAsset = appAdapter.asset();
+        (uint256 basePrice, uint256 basePriceDecimals) = oracle.getPrice(market.baseAsset);
+        (uint256 vaultPrice, uint256 vaultPriceDecimals) = oracle.getPrice(vaultAsset);
+        return Math.mulDiv(
+            vaultAssets,
+            vaultPrice * 10 ** (IERC20Metadata(market.baseAsset).decimals() + basePriceDecimals),
+            basePrice * 10 ** (IERC20Metadata(vaultAsset).decimals() + vaultPriceDecimals)
         );
     }
 }

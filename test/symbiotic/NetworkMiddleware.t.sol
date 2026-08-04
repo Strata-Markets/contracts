@@ -59,10 +59,10 @@ contract MockAppAdapter {
 
 /// @notice Minimal accounting mock exposing a settable coverage deficit.
 contract MockStrataAccounting is IStrataAccounting {
-    uint256 public pendingCoverageDeficit;
+    uint256 public insuranceAmount;
 
-    function setPendingCoverageDeficit(uint256 deficit) external {
-        pendingCoverageDeficit = deficit;
+    function setInsuranceAmount(uint256 deficit) external {
+        insuranceAmount = deficit;
     }
 }
 
@@ -137,7 +137,7 @@ contract NetworkMiddlewareTest is Test {
 
     function test_slash_convertsDeficitAndBooks() public {
         uint256 deficit = 60_000e18; // $60k deficit = 1 uniBTC
-        accounting.setPendingCoverageDeficit(deficit);
+        accounting.setInsuranceAmount(deficit);
 
         uint256 expected = expectedVaultAmount(deficit);
         assertEq(expected, 1e8); // sanity: exactly 1 uniBTC
@@ -155,7 +155,7 @@ contract NetworkMiddlewareTest is Test {
 
     function test_slash_decimalConversionFloors() public {
         uint256 deficit = 1000e18; // $1000 -> 0.016666.. uniBTC
-        accounting.setPendingCoverageDeficit(deficit);
+        accounting.setInsuranceAmount(deficit);
 
         vm.prank(owner);
         middleware.slash(cdo);
@@ -166,7 +166,7 @@ contract NetworkMiddlewareTest is Test {
 
     function test_slash_cappedByAdapterSlashable() public {
         adapter.setSlashable(0.5e8); // only 0.5 uniBTC available
-        accounting.setPendingCoverageDeficit(60_000e18); // wants 1 uniBTC
+        accounting.setInsuranceAmount(60_000e18); // wants 1 uniBTC
 
         vm.prank(owner);
         middleware.slash(cdo);
@@ -178,7 +178,7 @@ contract NetworkMiddlewareTest is Test {
     }
 
     function test_slash_noDoubleSlashForSameDeficit() public {
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
 
         vm.prank(owner);
         middleware.slash(cdo);
@@ -190,12 +190,12 @@ contract NetworkMiddlewareTest is Test {
     }
 
     function test_slash_slashesOnlyNewDeficit() public {
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
         vm.prank(owner);
         middleware.slash(cdo);
 
         // Deficit grows by another $30k before any true-up
-        accounting.setPendingCoverageDeficit(90_000e18);
+        accounting.setInsuranceAmount(90_000e18);
         vm.prank(owner);
         middleware.slash(cdo);
 
@@ -214,7 +214,7 @@ contract NetworkMiddlewareTest is Test {
         vm.prank(owner);
         middleware.setMarket(cdo, accounting, address(usde), 0, false);
 
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
         vm.expectRevert(abi.encodeWithSelector(NetworkMiddleware.MarketNotEnabled.selector, cdo));
         vm.prank(owner);
         middleware.slash(cdo);
@@ -227,14 +227,14 @@ contract NetworkMiddlewareTest is Test {
     }
 
     function test_slash_onlyOwner() public {
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vm.prank(stranger);
         middleware.slash(cdo);
     }
 
     function test_slash_revertsWhenPaused() public {
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
         vm.prank(owner);
         middleware.pause();
 
@@ -244,7 +244,7 @@ contract NetworkMiddlewareTest is Test {
     }
 
     function test_confirmTrueUp_byCdoReducesPendingTrueUp() public {
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
         vm.prank(owner);
         middleware.slash(cdo);
 
@@ -259,7 +259,7 @@ contract NetworkMiddlewareTest is Test {
     }
 
     function test_confirmTrueUp_byOwnerAllowed() public {
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
         vm.prank(owner);
         middleware.slash(cdo);
 
@@ -277,7 +277,7 @@ contract NetworkMiddlewareTest is Test {
     }
 
     function test_confirmTrueUp_saturatesOnOverConfirm() public {
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
         vm.prank(owner);
         middleware.slash(cdo);
 
@@ -290,7 +290,7 @@ contract NetworkMiddlewareTest is Test {
     }
 
     function test_confirmTrueUp_reopensSlashCapacity() public {
-        accounting.setPendingCoverageDeficit(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
         vm.prank(owner);
         middleware.slash(cdo);
 
@@ -299,12 +299,12 @@ contract NetworkMiddlewareTest is Test {
         middleware.confirmTrueUp(cdo, 60_000e18);
 
         // Once accounting clears the deficit, and a NEW deficit appears, slashing works again
-        accounting.setPendingCoverageDeficit(0);
+        accounting.setInsuranceAmount(0);
         vm.expectRevert(NetworkMiddleware.NoSlashableAmount.selector);
         vm.prank(owner);
         middleware.slash(cdo);
 
-        accounting.setPendingCoverageDeficit(30_000e18);
+        accounting.setInsuranceAmount(30_000e18);
         vm.prank(owner);
         middleware.slash(cdo);
 
