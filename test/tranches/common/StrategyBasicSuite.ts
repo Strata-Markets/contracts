@@ -96,7 +96,8 @@ export class StrategyBasicSuite<T extends DeploymentsBase> {
                 const aprs = await feed.latestRoundData();
                 const APRbase = $bigint.toEther(aprs.aprBase, 12);
                 const APRtarget = $bigint.toEther(aprs.aprTarget, 12);
-                $require.True(0.005 <= APRbase && APRbase <= .30, `APR base sanity check failed: ${APRbase}`);
+                const [aprBaseMin, aprBaseMax] = suite.helper.getSanityAprBase?.() ?? [0.005, .30]
+                $require.True(aprBaseMin <= APRbase && APRbase <= aprBaseMax, `APR base sanity check failed: ${APRbase}`);
 
                 const [aprTargetMin, aprTargetMax] = suite.helper.getSanityAprTarget?.() ?? [0.005, .10]
                 $require.True(aprTargetMin <= APRtarget && APRtarget <= aprTargetMax, `APR target sanity check failed: ${APRtarget}`);
@@ -223,14 +224,14 @@ export class StrategyBasicSuite<T extends DeploymentsBase> {
         ]);
         const dt = params.dt;
         await this.test.client.debug.mine(dt);
-        await this.helper.distributeRewards({
+        const afterState = await this.helper.distributeRewards({
             assetsBefore: totalAssets,
             dt: dt,
             apr: BigInt(params.apr)
         });
         await accounting.$receipt().onAprChanged(this.test.factory.owner);
 
-        const navGainExpect = this.calcWeiPerT(totalAssets, params.apr, dt);
+        const navGainExpect = (afterState as any)?.navGainExpect ?? this.calcWeiPerT(totalAssets, params.apr, dt);
         const navGainFact = await strategy.totalAssets() - totalAssets;
 
         const tolerance2SecVesting = this.calcWeiPerT(totalAssets, params.apr, 2);

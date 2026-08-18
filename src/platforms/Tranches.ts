@@ -7,8 +7,9 @@ import { TEth } from 'dequanto/models/TEth';
 import { MKRAlphaTranche } from './strats/MKRAlphaTranche';
 import { SaturnTranche } from './strats/SaturnTranche';
 import { FigureTranche } from './strats/FigureTranche';
+import { NestOpalTranche } from './strats/NestOpalTranche';
 
-export type TCDOKey = 'ethena' | 'neutrl' | 'mhyper' | 'mkralpha' | 'mm1usd' | 'mrox' | 'saturn' | 'figure' | 'spkMhyperIso';
+export type TCDOKey = 'ethena' | 'neutrl' | 'mhyper' | 'mkralpha' | 'mm1usd' | 'mrox' | 'saturn' | 'figure' | 'spkMhyperIso' | 'nestopal';
 export interface ICDO {
     // token symbol
     base: string;
@@ -99,6 +100,9 @@ export interface ICDO {
             useConservativeRedemptionPrice?: boolean
         }
         unstakeImpl?: 'MockInstant'
+
+        // TrancheDepositor Version
+        depositor?: 'V3' | 'V4'
     };
 
     // Contracts prefixes (can be overridden for testing)
@@ -366,6 +370,7 @@ export const Tranches: Record<TCDOKey, ICDO> = {
     },
     saturn: SaturnTranche,
     figure: FigureTranche,
+    nestopal: NestOpalTranche,
 };
 
 export const ContractsIDMapping = {
@@ -384,4 +389,5 @@ export const ContractsPrefixMapping = {
     mm1usd: 'MM1USD',
     mrox: 'MROX',
     saturn: 'Saturn',
+    nestopal: 'NestOpal',
 } as Record<TCDOKey, string>;

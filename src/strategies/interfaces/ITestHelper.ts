@@ -18,7 +18,9 @@ export interface ITestHelper {
         dt: number | string
         amount?: number
         apr?: bigint | number
-    }): Promise<void>
+    }): Promise<void | {
+        navGainExpect?: bigint
+    }>
 
     // Returns all tokens accepted by the strategy.
     getStrategyTokensIn (): Promise<{
@@ -48,5 +50,6 @@ export interface ITestHelper {
 
 
     getSanityAprTarget?(): [min: number, max: number]
+    getSanityAprBase?(): [min: number, max: number]
 }
 

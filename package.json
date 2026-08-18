@@ -13,7 +13,8 @@
     "coverage-nocompile": "atma --max-old-space-size=12000 test --coverage --no-compile",
     "coverage-server": "cd coverage/report && npx atma server",
     "deploy-local": "atma act tasks/deploy.act.ts -q \"deploy and configure\" --chain hardhat",
-    "fork-eth": "hardhat node --verbose --show-stack-traces --fork %MAINNET_RPC_URL%"
+    "fork-eth": "hardhat node --verbose --show-stack-traces --fork %MAINNET_RPC_URL%",
+    "fork-plasma": "hardhat node --verbose --show-stack-traces --fork %RPC_URL_PLASMA_MAINNET%"
   },
   "repository": {
     "type": "git",
@@ -45,7 +46,7 @@
     "atma-loader-ts": "latest",
     "atma-utest": "^0.21.36",
     "class-json": "latest",
-    "dequanto": "^0.2.32",
+    "dequanto": "^0.2.43",
     "dotenv": "^16.4.7",
     "memd": "latest",
     "tsconfig-paths": "^4.2.0"

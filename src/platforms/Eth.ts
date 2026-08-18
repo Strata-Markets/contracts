@@ -48,6 +48,11 @@ const Tokens = {
         address: '0xD166337499E176bbC38a1FBd113Ab144e5bd2Df7',
         decimals: 18,
     },
+    // Nest BlackOpal LiquidStone II
+    nOPAL: {
+        address: '0x119Dd7dAFf816f29D7eE47596ae5E4bdC4299165',
+        decimals: 6,
+    },
 } as Record<string, Partial<IToken>>;
 
 export const Eth: IPlatform = {
@@ -90,5 +95,12 @@ export const Eth: IPlatform = {
         yieldVault: '0x6aD038cA6C04e885630851278ca0a856Ad9a66Cc',
         stakingVault: '0x19ebb35279a16207ec4ba82799cc64715065f7f6',
         primeFeed: '0xf17C0EdcAA28371e9c8012D7699bF40ECF0F58d1',
+    },
+    nestopal: {
+        nOPAL: '0x119Dd7dAFf816f29D7eE47596ae5E4bdC4299165',
+        accountant: '0x2Ed2f77a961fc92F73D1087786099c39C894Ed1D',
+        predicateProxy: '0xfc0c4222b3a0c9b060c0b959dec62442036b9035',
+        teller: '0xA5F8e5843dd597a179453bF782844e8Bf808A90b',
+        nestVault: '0xd258029cf5a177e3306e09fbea63424543a505c0',
     },
 };

@@ -1544,5 +1544,73 @@
         "type": "((uint32 p0, uint32 p1, (uint32 feePpm, uint32 sharesLock) r0, (uint32 feePpm, uint32 sharesLock) r1, (uint32 feePpm, uint32 sharesLock) r2) bounds, uint64 executeAfter)"
       }
     ]
+  },
+  {
+    "id": "TrancheDepositorV4Proxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "autoSwaps",
+        "size": null,
+        "type": "mapping(address => (address router, uint24 fee, uint24 minimumReturnPercentage))"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "autoWithdrawals",
+        "size": null,
+        "type": "mapping(address => bool)"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "tranches",
+        "size": null,
+        "type": "mapping(address => mapping(address => bool))"
+      },
+      {
+        "slot": 53,
+        "position": 0,
+        "name": "trancheAutoSwaps",
+        "size": null,
+        "type": "mapping(address => mapping(address => (address router, uint24 fee, uint24 minimumReturnPercentage)))"
+      },
+      {
+        "slot": 54,
+        "position": 0,
+        "name": "trancheAdapterSwaps",
+        "size": null,
+        "type": "mapping(address => mapping(address => (address adapter, address tokenOut, uint24 minimumReturnPercentage)))"
+      }
+    ]
   }
 ]

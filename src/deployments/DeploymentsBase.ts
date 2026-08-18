@@ -108,12 +108,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         this.platform = Platforms[params.client.network];
         this.accounts = params.accounts;
         this.pfx = $require.notNull(params.cdoInfo?.pfx ?? ContractsPrefixMapping[params.cdo], `No contract prefix for ${params.cdo} found`);
-
-        let directoryPfx = '';
-        if (params.cdo !== 'ethena' && params.cdo !== 'neutrl') {
-            // @TODO split current ethena and neutrl deployments into subfolders
-            directoryPfx = params.cdo + '/';
-        }
+        let directoryPfx = params.cdo + '/';
 
         this.ds = new Deployments(params.client, params.deployer, {
             directory: `./deployments/${params.isTest ? 'test/' : ''}${directoryPfx}`,
@@ -130,7 +125,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
 
         let info = JSON.parse(JSON.stringify(Tranches[params.cdo])) as ICDO;
 
-        if (this.platform.Tranches?.ethena) {
+        if (this.platform?.Tranches?.ethena) {
             info.jrt = { ...info.jrt, ...(this.platform.Tranches?.[params.cdo]?.jrt ?? {}) } as any;
             info.srt = { ...info.srt, ...(this.platform.Tranches?.[params.cdo]?.srt ?? {}) } as any;
         }
@@ -178,6 +173,10 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
     protected async getDepositToken (): Promise<ERC20> {
         let { base } = await this.ensureUnderlying();
         return base;
+    }
+
+    protected getDepositAmount (): number {
+        return 40;
     }
 
 
@@ -728,7 +727,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         if (this.owner.type === 'safe') {
             throw new Error(`Mainnet deployment not ready`);
         }
-        const AMOUNT = $bigint.toWei(20, await erc20.decimals());
+        const AMOUNT = $bigint.toWei(this.getDepositAmount(), await erc20.decimals());
         let balance = await erc20.balanceOf(this.owner.address);
         if (balance < AMOUNT) {
             if (this.client.network === 'hardhat' || this.client.network === 'hoodi') {
@@ -757,8 +756,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         let erc20 = await this.getDepositToken();
         let { jrtVault, srtVault, cdo } = tranches;
 
-
-        const AMOUNT = $bigint.toWei(40, await erc20.decimals());
+        const AMOUNT = $bigint.toWei(this.getDepositAmount(), await erc20.decimals());
         let balance = await erc20.balanceOf(this.owner.address);
         if (balance < AMOUNT) {
             throw new Error(`Not enough balance for initial deposit.`);
@@ -795,10 +793,12 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         let acm = await this.ensureACM();
         let { base } = await this.ensureUnderlying();
         let { cdo, jrtVault } = await this.ensureCDO();
+
+        let v = this.cdoInfo.ContractVersions?.depositor ?? 'V3';
         let { contract: depositor } = await this.common.ensureWithProxy(TrancheDepositor, {
             id: this.isTestnet()
                 ? `${this.pfx}TrancheDepositor`
-                : `TrancheDepositorV3`,
+                : `TrancheDepositor${v}`,
             initialize: [
                 this.owner.address,
                 acm.address
@@ -807,7 +807,8 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         });
 
         await this.ensureRole($contract.keccak256('DEPOSITOR_CONFIG_ROLE'), this.owner.address);
-        let status = await depositor.tranches(jrtVault.address, base.address);
+        let depositToken = await this.getDepositToken();
+        let status = await depositor.tranches(jrtVault.address, depositToken.address);
         if (status == false) {
             await depositor.$receipt().addCdo(this.owner, cdo.address);
         }

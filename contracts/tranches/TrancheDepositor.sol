@@ -9,6 +9,7 @@ import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol
 import {Context} from "@openzeppelin/contracts/utils/Context.sol";
 import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import {ISwapRouter} from "./interfaces/ISwapRouter.sol";
+import {IAdapter} from "./interfaces/IAdapter.sol";
 import {IMetaVault} from "./interfaces/IMetaVault.sol";
 import {IDepositor} from "./interfaces/IDepositor.sol";
 import {IStrataCDO} from "./interfaces/IStrataCDO.sol";
@@ -20,6 +21,7 @@ contract TrancheDepositor is AccessControlled {
 
     event SwapInfoChanged(address indexed token);
     event CdoSwapInfoChanged(address indexed cdo, address indexed token);
+    event CdoAdapterSwapChanged(address indexed cdo, address indexed token);
     event AutoWithdrawalsChanged();
     event CdoAdded(address cdo);
     event TranchesAdded();
@@ -47,11 +49,34 @@ contract TrancheDepositor is AccessControlled {
         uint256 minShares;
     }
 
+    /// @notice Extended deposit params with arbitrary data (e.g. predicate signature for Nest)
+    struct TDepositParamsCommon {
+        // Optional, default 0 = no deadline
+        uint256 swapDeadline;
+        // Optional, default 0 = calculate return based on minimumReturnPercentage
+        uint256 swapAmountOutMinimum;
+        // Optional, default Tranche::asset()
+        address swapTokenOut;
+        // Optional, revert if minted shares < minShares (slippage guard)
+        uint256 minShares;
+        // Arbitrary data passed to the adapter (e.g. abi.encode(predicateMessage))
+        bytes data;
+    }
+
+    struct TAdapterConfig {
+        IAdapter adapter;
+        // The output token the adapter produces
+        address tokenOut;
+        // Minimum return percentage (1000 = 100%)
+        uint24 minimumReturnPercentage;
+    }
+
 
     mapping (address sourceToken => TAutoSwap tokenSwapInfo)              public autoSwaps;
     mapping (address sourceVault => bool enabled)                         public autoWithdrawals;
     mapping (address tranche => mapping(address token => bool enabled))   public tranches;
     mapping (address tranche => mapping(address token => TAutoSwap info)) public trancheAutoSwaps;
+    mapping (address tranche => mapping(address token => TAdapterConfig info)) public trancheAdapterSwaps;
 
     function initialize(
         address owner_,
@@ -111,6 +136,26 @@ contract TrancheDepositor is AccessControlled {
         emit CdoSwapInfoChanged(address(cdo), tokenIn);
     }
 
+    /**
+     * @notice Configure an adapter-based swap for a given CDO and input token
+     * @dev Example: for Nest nALPHA + USDC, use NestDepositAdapter to convert USDC -> nALPHA
+     */
+    function addCdoAdapterSwap (
+        IStrataCDO cdo_,
+        address tokenIn,
+        TAdapterConfig calldata adapterConfig
+    ) external onlyRole(DEPOSITOR_CONFIG_ROLE) {
+        require(address(adapterConfig.adapter) != address(0), "ZeroAddress");
+        require(adapterConfig.tokenOut != address(0), "ZeroAddress");
+        require(900 <= adapterConfig.minimumReturnPercentage && adapterConfig.minimumReturnPercentage <= 1000, "InvalidReturnPercentage");
+
+        address jrt = address(cdo_.jrtVault());
+        address srt = address(cdo_.srtVault());
+        trancheAdapterSwaps[jrt][tokenIn] = adapterConfig;
+        trancheAdapterSwaps[srt][tokenIn] = adapterConfig;
+        emit CdoAdapterSwapChanged(address(cdo_), tokenIn);
+    }
+
    /**
      * @notice Deposits assets into the vault
      * @dev Accepts three types of assets:
@@ -125,6 +170,19 @@ contract TrancheDepositor is AccessControlled {
      */
     function deposit(IMetaVault vault, IERC20 asset, uint256 amount, address receiver, TDepositParams calldata params) external returns (uint256 shares) {
         return _deposit(vault, asset, amount, receiver, params);
+    }
+
+    /**
+     * @notice Deposit with extended params (supports adapter data, e.g. predicate signature)
+     */
+    function deposit(IMetaVault vault, IERC20 asset, uint256 amount, address receiver, TDepositParamsCommon calldata params) external returns (uint256 shares) {
+        TDepositParams memory baseParams = TDepositParams({
+            swapDeadline: params.swapDeadline,
+            swapAmountOutMinimum: params.swapAmountOutMinimum,
+            swapTokenOut: params.swapTokenOut,
+            minShares: params.minShares
+        });
+        return _deposit(vault, asset, amount, receiver, baseParams, params.data);
     }
 
     /**
@@ -162,6 +220,33 @@ contract TrancheDepositor is AccessControlled {
     }
 
     /**
+     * @notice Deposit with permit and extended params (supports adapter data)
+     */
+    function depositWithPermit(
+        IMetaVault vault,
+        IERC20 asset,
+        uint256 amount,
+        address receiver,
+        TDepositParamsCommon calldata params,
+        uint256 deadline,
+        uint8 v, bytes32 r, bytes32 s
+    ) external nonReentrant returns (uint256 shares) {
+        address user = _msgSender();
+        try IERC20Permit(address(asset)).permit(user, address(this), amount, deadline, v, r, s) {}
+        catch {
+            require(IERC20(address(asset)).allowance(user, address(this)) >= amount,"InsufficientAllowance");
+        }
+        SafeERC20.safeTransferFrom(asset, user, address(this), amount);
+        TDepositParams memory baseParams = TDepositParams({
+            swapDeadline: params.swapDeadline,
+            swapAmountOutMinimum: params.swapAmountOutMinimum,
+            swapTokenOut: params.swapTokenOut,
+            minShares: params.minShares
+        });
+        return _deposit(vault, asset, address(this), amount, receiver, baseParams, params.data);
+    }
+
+    /**
      * ============================================
      *              Internal Deposit Flows
      * ============================================
@@ -179,6 +264,19 @@ contract TrancheDepositor is AccessControlled {
         return _deposit(vault, asset, user, amount, receiver, params);
     }
 
+    // Internal helper with adapter data
+    function _deposit(
+        IMetaVault vault,
+        IERC20 asset,
+        uint256 amount,
+        address receiver,
+        TDepositParams memory params,
+        bytes memory adapterData
+    ) internal returns (uint256) {
+        address user = _msgSender();
+        return _deposit(vault, asset, user, amount, receiver, params, adapterData);
+    }
+
     // Core internal deposit method that determines and executes the appropriate deposit flow based on asset type
     function _deposit(
         IMetaVault vault,
@@ -188,11 +286,29 @@ contract TrancheDepositor is AccessControlled {
         address receiver,
         TDepositParams memory params
     ) internal returns (uint256) {
+        return _deposit(vault, asset, from, amount, receiver, params, bytes(""));
+    }
+
+    // Core internal deposit method with adapter data support
+    function _deposit(
+        IMetaVault vault,
+        IERC20 asset,
+        address from,
+        uint256 amount,
+        address receiver,
+        TDepositParams memory params,
+        bytes memory adapterData
+    ) internal returns (uint256) {
         if (tranches[address(vault)][address(asset)] == true) {
             return _deposit_asMetaToken(vault, asset, from, amount, receiver, params.minShares);
         }
         if (autoWithdrawals[address(asset)] == true) {
             return _deposit_viaWithdraw(vault, IERC4626(address(asset)), from, amount, receiver, params);
+        }
+        // Check adapter-based swaps first (takes priority over Uniswap-style swaps)
+        TAdapterConfig memory adapterConfig = trancheAdapterSwaps[address(vault)][address(asset)];
+        if (address(adapterConfig.adapter) != address(0)) {
+            return _deposit_viaAdapter(vault, asset, from, amount, receiver, params, adapterConfig, adapterData);
         }
         TAutoSwap memory tracheSwapInfo = trancheAutoSwaps[address(vault)][address(asset)];
         if (tracheSwapInfo.router != address(0)) {
@@ -314,6 +430,50 @@ contract TrancheDepositor is AccessControlled {
             revert InsufficientOutputAmount(amountReceived, amountOutMin);
         }
         return _deposit(vault, IERC20(tokenOut), address(this), amountReceived, receiver, depositParams);
+    }
+
+    // Internal function to handle deposits via an IAdapter before depositing into the target Vault
+    function _deposit_viaAdapter (
+        IMetaVault vault,
+        IERC20 tokenIn,
+        address from,
+        uint256 amount,
+        address receiver,
+        TDepositParams memory depositParams,
+        TAdapterConfig memory adapterConfig,
+        bytes memory adapterData
+    ) internal returns (uint256) {
+        require(amount > 0, "ZeroDeposit");
+
+        if (from != address(this)) {
+            SafeERC20.safeTransferFrom(tokenIn, from, address(this), amount);
+        }
+
+        // Approve the adapter to pull tokenIn
+        SafeERC20.forceApprove(tokenIn, address(adapterConfig.adapter), amount);
+
+        uint256 amountOutMin = depositParams.swapAmountOutMinimum;
+        if (amountOutMin == 0) {
+            amountOutMin = amount * adapterConfig.minimumReturnPercentage / 1000;
+        }
+
+        uint256 tokenOutBalanceBefore = IERC20(adapterConfig.tokenOut).balanceOf(address(this));
+
+        adapterConfig.adapter.swap(
+            address(tokenIn),
+            adapterConfig.tokenOut,
+            amount,
+            amountOutMin,
+            address(this),
+            adapterData
+        );
+
+        uint256 amountReceived = IERC20(adapterConfig.tokenOut).balanceOf(address(this)) - tokenOutBalanceBefore;
+        if (amountReceived < amountOutMin) {
+            revert InsufficientOutputAmount(amountReceived, amountOutMin);
+        }
+
+        return _deposit(vault, IERC20(adapterConfig.tokenOut), address(this), amountReceived, receiver, depositParams);
     }
 
 }

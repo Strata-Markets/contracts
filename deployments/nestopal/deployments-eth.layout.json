@@ -1,0 +1,969 @@
+[
+  {
+    "id": "NestOpalCDOProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "accounting",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "strategy",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "jrtVault",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 53,
+        "position": 0,
+        "name": "srtVault",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 54,
+        "position": 0,
+        "name": "treasury",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 55,
+        "position": 0,
+        "name": "actionsJrt",
+        "size": 16,
+        "type": "(bool isDepositEnabled, bool isWithdrawEnabled)"
+      },
+      {
+        "slot": 56,
+        "position": 0,
+        "name": "actionsSrt",
+        "size": 16,
+        "type": "(bool isDepositEnabled, bool isWithdrawEnabled)"
+      },
+      {
+        "slot": 57,
+        "position": 0,
+        "name": "jrtShortfallPausePrice",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 58,
+        "position": 0,
+        "name": "exitFeeJrt",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 59,
+        "position": 0,
+        "name": "exitFeeSrt",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 60,
+        "position": 0,
+        "name": "sharesCooldown",
+        "size": 160,
+        "type": "address"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalERC20CooldownProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "activeRequests",
+        "size": null,
+        "type": "mapping(address => mapping(address => (uint64 unlockAt, uint192 amount)[]))"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "cooldownDisabled",
+        "size": null,
+        "type": "mapping(address => bool)"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalUnstakeCooldownProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "implementations",
+        "size": null,
+        "type": "mapping(address => address)"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "activeRequests",
+        "size": null,
+        "type": "mapping(address => mapping(address => (uint64 unlockAt, address proxy)[]))"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "proxiesPool",
+        "size": null,
+        "type": "mapping(address => mapping(address => address[]))"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalSharesCooldownProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "activeRequests",
+        "size": null,
+        "type": "mapping(address => mapping(address => (uint64 unlockAt, uint192 shares, address token, bytes12 metaKey)[]))"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "vaultEarlyExitFeePerDay",
+        "size": null,
+        "type": "mapping(address => uint256)"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "vaultExitBounds",
+        "size": null,
+        "type": "mapping(address => (uint32 p0, uint32 p1, (uint32 feePpm, uint32 sharesLock) r0, (uint32 feePpm, uint32 sharesLock) r1, (uint32 feePpm, uint32 sharesLock) r2))"
+      },
+      {
+        "slot": 53,
+        "position": 0,
+        "name": "requestMeta",
+        "size": null,
+        "type": "mapping(address => mapping(address => mapping(bytes12 => (bytes strategyOptions))))"
+      },
+      {
+        "slot": 54,
+        "position": 0,
+        "name": "_metaKeyNonce",
+        "size": null,
+        "type": "mapping(address => mapping(address => uint96))"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalNestOpalStrategyProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap$",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "cdo",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "migrationBitmap",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "__gap",
+        "size": 12288,
+        "type": "uint256[48]"
+      },
+      {
+        "slot": 100,
+        "position": 0,
+        "name": "erc20Cooldown",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 101,
+        "position": 0,
+        "name": "nOpalCooldownJrt",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 102,
+        "position": 0,
+        "name": "nOpalCooldownSrt",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 103,
+        "position": 0,
+        "name": "aprProvider",
+        "size": 160,
+        "type": "address"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalAprFeedsProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "description",
+        "size": null,
+        "type": "string"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "latestRoundId",
+        "size": 64,
+        "type": "uint64"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "latestRound",
+        "size": 256,
+        "type": "(int64 aprTarget, int64 aprBase, uint64 updatedAt, uint64 answeredInRound)"
+      },
+      {
+        "slot": 53,
+        "position": 0,
+        "name": "rounds",
+        "size": null,
+        "type": "mapping(uint80 => (int64 aprTarget, int64 aprBase, uint64 updatedAt, uint64 answeredInRound))"
+      },
+      {
+        "slot": 54,
+        "position": 0,
+        "name": "roundStaleAfter",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 55,
+        "position": 0,
+        "name": "provider",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 55,
+        "position": 160,
+        "name": "sourcePref",
+        "size": 8,
+        "type": "enum"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalAccountingProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap$",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "cdo",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "migrationBitmap",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "__gap",
+        "size": 12288,
+        "type": "uint256[48]"
+      },
+      {
+        "slot": 100,
+        "position": 0,
+        "name": "aprPairFeed",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 101,
+        "position": 0,
+        "name": "aprTarget",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 102,
+        "position": 0,
+        "name": "aprBase",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 103,
+        "position": 0,
+        "name": "aprSrt",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 104,
+        "position": 0,
+        "name": "indexTimestamp",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 105,
+        "position": 0,
+        "name": "srtTargetIndex",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 106,
+        "position": 0,
+        "name": "reserveBps",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 107,
+        "position": 0,
+        "name": "nav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 108,
+        "position": 0,
+        "name": "jrtBaseNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 109,
+        "position": 0,
+        "name": "srtBaseNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 110,
+        "position": 0,
+        "name": "reserveNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 111,
+        "position": 0,
+        "name": "riskX",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 112,
+        "position": 0,
+        "name": "riskY",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 113,
+        "position": 0,
+        "name": "riskK",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 114,
+        "position": 0,
+        "name": "minimumJrtSrtRatio",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 115,
+        "position": 0,
+        "name": "minimumJrtSrtRatioBuffer",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 116,
+        "position": 0,
+        "name": "feeJrtRetentionBps",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 117,
+        "position": 0,
+        "name": "feeSrtRetentionBps",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 118,
+        "position": 0,
+        "name": "navTargetIndex",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 119,
+        "position": 0,
+        "name": "navTimestamp",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 120,
+        "position": 0,
+        "name": "jrtNavProjected",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 121,
+        "position": 0,
+        "name": "valuationPrice",
+        "size": 128,
+        "type": "uint128"
+      },
+      {
+        "slot": 121,
+        "position": 128,
+        "name": "valuationUpdatedAt",
+        "size": 64,
+        "type": "uint64"
+      },
+      {
+        "slot": 121,
+        "position": 192,
+        "name": "valuationEnteredAt",
+        "size": 64,
+        "type": "uint64"
+      },
+      {
+        "slot": 122,
+        "position": 0,
+        "name": "valuationGracePeriod",
+        "size": 64,
+        "type": "uint64"
+      },
+      {
+        "slot": 123,
+        "position": 0,
+        "name": "srtFundedGrossNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 124,
+        "position": 0,
+        "name": "srtFundNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 125,
+        "position": 0,
+        "name": "feeWatermarkNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 126,
+        "position": 0,
+        "name": "lastReconciliation",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 127,
+        "position": 0,
+        "name": "benchmarkIndex",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 128,
+        "position": 0,
+        "name": "srtNavTime",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 129,
+        "position": 0,
+        "name": "navTime",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 130,
+        "position": 0,
+        "name": "navTimeNet",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 131,
+        "position": 0,
+        "name": "lastAccrual",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 132,
+        "position": 0,
+        "name": "srtPnLProjected",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 133,
+        "position": 0,
+        "name": "srtProjectedPnLTime",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 134,
+        "position": 0,
+        "name": "srtPaidProjected",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 135,
+        "position": 0,
+        "name": "srtPnLBenchmark",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 136,
+        "position": 0,
+        "name": "windowStartSrtNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 137,
+        "position": 0,
+        "name": "windowNetFlows",
+        "size": 256,
+        "type": "int256"
+      },
+      {
+        "slot": 138,
+        "position": 0,
+        "name": "windowEnd",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 139,
+        "position": 0,
+        "name": "floorRate",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 140,
+        "position": 0,
+        "name": "epochStart",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 141,
+        "position": 0,
+        "name": "strategyRate",
+        "size": 256,
+        "type": "uint256"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalJrtProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap$",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "cdo",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "migrationBitmap",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "__gap",
+        "size": 12288,
+        "type": "uint256[48]"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalSrtProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap$",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "cdo",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "migrationBitmap",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "__gap",
+        "size": 12288,
+        "type": "uint256[48]"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalConfigManagerProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "pendingExitFeeChange",
+        "size": 576,
+        "type": "(uint256 feeJrt, uint256 feeSrt, uint64 executeAfter)"
+      },
+      {
+        "slot": 53,
+        "position": 0,
+        "name": "pendingExitModeBoundsJrt",
+        "size": 320,
+        "type": "((uint32 p0, uint32 p1, (uint32 feePpm, uint32 sharesLock) r0, (uint32 feePpm, uint32 sharesLock) r1, (uint32 feePpm, uint32 sharesLock) r2) bounds, uint64 executeAfter)"
+      },
+      {
+        "slot": 55,
+        "position": 0,
+        "name": "pendingExitModeBoundsSrt",
+        "size": 320,
+        "type": "((uint32 p0, uint32 p1, (uint32 feePpm, uint32 sharesLock) r0, (uint32 feePpm, uint32 sharesLock) r1, (uint32 feePpm, uint32 sharesLock) r2) bounds, uint64 executeAfter)"
+      }
+    ]
+  }
+]

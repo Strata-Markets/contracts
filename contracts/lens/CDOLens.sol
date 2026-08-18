@@ -61,7 +61,19 @@ contract CDOLens is OwnableUpgradeable {
     }
 
     function getAPRs (IStrataCDOApi cdo) public view returns (TAPRs memory) {
-        TAPRsBreakdown memory aprs = getAPRsBreakdownInner(cdo);
+        TAPRsBreakdown memory aprs = getAPRsBreakdownInner(cdo, false);
+        return TAPRs({
+            base: aprs.base,
+            target: aprs.target,
+            jrt: aprs.jrt,
+            srt: aprs.srt
+        });
+    }
+
+    /// @notice Returns APRs using either the latest AprFeed round or projected APRs.
+    /// @dev Set `useProjectedApr` to true for markets that support projected APRs.
+    function getAPRs (IStrataCDOApi cdo, bool useProjectedApr) public view returns (TAPRs memory) {
+        TAPRsBreakdown memory aprs = getAPRsBreakdownInner(cdo, useProjectedApr);
         return TAPRs({
             base: aprs.base,
             target: aprs.target,
@@ -71,15 +83,24 @@ contract CDOLens is OwnableUpgradeable {
     }
 
     function getAPRsBreakdown (IStrataCDOApi cdo) external view returns (TAPRsBreakdown memory) {
-        return getAPRsBreakdownInner(cdo);
+        return getAPRsBreakdownInner(cdo, false);
     }
 
-    function getAPRsBreakdownInner (IStrataCDOApi cdo) internal view returns (TAPRsBreakdown memory) {
+    function getAPRsBreakdownInner (IStrataCDOApi cdo, bool useProjectedApr) internal view returns (TAPRsBreakdown memory) {
         IAccountingApi accounting = IAccountingApi(address(cdo.accounting()));
 
-        IAprPairFeed feed = accounting.aprPairFeed();
+        IAprPairFeedApi feed = IAprPairFeedApi(address(accounting.aprPairFeed()));
+        int256 aprBase;
+        int256 aprTarget;
 
-        IAprPairFeed.TRound memory round = feed.latestRoundData();
+        if (useProjectedApr == false) {
+            IAprPairFeed.TRound memory round = feed.latestRoundData();
+            aprBase   = int256(round.aprBase);
+            aprTarget = int256(round.aprTarget);
+        } else {
+            IStrategyAprPairProviderApi provider = feed.provider();
+            (aprTarget, aprBase, ) = provider.getAprPairProjected();
+        }
 
         uint256 nav = cdo.totalStrategyAssets();
         (uint256 jrtNav, uint256 srtNav, ) = accounting.totalAssets(nav);
@@ -92,8 +113,6 @@ contract CDOLens is OwnableUpgradeable {
         UD60x18 tvlRatioJrt = UD60x18.wrap(jrtNav == 0 ? 1 : (jrtNav * 1e18 / (srtNav + jrtNav)));
         UD60x18 risk = calculateRiskPremiumInner(riskX, riskY, riskK, tvlRatioSrt);
 
-        int256 aprBase   = int256(round.aprBase);
-        int256 aprTarget = int256(round.aprTarget);
 
         UD60x18 aprSrt1 = mul(UD60x18.wrap(uint256(aprBase)), UD60x18.wrap(1e18) - risk);
         int256 aprSrt = int256(UD60x18Ext.max(UD60x18.wrap(uint256(aprTarget)), aprSrt1).unwrap());
@@ -109,8 +128,8 @@ contract CDOLens is OwnableUpgradeable {
         int256 aprJrt = aprBase + aprJrtSpread;
 
         return TAPRsBreakdown({
-            base: int64(round.aprBase),
-            target: int64(round.aprTarget),
+            base: int64(aprBase),
+            target: int64(aprTarget),
             jrt: int64(aprJrt),
             srt: int64(aprSrt),
             tvlRatioSrt: tvlRatioSrt.unwrap(),
@@ -262,6 +281,17 @@ interface IAccountingApi is IAccounting {
 }
 interface IStrataCDOApi is IStrataCDO {
 
+}
+
+interface IStrategyAprPairProviderApi {
+    function getAprPairProjected()
+        external
+        view
+        returns (int64 aprTarget, int64 aprBase, uint64 timestamp);
+}
+
+interface IAprPairFeedApi is IAprPairFeed {
+    function provider() external view returns (IStrategyAprPairProviderApi);
 }
 
 interface IChainlinkPriceFeed {
