@@ -83,6 +83,7 @@ abstract contract PendingExitModeTypes {
 contract TwoStepConfigManager is AccessControlled, PendingFeesTypes, PendingExitModeTypes{
 
     uint256 public constant MIN_DELAY = 1 days;
+    uint256 public constant MAX_DELAY = 30 days;
     IStrataCDOFull public immutable cdo;
 
     TPendingExitFeeChange public pendingExitFeeChange;
@@ -126,7 +127,7 @@ contract TwoStepConfigManager is AccessControlled, PendingFeesTypes, PendingExit
             return;
         }
 
-        require(MIN_DELAY <= delay, "InvalidDelay");
+        require(MIN_DELAY <= delay && delay <= MAX_DELAY, "InvalidDelay");
 
         uint64 executeAfter = uint64(block.timestamp + delay);
         pendingExitFeeChange = TPendingExitFeeChange({
@@ -181,7 +182,7 @@ contract TwoStepConfigManager is AccessControlled, PendingFeesTypes, PendingExit
 
         validateBounds(boundsJrt);
         validateBounds(boundsSrt);
-        require(delay >= MIN_DELAY, "InvalidDelay");
+        require(delay >= MIN_DELAY && delay <= MAX_DELAY, "InvalidDelay");
 
         uint64 executeAfter = uint64(block.timestamp + delay);
         pendingExitModeBoundsJrt = TPendingExitModeBoundsChange({
