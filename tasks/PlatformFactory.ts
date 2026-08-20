@@ -45,8 +45,7 @@ export namespace PlatformFactory {
         const client = params?.client ?? await Web3ClientFactory.getAsync(platform);
 
         const accounts = await getAccounts(client, params.accounts ?? params.cdo);
-
-        if (accounts.safe?.admin?.type === 'safe') {
+        if (accounts.safe?.admin?.type === 'safe' || client.platform === 'hardhat') {
             TxWriter.defaultOptions({
                 safeTransport: new InMemoryServiceTransport(client, accounts.deployer as EoAccount)
             });
@@ -81,8 +80,8 @@ export namespace PlatformFactory {
             deployer: `${network}/deployer`,
             timelockAdmin: `timelock/${network}/strata`,
             timelockConfig: `timelock/${network}/config`,
-            safeAdmin: `safe/${network}/strata`,
-            safeOperator: `safe/${network}/owner`,
+            safeAdmin: `safe/${network}/admin`,
+            safeOperator: `safe/${network}/operator`,
             safeWorker: `safe/${network}/worker`,
         };
         if (typeof group === 'string') {
@@ -110,32 +109,32 @@ export namespace PlatformFactory {
         } else if (platform === 'hardhat' && client.forked?.platform) {
             // Impersonate safe and timelock accounts in forked networks
             deployer = {
-                name: 'impersonated',
+                name: deployer.name,
                 type: 'impersonated',
                 address: deployer.address,
             };
             safeAdmin = {
-                name: 'impersonated',
+                name: safeAdmin.name,
                 type: 'impersonated',
                 address: safeAdmin.address,
             };
             safeOperator = {
-                name: 'impersonated',
+                name: safeOperator.name,
                 type: 'impersonated',
                 address: safeOperator.address,
             };
             safeWorker = {
-                name: 'impersonated',
+                name: safeWorker.name,
                 type: 'impersonated',
                 address: safeWorker.address,
             };
             timelockAdmin = {
-                name: 'impersonated',
+                name: timelockAdmin.name,
                 type: 'impersonated',
                 address: timelockAdmin.address,
             };
             timelockConfig = {
-                name: 'impersonated',
+                name: timelockConfig.name,
                 type: 'impersonated',
                 address: timelockConfig.address,
             };
@@ -178,14 +177,17 @@ export namespace PlatformFactory {
 
 
     export async function getTranches() {
-        await ConfigLoader.fetch();
+        const config = await ConfigLoader.fetch();
+        const cdoArr = config.$get('cdo')?.split(',') ?? null;
+        const platform = config.$get('chain') ?? 'eth';
         const ignore = ['spkMhyperIso', 'mkralpha', 'mrox'];
         return await alot
             .fromObject(Tranches)
             .filter(x => ignore.includes(x.key) === false)
+            .filter(x => cdoArr == null ? true : cdoArr.includes(x.key))
             .mapAsync(async x => {
                 const factory = await PlatformFactory.init({
-                    platform: 'eth',
+                    platform,
                     cdo: x.key as 'ethena',
                     deployments: 'throw',
                 });
@@ -194,15 +196,7 @@ export namespace PlatformFactory {
             .toArrayAsync()
     }
 
-    export async function getAccountByRole(ds: DeploymentsBase, role: TEth.Hex) {
-        const accounts = [
-            ds.accounts.safe.admin,
-            ds.accounts.timelock.config,
-            ds.accounts.timelock.admin,
-            ds.accounts.safe.operator,
-            ds.accounts.deployer,
-        ] as TEth.IAccount[];
-        const acm = await ds.get(AccessControlManager);
-        return alot(accounts).findAsync(account => acm.hasRole(role, account.address));
+    export async function getAccountByRole(ds: DeploymentsBase, roleOrName: TEth.Hex | keyof typeof ds.ROLES) {
+        return ds.getAccountByRole(roleOrName);
     }
 }

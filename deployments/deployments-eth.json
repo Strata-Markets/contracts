@@ -205,58 +205,6 @@
     "timestamp": 1770313172
   },
   {
-    "id": "SNUSDSwapAdapter",
-    "name": "SNUSDSwapAdapter",
-    "main": "./0xc/hardhat/sNUSDSwapAdapter/sNUSDSwapAdapter.ts",
-    "bytecodeHash": "0x94e2532f3a3ccd8e01d77c31e3e3d9e996d7b9ec8b5631d2b4a6fa662259032c",
-    "address": "0xbeBbeb5Ec0Fa689dEF85423D6c161B30BF3D6303",
-    "block": 24392186,
-    "tx": "0x0e532db6a31ca99f6d0e9508367571e1f1b6762bd32e185a1dda95fafbb7056b",
-    "gas": "364374",
-    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
-    "timestamp": 1770313310,
-    "verified": "2026-02-05T17:45:02.283Z"
-  },
-  {
-    "id": "NeutrlConfigManager",
-    "name": "TwoStepConfigManager",
-    "main": "./0xc/hardhat/TwoStepConfigManager/TwoStepConfigManager.ts",
-    "bytecodeHash": "0x7bbbbf987a0ed80dcc585385e2c269b61b794070de811fb605b7fd512c689686",
-    "address": "0x60DAe21944e6c1F4a185d33a217B05bFD647Eb79",
-    "block": 24392190,
-    "tx": "0x2883c29eb8253d4225f6beb381a5d17ee8525a1e090eb4308dbf0404e7a046ac",
-    "gas": "1935027",
-    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
-    "timestamp": 1770313358,
-    "implementation": "0x452F0E1BD7310e3cFb32383d7c200308E551FE8A",
-    "verified": "2026-02-05T17:45:17.925Z"
-  },
-  {
-    "id": "NeutrlConfigManagerProxy",
-    "name": "TransparentUpgradeableProxy",
-    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
-    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
-    "address": "0x60DAe21944e6c1F4a185d33a217B05bFD647Eb79",
-    "block": 24392191,
-    "tx": "0x8d789312562a59e8c0ef4c1365792784ae3cdd705a92d5c282e9b1d9c01d2ae9",
-    "gas": "670259",
-    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
-    "timestamp": 1770313369,
-    "verified": "2026-02-05T17:42:55.446Z",
-    "proxyFor": "0x452F0E1BD7310e3cFb32383d7c200308E551FE8A"
-  },
-  {
-    "id": "NeutrlConfigManagerProxyAdmin",
-    "name": "ProxyAdmin",
-    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
-    "address": "0x61723F6bBFf3f74f2862028bb2353e76b6Fb8e99",
-    "block": 24392191,
-    "tx": "0x8d789312562a59e8c0ef4c1365792784ae3cdd705a92d5c282e9b1d9c01d2ae9",
-    "gas": "670259",
-    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
-    "timestamp": 1770313375
-  },
-  {
     "id": "TrancheDepositorV4",
     "name": "TrancheDepositor",
     "main": "./0xc/hardhat/TrancheDepositor/TrancheDepositor.ts",

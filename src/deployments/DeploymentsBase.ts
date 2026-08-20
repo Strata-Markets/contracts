@@ -41,6 +41,8 @@ import { DiscreteAccounting } from '@0xc/hardhat/DiscreteAccounting/DiscreteAcco
 import { DYSAccounting } from '@0xc/hardhat/DYSAccounting/DYSAccounting';
 import { ERC20 } from 'dequanto/prebuilt/openzeppelin/ERC20';
 import { KyberSwapAdapter } from '@0xc/hardhat/KyberSwapAdapter/KyberSwapAdapter';
+import { ChainAccountService } from 'dequanto/ChainAccountService';
+import { $is } from 'dequanto/utils/$is';
 
 
 export interface ICdoDeploymentsBase {
@@ -1030,5 +1032,42 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
     public async ensureKyberSwapAdapter () {
         let { contract: swapper } = await this.common.ensure(KyberSwapAdapter);
         return swapper;
+    }
+
+    public async getAccount(mix: TEth.Address | string): Promise<TEth.IAccount> {
+        let arr = [
+            this.accounts.deployer,
+            ...Object.values(this.accounts.safe),
+            ...Object.values(this.accounts.timelock),
+        ];
+
+        let account = arr.find(x => $address.eq(x.address, mix) || x.name === mix);
+        if (account) {
+            if (this.client.platform === 'hardhat' && /(safe|timelock)/.test(account.name)) {
+                // Add the :hh suffix to prevent dequanto from detecting the accounts as Safe or Timelock agents.
+                return {
+                    ...account,
+                    name: account.name.replace(/(safe|timelock)/, '$1:hh')
+                };
+            }
+            return account;
+        }
+
+        return ChainAccountService.get(mix);
+    }
+
+    public async getAccountByRole(roleOrName: TEth.Hex | keyof typeof this.ROLES): Promise<TEth.IAccount> {
+        const role = roleOrName === '0x' || $is.Hex(roleOrName)
+            ? roleOrName
+            : $contract.keccak256(roleOrName, 'hex');
+        const arr = [
+            this.accounts.safe.admin,
+            this.accounts.timelock.config,
+            this.accounts.timelock.admin,
+            this.accounts.safe.operator,
+            this.accounts.deployer,
+        ] as TEth.IAccount[];
+        const acm = await this.get(AccessControlManager);
+        return alot(arr).findAsync(account => acm.hasRole(role, account.address));
     }
 }
