@@ -165,3 +165,6 @@ accounts:
 
   - name: oft-deployer
     address: '0x99394602661317e9806745477B7da94bDB4f6099'
+
+  - name: observer
+    address: '0x6970791F36128c69574046c4135dc7e3cB38C52C'

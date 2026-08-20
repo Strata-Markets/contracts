@@ -43,6 +43,7 @@ import { ERC20 } from 'dequanto/prebuilt/openzeppelin/ERC20';
 import { KyberSwapAdapter } from '@0xc/hardhat/KyberSwapAdapter/KyberSwapAdapter';
 import { ChainAccountService } from 'dequanto/ChainAccountService';
 import { $is } from 'dequanto/utils/$is';
+import { AccountablePushOracle } from '@0xc/hardhat/AccountablePushOracle/AccountablePushOracle';
 
 
 export interface ICdoDeploymentsBase {
@@ -281,13 +282,17 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         return acm;
     }
 
-    async ensureRole(role: TEth.Hex, account: TEth.Address) {
+    async ensureRole(roleOrName: TEth.Hex | keyof typeof this.ROLES, account: TEth.Address) {
+         const role = roleOrName === '0x' || $is.Hex(roleOrName)
+            ? roleOrName
+            : this.ROLES[roleOrName];
         $require.Hex(role, 'Role is undefined');
         $require.AddressNotEmpty(account, 'Account is empty');
         let acm = await this.ensureACM();
+        let acmAdmin = await this.getAccountByRole('0x');
         let has = await acm.hasRole(role, account);
         if (has === false) {
-            await acm.$receipt().grantRole(this.owner, role, account);
+            await acm.$receipt().grantRole(acmAdmin, role, account);
         }
     }
     async ensureRoles(roles: Record<string, Record<TEth.Address, boolean>>) {
@@ -819,6 +824,50 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         return depositor;
     }
 
+    async ensureValuationOracles() {
+        const { valuationKeeper, valuationKeeperOptions } = this.cdoInfo.ContractVersions;
+        if (valuationKeeper == null) {
+            return;
+        }
+
+        let { cdo, accounting } = await this.ensureCDO();
+        let gracePeriod = $date.parseTimespan(valuationKeeperOptions?.gracePeriod ?? '0s', { get: 's' });
+        $require.True(this.client.platform === 'hardhat' || gracePeriod > 0, `GracePeriod MUST be set on Live`);
+
+        await this.ds.configure(accounting, {
+            title: `Update GracePeriod`,
+            value: gracePeriod,
+            current: accounting.valuationGracePeriod(),
+            updater: async (accounting, value) => {
+                await accounting.$receipt().setValuationGracePeriod(this.owner, value)
+            }
+        });
+
+        let observer = await this.getAccount('observer');
+        let { contract: accountable } = await this.common.ensure(AccountablePushOracle, {
+            arguments: [
+                this.owner.address,
+                observer.address,
+            ]
+        });
+        await this.ensureRole('PAUSER_ROLE', accountable.address);
+
+        if (valuationKeeper === 'Accountable') {
+            await this.ds.configure(cdo, {
+                title: `Update the ValuationKeeper`,
+                value: accountable.address,
+                current: cdo.valuationKeeper(),
+                updater: async (cdo, value) => {
+                    await cdo.$receipt().setValuationKeeper(this.owner, value);
+                },
+            });
+        }
+
+        return {
+            accountable
+        };
+    }
+
 
 
     public isTestnet() {
@@ -1015,6 +1064,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             configManager,
         };
 
+        await this.ensureValuationOracles();
         await this.configure(contractsAll);
         return contractsAll;
     }
@@ -1037,11 +1087,11 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
     public async getAccount(mix: TEth.Address | string): Promise<TEth.IAccount> {
         let arr = [
             this.accounts.deployer,
+            this.accounts.observer,
             ...Object.values(this.accounts.safe),
             ...Object.values(this.accounts.timelock),
         ];
-
-        let account = arr.find(x => $address.eq(x.address, mix) || x.name === mix);
+        let account = arr.find(x => $address.eq(x?.address, mix) || x?.name === mix);
         if (account) {
             if (this.client.platform === 'hardhat' && /(safe|timelock)/.test(account.name)) {
                 // Add the :hh suffix to prevent dequanto from detecting the accounts as Safe or Timelock agents.
@@ -1052,11 +1102,14 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             }
             return account;
         }
-
-        return ChainAccountService.get(mix);
+        return $require.notNull(await ChainAccountService.get(mix), `Account ${mix} not found`);
     }
 
     public async getAccountByRole(roleOrName: TEth.Hex | keyof typeof this.ROLES): Promise<TEth.IAccount> {
+        if (this.client.network === 'hardhat') {
+            // In the raw Hardhat network (not forked) the acm admin is the deployer
+            return this.owner;
+        }
         const role = roleOrName === '0x' || $is.Hex(roleOrName)
             ? roleOrName
             : $contract.keccak256(roleOrName, 'hex');

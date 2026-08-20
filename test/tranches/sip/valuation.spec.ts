@@ -11,12 +11,17 @@ import { $ethena } from '../utils/$ethena';
 import { DYSAccounting } from '@0xc/hardhat/DYSAccounting/DYSAccounting';
 import { TEth } from 'dequanto/models/TEth';
 import { $accounting } from '../utils/$accounting';
-import { $erc20 } from '../utils/$erc20';
+import { $sig } from 'dequanto/utils/$sig';
+import { $abiCoder } from 'dequanto/abi/$abiCoder';
+import { $buffer } from 'dequanto/utils/$buffer';
 
 
 const test = await $hh.deploy('ethena', {
     cdoInfo: {
-        ContractVersions: { accounting: 'dys' }
+        ContractVersions: {
+            accounting: 'dys',
+            valuationKeeper: 'Accountable',
+        }
     },
 });
 
@@ -447,7 +452,38 @@ UTest.create({
         await t.deposit(alice, 0, 1000);
         await t.compareNavs(100, 1200);
         await t.withdraw(alice, 0, 1150);
-    }
+    },
+
+    async 'uses AccountablePushOracle' () {
+        await t.deposit(alice, 200, 100);
+
+        const { accountable } = await test.factory.ensureValuationOracles();
+
+        const totalSupply = BigInt(1000e18);
+        const totalReserveUsd = BigInt(500e18);
+        const observer = await test.factory.getAccount('observer') as TEth.EoAccount;
+
+        const payload = $abiCoder.encode(
+            ['uint256', 'address', 'uint256', 'uint256'],
+            [await accountable.nonce(), cdo.address, totalSupply, totalReserveUsd]
+        );
+        const sig = await $sig.signMessage($buffer.fromHex(payload), observer);
+
+        await accountable.$receipt().pushProofOfReserve(
+            test.factory.owner,
+            cdo.address,
+            totalSupply,
+            totalReserveUsd,
+            sig.signature
+        );
+
+        await $test.compare(.5, await accounting.valuationPrice());
+
+        await cdo.$receipt().setActionStates(deployer, srtVault.address, true, true);
+        await t.deposit(alice, 0, 1000);
+        await t.compareNavs(100, 1200);
+        await t.withdraw(alice, 0, 1150);
+    },
 })
 
 namespace t {
