@@ -46,7 +46,7 @@
     "atma-loader-ts": "latest",
     "atma-utest": "^0.21.36",
     "class-json": "latest",
-    "dequanto": "^0.2.43",
+    "dequanto": "^0.2.44",
     "dotenv": "^16.4.7",
     "memd": "latest",
     "tsconfig-paths": "^4.2.0"
