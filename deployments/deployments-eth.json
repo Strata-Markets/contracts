@@ -154,7 +154,6 @@
     "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
     "timestamp": 1762180314
   },
-
   {
     "id": "TrancheDepositorV3",
     "name": "TrancheDepositor",
@@ -265,5 +264,18 @@
     "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
     "timestamp": 1786525729,
     "verified": "2026-08-12T09:09:18.564Z"
+  },
+  {
+    "id": "AccountablePushOracle",
+    "name": "AccountablePushOracle",
+    "main": "./0xc/hardhat/AccountablePushOracle/AccountablePushOracle.ts",
+    "bytecodeHash": "0xffcbd25e2c556be2f5838643e6c268e8aea845e0755b2593715aa8f42832661d",
+    "address": "0x433483570B69691a9e1e4Ef9791a4ca92DD8c1FC",
+    "block": 25801851,
+    "tx": "0xac7d8403555052f57eb4584879f0a416dd4c72c3eb68182a837501c3fe1c3b59",
+    "gas": 767068,
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1787295349,
+    "verified": "2026-08-21T06:59:23.528Z"
   }
 ]

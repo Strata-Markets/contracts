@@ -44,6 +44,8 @@ import { KyberSwapAdapter } from '@0xc/hardhat/KyberSwapAdapter/KyberSwapAdapter
 import { ChainAccountService } from 'dequanto/ChainAccountService';
 import { $is } from 'dequanto/utils/$is';
 import { AccountablePushOracle } from '@0xc/hardhat/AccountablePushOracle/AccountablePushOracle';
+import { $promise } from 'dequanto/utils/$promise';
+import { $account } from 'dequanto/utils/$account';
 
 
 export interface ICdoDeploymentsBase {
@@ -118,12 +120,14 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             whenBytecodeChanged: params.deployments ?? (this.isTestnet() ? null : 'throw'),
             fork: params.client.forked?.platform,
             whenUpgradeRequired: params.whenUpgradeRequired,
+            owner: this.owner,
         });
         this.common = new Deployments(params.client, params.deployer, {
             directory: `./deployments/${params.isTest ? 'test/' : ''}`,
             whenBytecodeChanged: params.deployments ?? (this.isTestnet() ? null : 'throw'),
             fork: params.client.forked?.platform,
             whenUpgradeRequired: params.whenUpgradeRequired,
+            owner: this.owner,
         });
 
         let info = JSON.parse(JSON.stringify(Tranches[params.cdo])) as ICDO;
@@ -837,7 +841,10 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         await this.ds.configure(accounting, {
             title: `Update GracePeriod`,
             value: gracePeriod,
-            current: accounting.valuationGracePeriod(),
+            current: async () => {
+                const { result, error } = await $promise.caught(accounting.valuationGracePeriod());
+                return error == null ? result : 0;
+            },
             updater: async (accounting, value) => {
                 await accounting.$receipt().setValuationGracePeriod(this.owner, value)
             }
@@ -856,7 +863,10 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             await this.ds.configure(cdo, {
                 title: `Update the ValuationKeeper`,
                 value: accountable.address,
-                current: cdo.valuationKeeper(),
+                current: async () => {
+                    const { result, error } = await $promise.caught(cdo.valuationKeeper());
+                    return error == null ? result : $address.ZERO;
+                },
                 updater: async (cdo, value) => {
                     await cdo.$receipt().setValuationKeeper(this.owner, value);
                 },

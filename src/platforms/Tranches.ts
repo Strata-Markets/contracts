@@ -239,7 +239,11 @@ export const Tranches: Record<TCDOKey, ICDO> = {
         },
         ContractVersions: {
             accounting: 'continuous',
+            depositor: 'V3',
             valuationKeeper: 'Accountable',
+            valuationKeeperOptions: {
+                gracePeriod: '24h'
+            },
         },
         TestHelper: NeutrlTestHelper,
     },
