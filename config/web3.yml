@@ -69,34 +69,30 @@ accounts:
     operator: 'eth/deployer'
     owners:
       - 'eth/deployer'
-      - 'eth/strata2'
 
-  - name: safe/monad/strata
+  - name: safe/monad/admin
     type: safe
     address: '0xA27cA9292268ee0f0258B749f1D5740c9Bb68B50'
     platform: 'monad'
     operator: 'eth/deployer'
     owners:
       - 'eth/deployer'
-      - 'eth/strata2'
 
-  - name: safe/plasma/strata
+  - name: safe/plasma/admin
     type: safe
     address: '0xA27cA9292268ee0f0258B749f1D5740c9Bb68B50'
     platform: 'plasma'
     operator: 'eth/deployer'
     owners:
       - 'eth/deployer'
-      - 'eth/strata2'
 
-  - name: safe/mantle/strata
+  - name: safe/mantle/admin
     type: safe
     address: '0xA27cA9292268ee0f0258B749f1D5740c9Bb68B50'
     platform: 'mantle'
     operator: 'eth/deployer'
     owners:
       - 'eth/deployer'
-      - 'eth/strata2'
 
   - name: safe/eth/worker
     type: safe
@@ -165,3 +161,6 @@ accounts:
 
   - name: oft-deployer
     address: '0x99394602661317e9806745477B7da94bDB4f6099'
+
+  - name: observer
+    address: '0x6970791F36128c69574046c4135dc7e3cB38C52C'

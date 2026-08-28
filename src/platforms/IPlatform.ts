@@ -70,7 +70,8 @@ export interface IPlatform {
 }
 
 export interface IPlatformAccounts {
-    deployer: TEth.IAccount;
+    deployer: TEth.EoAccount;
+    observer: TEth.EoAccount;
     safe: {
         admin: TEth.IAccount;
         operator: TEth.IAccount;

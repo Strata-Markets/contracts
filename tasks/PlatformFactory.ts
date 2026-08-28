@@ -45,11 +45,11 @@ export namespace PlatformFactory {
         const client = params?.client ?? await Web3ClientFactory.getAsync(platform);
 
         const accounts = await getAccounts(client, params.accounts ?? params.cdo);
-        if (accounts.safe?.admin?.type === 'safe' || client.platform === 'hardhat') {
-            TxWriter.defaultOptions({
-                safeTransport: new InMemoryServiceTransport(client, accounts.deployer as EoAccount)
-            });
-        }
+        // if (accounts.safe?.admin?.type === 'safe' || client.platform === 'hardhat') {
+        //     TxWriter.defaultOptions({
+        //         safeTransport: new InMemoryServiceTransport(client, accounts.deployer as EoAccount)
+        //     });
+        // }
 
         const CtorDeployments = DeploymentsTypes.Tranches[params.cdo];
 
@@ -83,6 +83,7 @@ export namespace PlatformFactory {
             safeAdmin: `safe/${network}/admin`,
             safeOperator: `safe/${network}/operator`,
             safeWorker: `safe/${network}/worker`,
+            observer: `observer`,
         };
         if (typeof group === 'string') {
             accounts = Tranches[group]?.accounts?.[network] ?? accounts;
@@ -99,13 +100,34 @@ export namespace PlatformFactory {
         let safeAdmin = await ChainAccountService.get(accounts.safeAdmin);
         let safeOperator = await ChainAccountService.get(accounts.safeOperator);
         let safeWorker = await ChainAccountService.get(accounts.safeWorker);
+        let observer = await ChainAccountService.get('observer');
 
         if (network === 'hardhat' || (platform === 'hardhat' && group === 'deployer')) {
-            deployer = hh.deployer(0);
-            timelockAdmin = deployer;
-            timelockConfig = deployer;
-            safeAdmin = deployer;
-            safeOperator = deployer;
+            deployer = {
+                ...hh.deployer(0),
+                type: 'eoa',
+                name: accounts.deployer,
+            };
+            observer = {
+                ...deployer,
+                name: accounts.observer
+            };
+            timelockAdmin = {
+                ...deployer,
+                name: accounts.timelockAdmin
+            };
+            timelockConfig = {
+                ...deployer,
+                name: accounts.timelockConfig
+            };
+            safeAdmin = {
+                ...deployer,
+                name: accounts.safeAdmin
+            };
+            safeOperator = {
+                ...deployer,
+                name: accounts.safeOperator
+            };
         } else if (platform === 'hardhat' && client.forked?.platform) {
             // Impersonate safe and timelock accounts in forked networks
             deployer = {
@@ -163,6 +185,7 @@ export namespace PlatformFactory {
 
         return {
             deployer,
+            observer,
             safe: {
                 admin: safeAdmin,
                 operator: safeOperator,

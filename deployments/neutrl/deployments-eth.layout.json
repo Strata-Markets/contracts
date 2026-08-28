@@ -1,5 +1,5 @@
 [
-     {
+  {
     "id": "NeutrlCDOProxy",
     "slots": [
       {
@@ -19,9 +19,16 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
@@ -122,9 +129,16 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
@@ -162,9 +176,16 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
@@ -209,16 +230,23 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
         "position": 0,
         "name": "activeRequests",
         "size": null,
-        "type": "mapping(address => mapping(address => (uint64 unlockAt, uint192 shares, address token)[]))"
+        "type": "mapping(address => mapping(address => (uint64 unlockAt, uint192 shares, address token, bytes12 metaKey)[]))"
       },
       {
         "slot": 51,
@@ -233,6 +261,20 @@
         "name": "vaultExitBounds",
         "size": null,
         "type": "mapping(address => (uint32 p0, uint32 p1, (uint32 feePpm, uint32 sharesLock) r0, (uint32 feePpm, uint32 sharesLock) r1, (uint32 feePpm, uint32 sharesLock) r2))"
+      },
+      {
+        "slot": 53,
+        "position": 0,
+        "name": "requestMeta",
+        "size": null,
+        "type": "mapping(address => mapping(address => mapping(bytes12 => (bytes strategyOptions))))"
+      },
+      {
+        "slot": 54,
+        "position": 0,
+        "name": "_metaKeyNonce",
+        "size": null,
+        "type": "mapping(address => mapping(address => uint96))"
       }
     ]
   },
@@ -296,9 +338,16 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
@@ -371,9 +420,16 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap$",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
@@ -385,9 +441,16 @@
       {
         "slot": 51,
         "position": 0,
+        "name": "migrationBitmap",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 52,
+        "position": 0,
         "name": "__gap",
-        "size": 12544,
-        "type": "uint256[49]"
+        "size": 12288,
+        "type": "uint256[48]"
       },
       {
         "slot": 100,
@@ -448,14 +511,14 @@
       {
         "slot": 108,
         "position": 0,
-        "name": "jrtNav",
+        "name": "jrtBaseNav",
         "size": 256,
         "type": "uint256"
       },
       {
         "slot": 109,
         "position": 0,
-        "name": "srtNav",
+        "name": "srtBaseNav",
         "size": 256,
         "type": "uint256"
       },
@@ -514,6 +577,76 @@
         "name": "feeSrtRetentionBps",
         "size": 256,
         "type": "uint256"
+      },
+      {
+        "slot": 118,
+        "position": 0,
+        "name": "navTargetIndex",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 119,
+        "position": 0,
+        "name": "navTimestamp",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 120,
+        "position": 0,
+        "name": "jrtNavProjected",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 121,
+        "position": 0,
+        "name": "valuationPrice",
+        "size": 128,
+        "type": "uint128"
+      },
+      {
+        "slot": 121,
+        "position": 128,
+        "name": "valuationUpdatedAt",
+        "size": 64,
+        "type": "uint64"
+      },
+      {
+        "slot": 121,
+        "position": 192,
+        "name": "valuationEnteredAt",
+        "size": 64,
+        "type": "uint64"
+      },
+      {
+        "slot": 122,
+        "position": 0,
+        "name": "valuationGracePeriod",
+        "size": 64,
+        "type": "uint64"
+      },
+      {
+        "slot": 123,
+        "position": 0,
+        "name": "srtFundedGrossNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 124,
+        "position": 0,
+        "name": "srtFundNav",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 125,
+        "position": 0,
+        "name": "feeWatermarkNav",
+        "size": 256,
+        "type": "uint256"
       }
     ]
   },
@@ -537,9 +670,16 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap$",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
@@ -551,9 +691,16 @@
       {
         "slot": 51,
         "position": 0,
+        "name": "migrationBitmap",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 52,
+        "position": 0,
         "name": "__gap",
-        "size": 12544,
-        "type": "uint256[49]"
+        "size": 12288,
+        "type": "uint256[48]"
       }
     ]
   },
@@ -577,9 +724,16 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap$",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
@@ -591,9 +745,16 @@
       {
         "slot": 51,
         "position": 0,
+        "name": "migrationBitmap",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 52,
+        "position": 0,
         "name": "__gap",
-        "size": 12544,
-        "type": "uint256[49]"
+        "size": 12288,
+        "type": "uint256[48]"
       }
     ]
   },
@@ -685,9 +846,16 @@
       {
         "slot": 2,
         "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
         "name": "__gap",
-        "size": 12288,
-        "type": "uint256[48]"
+        "size": 12032,
+        "type": "uint256[47]"
       },
       {
         "slot": 50,
@@ -709,6 +877,88 @@
         "name": "pendingExitModeBoundsSrt",
         "size": 320,
         "type": "((uint32 p0, uint32 p1, (uint32 feePpm, uint32 sharesLock) r0, (uint32 feePpm, uint32 sharesLock) r1, (uint32 feePpm, uint32 sharesLock) r2) bounds, uint64 executeAfter)"
+      }
+    ]
+  },
+  {
+    "id": "NeutrlSNUSDStrategyProxy",
+    "slots": [
+      {
+        "slot": 0,
+        "position": 0,
+        "name": "acm",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 1,
+        "position": 0,
+        "name": "twoStepConfigManager",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 2,
+        "position": 0,
+        "name": "valuationKeeper",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 3,
+        "position": 0,
+        "name": "__gap$",
+        "size": 12032,
+        "type": "uint256[47]"
+      },
+      {
+        "slot": 50,
+        "position": 0,
+        "name": "cdo",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 51,
+        "position": 0,
+        "name": "migrationBitmap",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 52,
+        "position": 0,
+        "name": "__gap",
+        "size": 12288,
+        "type": "uint256[48]"
+      },
+      {
+        "slot": 100,
+        "position": 0,
+        "name": "erc20Cooldown",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 101,
+        "position": 0,
+        "name": "unstakeCooldown",
+        "size": 160,
+        "type": "address"
+      },
+      {
+        "slot": 102,
+        "position": 0,
+        "name": "sNUSDCooldownJrt",
+        "size": 256,
+        "type": "uint256"
+      },
+      {
+        "slot": 103,
+        "position": 0,
+        "name": "sNUSDCooldownSrt",
+        "size": 256,
+        "type": "uint256"
       }
     ]
   }

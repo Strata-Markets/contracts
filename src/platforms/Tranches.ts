@@ -103,6 +103,13 @@ export interface ICDO {
 
         // TrancheDepositor Version
         depositor?: 'V3' | 'V4'
+
+        valuationKeeper?: 'Accountable'
+        valuationKeeperOptions?: {
+            // timespan, e.g.: 24h
+            gracePeriod?: string
+            [key: string]: any
+        }
     };
 
     // Contracts prefixes (can be overridden for testing)
@@ -232,6 +239,11 @@ export const Tranches: Record<TCDOKey, ICDO> = {
         },
         ContractVersions: {
             accounting: 'continuous',
+            depositor: 'V3',
+            valuationKeeper: 'Accountable',
+            valuationKeeperOptions: {
+                gracePeriod: '24h'
+            },
         },
         TestHelper: NeutrlTestHelper,
     },
