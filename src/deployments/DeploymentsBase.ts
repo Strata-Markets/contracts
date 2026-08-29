@@ -47,6 +47,7 @@ import { AccountablePushOracle } from '@0xc/hardhat/AccountablePushOracle/Accoun
 import { $promise } from 'dequanto/utils/$promise';
 import { $account } from 'dequanto/utils/$account';
 import { Ownable } from 'dequanto/prebuilt/openzeppelin/Ownable';
+import { RiskPremiumSigmoid } from '@0xc/hardhat/RiskPremiumSigmoid/RiskPremiumSigmoid';
 
 
 export interface ICdoDeploymentsBase {
@@ -939,6 +940,30 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             return null;
         }
         const { accounting } = contracts;
+        if (risk.model?.type === 'sigmoid') {
+            const {min, max, k, sOptimal } = risk.model;
+            const id = [min, max, k, sOptimal].join('-')
+            const model = await this.common.ensureContract(RiskPremiumSigmoid, {
+                id: `RiskPremiumSigmoid-${id}`,
+                arguments: [
+                    $bigint.toWei(min),
+                    $bigint.toWei(max),
+                    $bigint.toWei(k),
+                    $bigint.toWei(sOptimal)
+                ]
+            });
+            await this.ds.configure(accounting, {
+                title: `Update Accounting Risk Premium Model`,
+                value: model.address,
+                current: accounting.riskPremiumModel(),
+                updater: async (accounting, value) => {
+                    const acc = await this.getAccountByRole('UPDATER_STRAT_CONFIG_ROLE');
+                    await accounting.$receipt().setRiskModel(acc, model.address);
+                }
+            });
+            return;
+        }
+
         const x = $bigint.toWei(risk.x ?? 0.2, 18);
         const y = $bigint.toWei(risk.y ?? 0.2, 18);
         const k = $bigint.toWei(risk.k ?? 0.3, 18);

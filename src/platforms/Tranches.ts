@@ -53,9 +53,20 @@ export interface ICDO {
         performanceFee: number;
     };
     riskPremium?: {
-        x: number;
-        y: number;
-        k: number;
+        x?: number;
+        y?: number;
+        k?: number;
+        model?: {
+            type: 'sigmoid'
+            // 0.05 (5%)
+            min: number
+            // 0.22 (22%)
+            max: number
+            // 30
+            k: number
+            // 0.85 (85%)
+            sOptimal: number
+        }
     };
     minimumJrtSrtRatioBuffer?: number;
     minimumJrtSrtRatio?: number;
