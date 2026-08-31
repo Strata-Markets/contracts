@@ -7,21 +7,8 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 import { Accounting } from "../../contracts/tranches/Accounting.sol";
 import { IStrataCDO } from "../../contracts/tranches/interfaces/IStrataCDO.sol";
 import { IAprPairFeed } from "../../contracts/tranches/interfaces/IAprPairFeed.sol";
-import { IInsurancePool } from "../../contracts/tranches/symbiotic/interfaces/IInsurancePool.sol";
 import { AccessControlManager } from "../../contracts/governance/AccessControlManager.sol";
-
-/// @notice Insurance pool mock that covers losses up to a settable capacity, in base assets.
-contract MockInsurancePool is IInsurancePool {
-    uint256 public capacity;
-
-    function setCapacity(uint256 capacity_) external {
-        capacity = capacity_;
-    }
-
-    function request(address, uint256 lossAmount) external view returns (uint256) {
-        return lossAmount < capacity ? lossAmount : capacity;
-    }
-}
+import { MockInsurancePool } from "./mocks/MockInsurancePool.sol";
 
 /// @notice Proves the insuranceAmount coverage model in `Accounting`:
 ///         - a covered loss holds the covered tranche whole and books the loss to insuranceAmount,
