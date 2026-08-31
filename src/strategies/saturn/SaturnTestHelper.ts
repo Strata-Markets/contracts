@@ -7,10 +7,8 @@ import { SaturnDeployments } from '@s/deployments/SaturnDeployments';
 import { ERC20 } from 'dequanto/prebuilt/openzeppelin/ERC20';
 import { $erc20 } from '@test/tranches/utils/$erc20';
 import { $bigfloat } from 'dequanto/utils/$bigfloat';
-import { ISaturnWithdrawalQueueERC721 } from '@0xc/hardhat/ISaturnWithdrawalQueueERC721/ISaturnWithdrawalQueueERC721';
-import { Eth } from '@s/platforms/Eth';
+import { IWithdrawalQueueERC721 } from '@0xc/hardhat/IWithdrawalQueueERC721/IWithdrawalQueueERC721';
 import { SaturnCooldownRequestImpl } from '@0xc/hardhat/SaturnCooldownRequestImpl/SaturnCooldownRequestImpl';
-import { IStrcPriceOracle } from '@0xc/hardhat/IStrcPriceOracle/IStrcPriceOracle';
 
 const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
 
@@ -101,8 +99,14 @@ export class SaturnTestHelper implements ITestHelper {
         return '1h';
     }
 
+    getSanityAprBase (): [number, number] {
+        // V2: getAPRbase() returns 0 — STRCon yield is continuous mark-to-market
+        return [0, 0.30];
+    }
+
     async finalizeUnderlyingUnstake (acc: TEth.Address) {
-        // Saturn's WithdrawalQueueERC721 requires off-chain processing.
+        // V2: WithdrawalQueueERC721 requires off-chain operator processing.
+        // processRequests is simplified in V2 — just tokenIds, vault handles pricing.
         const { sUSDat } = await this.test.factory.ensureUnderlying();
         const SaturnWithdrawProcessor = {
             address: `0x09D6E34cE24D54890fF0BC6a090b5f880F8C729f`,
@@ -110,25 +114,18 @@ export class SaturnTestHelper implements ITestHelper {
         } as TEth.IAccount;
 
         const { unstakeCooldown } = this.test.tranches;
-        const req = await unstakeCooldown.activeRequests(Eth.saturn.sUSDat, acc, 0n);
+        const req = await unstakeCooldown.activeRequests(sUSDat.address, acc, 0n);
         const proxy = new SaturnCooldownRequestImpl(req.proxy, this.test.client);
         const id = await proxy.requestId();
-        const requestedAmount = await proxy.requestedAmount();
 
-        const oracleAddr = await sUSDat.getStrcOracle();
-        const oracle = new IStrcPriceOracle(oracleAddr, this.test.client);
-        const priceData = await oracle.getPrice();
-        const price = priceData.price;
-        const shares = requestedAmount * 10n**8n / price;
+        // V2: get the separate WithdrawalQueueERC721 contract address
+        const queueAddr = await sUSDat.getWithdrawalQueue();
+        const queue = new IWithdrawalQueueERC721(queueAddr, this.test.client);
 
-        const queue = new ISaturnWithdrawalQueueERC721('0x4Bc9FEC04F0F95e9b42a3EF18F3C96fB57923D2e', this.test.client);
-
-        await queue.$receipt().lockRequests(SaturnWithdrawProcessor, [
-            id
-        ]);
+        // V2: processRequests just takes tokenIds — vault handles pricing internally
         await queue.$receipt().processRequests(SaturnWithdrawProcessor, [
             id
-        ], requestedAmount, shares, price);
+        ]);
 
         // Move forward 7 days to finalize our unstake request
         await this.test.mine('7days');

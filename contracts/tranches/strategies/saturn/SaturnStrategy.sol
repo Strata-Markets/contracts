@@ -13,20 +13,21 @@ import { IsUSDat } from "./IsUSDat.sol";
 
 /**
  * @title SaturnStrategy
- * @notice Strategy for the Saturn sUSDat vault (ERC4626 with STRC-based yield).
+ * @notice Strategy for the Saturn sUSDat vault (ERC4626 with STRCon-based yield).
  *
  * Architecture:
- *   - Deposits: USDat is deposited into sUSDat (0.1% deposit fee applies).
+ *   - Deposits: USDat is deposited into sUSDat (market-mode deposit fee applies in V2).
  *     sUSDat shares can also be deposited directly.
  *   - Withdrawals: sUSDat shares via erc20Cooldown (instant with configurable cooldown).
- *     USDat via unstakeCooldown → SaturnCooldownRequestImpl (async via WithdrawalQueueERC721).
- *   - totalAssets: Reports real spot NAV via sUSDat.previewRedeem (no smoothing).
- *     Junior tranche absorbs STRC price volatility. Senior earns a fixed benchmark.
+ *     USDat via unstakeCooldown -> SaturnCooldownRequestImpl (async via WithdrawalQueueERC721).
+ *   - totalAssets: Reports real spot NAV via sUSDat.convertToAssets (no smoothing).
+ *     Junior tranche absorbs STRCon price volatility. Senior earns a fixed benchmark.
  *
  * @dev Follows the same patterns as sUSDeStrategy. Key differences:
- *   - deposit() returns actual post-fee base value (sUSDat.previewRedeem(sharesReceived))
+ *   - deposit() returns actual post-fee base value (sUSDat.convertToAssets(sharesReceived))
  *   - ensureRedeemable() uses balance check (sUSDat.maxWithdraw always returns 0)
  *   - convertToAssets/convertToTokens use raw ERC4626 conversion (avoids sUSDat deposit fee in previewMint/previewDeposit)
+ *   - V2: totalAssets() is fail-closed - reverts when module oracles cannot price
  */
 contract SaturnStrategy is Strategy {
 
@@ -167,8 +168,8 @@ contract SaturnStrategy is Strategy {
         }
 
         // Convert base assets to sUSDat shares needed (ceil rounding, favors protocol)
-        // previewWithdraw is standard OZ (no fee override) — returns shares needed for given assets
-        uint256 shares = sUSDat.previewWithdraw(baseAssets);
+        // V2: previewWithdraw returns 0 (withdraw is disabled), use convertToShares instead
+        uint256 shares = sUSDat.convertToShares(baseAssets);
         if (token == address(sUSDat)) {
             uint256 cooldownSeconds = shouldSkipCooldown ? 0 : (cdo.isJrt(tranche) ? sUSDatCooldownJrt : sUSDatCooldownSrt);
             erc20Cooldown.transfer(IERC20(address(sUSDat)), sender, receiver, shares, cooldownSeconds);
@@ -209,7 +210,7 @@ contract SaturnStrategy is Strategy {
     /**
      * @notice Calculates the total assets managed by this strategy
      * @dev Returns the real spot value of all sUSDat shares held, including STRC price component.
-     *      No smoothing applied — Junior tranche absorbs STRC price volatility.
+     *      No smoothing applied - Junior tranche absorbs STRCon price volatility.
      * @return baseAssets The total amount of USDat managed by this strategy
      */
     function totalAssets () public view returns (uint256 baseAssets) {
@@ -383,9 +384,6 @@ contract SaturnStrategy is Strategy {
         if (tokenIn == address(sUSDat)) {
             return 0;
         }
-        if (sUSDat.feeRecipient() == address(0)) {
-            return 0;
-        }
         return sUSDat.depositFeeBps();
     }
 
@@ -396,8 +394,6 @@ contract SaturnStrategy is Strategy {
     function depositFeeBps (address /*tranche*/, address tokenIn, uint256 /*tokenAmount*/) external override view returns (uint256 feeBps) {
         return depositFeeBps(tokenIn);
     }
-
-
 
     function supportsToken(address token) external view returns (bool) {
         return token == address(sUSDat) || token == address(USDat);

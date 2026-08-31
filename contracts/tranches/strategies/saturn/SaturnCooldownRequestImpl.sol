@@ -6,7 +6,7 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IUnstakeHandler} from "../../interfaces/cooldown/IUnstakeHandler.sol";
-import {IsUSDat} from "./IsUSDat.sol";
+import {IsUSDat, ISaturnWithdrawalQueueV2} from "./IsUSDat.sol";
 
 /**
  * @title SaturnCooldownRequestImpl
@@ -19,14 +19,20 @@ import {IsUSDat} from "./IsUSDat.sol";
  *    - Mints an ERC721 NFT representing the withdrawal request to this contract
  *    - No approval needed: requestRedeem uses internal _transfer
  * 2. Saturn's off-chain processor processes the withdrawal request:
- *    - Converts STRC to USDat as needed
+ *    - Settles the request at current NAV from the vault's USDat buffer
  *    - Marks the request as Processed in the WithdrawalQueue
- * 3. `finalize()` - calls `sUSDat.claim()` which:
- *    - Calls WithdrawalQueue.claimAllFor(this) — transfers USDat to this contract
- *    - Reverts with NothingToClaim if not yet processed (caught by UnstakeCooldown's try/catch)
+ * 3. `finalize()` - calls `queue.claim(requestId)` on the WithdrawalQueueERC721:
+ *    - Transfers USDat to this contract
+ *    - Reverts if request is not yet processed (caught by UnstakeCooldown's try/catch)
  *    - This contract then transfers USDat to the receiver
  *
  * Note: Saturn's withdrawal queue has no fixed SLA. Processing typically takes ~7 days.
+ *
+ * V2 Changes:
+ *   - finalize() now calls queue.claim(requestId) instead of sUSDat.claim()
+ *     because V2 removed claim()/claimBatch() from the vault.
+ *   - requestRedeem second param renamed from minUsdatReceived to minSharePrice
+ *     (passing 0 means "no minimum" in both V1 and V2).
  */
 contract SaturnCooldownRequestImpl is IUnstakeHandler, Initializable, IERC721Receiver {
     IsUSDat public immutable sUSDat;
@@ -72,7 +78,7 @@ contract SaturnCooldownRequestImpl is IUnstakeHandler, Initializable, IERC721Rec
 
         // requestRedeem internally transfers shares from this contract to the WithdrawalQueue.
         // No approval needed — sUSDat uses internal _transfer.
-        // minUsdatReceived = 0 (no slippage protection at this stage)
+        // minSharePrice = 0 (no minimum price protection at this stage)
         requestId = sUSDat.requestRedeem(shares, 0);
 
         requestedAt = block.timestamp;
@@ -85,20 +91,18 @@ contract SaturnCooldownRequestImpl is IUnstakeHandler, Initializable, IERC721Rec
 
     /**
      * @dev Completes the unstake request and transfers USDat to the receiver.
-     * Calls sUSDat.claim() which internally calls WithdrawalQueue.claimAllFor(this).
-     * If the request has not yet been processed by Saturn, claim() reverts with
-     * NothingToClaim — UnstakeCooldown catches this via try/catch and skips
+     * Calls queue.claim(requestId) on the WithdrawalQueueERC721 contract.
+     * If the request has not yet been processed by Saturn, claim() reverts —
+     * UnstakeCooldown catches this via try/catch and skips
      * the unready request without marking it as completed.
      * Can be called by the UnstakeHandler, which can be triggered permissionlessly.
      */
     function finalize() external returns (uint256 amount) {
         require(msg.sender == handler, "NotAuthorized");
 
-        // claimBatch() reverts if the request is not processable.
-        // This is the desired behavior — UnstakeCooldown wraps in try/catch.
-        uint256[] memory requestIds = new uint256[](1);
-        requestIds[0] = requestId;
-        sUSDat.claimBatch(requestIds);
+        // V2: claim directly on the WithdrawalQueueERC721, not on the vault
+        ISaturnWithdrawalQueueV2 queue = ISaturnWithdrawalQueueV2(sUSDat.getWithdrawalQueue());
+        queue.claim(requestId);
 
         amount = USDat.balanceOf(address(this));
         if (amount > 0) {

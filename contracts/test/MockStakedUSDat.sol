@@ -5,6 +5,7 @@ pragma solidity ^0.8.28;
 
 import {ERC4626} from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -32,15 +33,123 @@ contract MockStrcPriceOracle {
 }
 
 /**
- * @title MockStakedUSDat
- * @notice Mock of Saturn's StakedUSDat vault for testing the SaturnStrategy.
+ * @title MockWithdrawalQueueV2
+ * @notice ERC721-based mock for Saturn's V2 WithdrawalQueueERC721.
  *
  * Simulates:
- * - ERC4626 vault with 0.1% deposit fee (depositFeeBps = 10)
+ * - ERC721 NFT per withdrawal request
+ * - claim(tokenId) with ownerOf(tokenId) == msg.sender check
+ * - processRequests(tokenIds) for operator settlement
+ * - Request struct matching V2 layout
+ *
+ * Flow:
+ * 1. Vault calls addRequest(owner, shares, minSharePrice) -> mints NFT to owner
+ * 2. Test calls processAllPending() -> settles at current NAV, marks as Processed
+ * 3. NFT owner calls claim(tokenId) -> transfers USDat, burns NFT
+ */
+contract MockWithdrawalQueueV2 is ERC721 {
+    using SafeERC20 for IERC20;
+
+    enum RequestStatus { NULL, Requested, InProgress, Processed, Claimed, Cancelled }
+
+    struct Request {
+        uint256 shares;
+        uint256 usdatOwed;
+        uint256 timestamp;
+        uint256 minSharePrice;
+        RequestStatus status;
+    }
+
+    IERC20 public immutable USDAT;
+    address public immutable STAKED_USDAT;
+
+    mapping(uint256 => Request) public requests;
+    uint256 public nextTokenId;
+
+    error NotOwner();
+    error RequestNotProcessed();
+
+    constructor(address usdat_, address stakedUsdat_)
+        ERC721("sUSDat Withdrawal", "sUSDat-WQ")
+    {
+        USDAT = IERC20(usdat_);
+        STAKED_USDAT = stakedUsdat_;
+    }
+
+    /// @notice Called by the vault to create a new withdrawal request
+    /// @dev Mints an ERC721 NFT to the owner via _safeMint (triggers onERC721Received)
+    function addRequest(address owner, uint256 shares, uint256 minSharePrice)
+        external
+        returns (uint256 tokenId)
+    {
+        require(msg.sender == STAKED_USDAT, "OnlyStakedUSDat");
+        tokenId = nextTokenId++;
+        requests[tokenId] = Request({
+            shares: shares,
+            usdatOwed: 0,
+            timestamp: block.timestamp,
+            minSharePrice: minSharePrice,
+            status: RequestStatus.Requested
+        });
+        _safeMint(owner, tokenId);
+    }
+
+    /// @notice Claims a processed withdrawal, burns the NFT, transfers USDat
+    /// @dev Requires msg.sender == ownerOf(tokenId), matching V2 behavior
+    function claim(uint256 tokenId) external returns (uint256 amount) {
+        require(ownerOf(tokenId) == msg.sender, "NotOwner");
+        require(requests[tokenId].status == RequestStatus.Processed, "RequestNotProcessed");
+
+        amount = requests[tokenId].usdatOwed;
+        requests[tokenId].status = RequestStatus.Claimed;
+        _burn(tokenId);
+
+        USDAT.safeTransfer(msg.sender, amount);
+    }
+
+    /// @notice Simulates operator processing - settles at current NAV
+    function processRequests(uint256[] calldata tokenIds) external {
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 tokenId = tokenIds[i];
+            Request storage req = requests[tokenId];
+            if (req.status != RequestStatus.Requested) continue;
+
+            // Query the vault for current NAV-based conversion
+            uint256 assets = ERC4626(STAKED_USDAT).convertToAssets(req.shares);
+            req.usdatOwed = assets;
+            req.status = RequestStatus.Processed;
+
+            // Transfer USDat from vault to queue for later claim
+            MockStakedUSDat(STAKED_USDAT).settleQueuedShares(req.shares, assets);
+        }
+    }
+
+    /// @notice Test helper: process all pending withdrawal requests
+    function processAllPending() external {
+        for (uint256 i = 0; i < nextTokenId; i++) {
+            Request storage req = requests[i];
+            if (req.status == RequestStatus.Requested) {
+                uint256 assets = ERC4626(STAKED_USDAT).convertToAssets(req.shares);
+                req.usdatOwed = assets;
+                req.status = RequestStatus.Processed;
+
+                MockStakedUSDat(STAKED_USDAT).settleQueuedShares(req.shares, assets);
+            }
+        }
+    }
+}
+
+/**
+ * @title MockStakedUSDat
+ * @notice Mock of Saturn's StakedUSDat V2 vault for testing the SaturnStrategy.
+ *
+ * V2 Simulates:
+ * - ERC4626 vault with market-mode-dependent deposit fee (depositFeeBps)
  * - 18 decimal shares with _decimalsOffset = 12 (asset is 6 decimals)
- * - STRC vesting (vestingAmount, vestingPeriod, lastDistributionTimestamp)
- * - Async withdrawal queue (requestRedeem → processAllPending → claim)
- * - STRC price oracle for totalAssets calculation
+ * - Surplus vesting (surplusVestingAmount, surplusVestingPeriod, surplusVestingStartTimestamp)
+ * - Partial sweep (_surplusSwept) matching L-06 audit fix
+ * - Separate WithdrawalQueueERC721 (MockWithdrawalQueueV2) for async redemptions
+ * - Deposit fees stay in the vault (V2 behavior, not sent to feeRecipient)
  * - withdraw/redeem disabled (reverts with OperationNotAllowed)
  */
 contract MockStakedUSDat is ERC4626 {
@@ -48,42 +157,30 @@ contract MockStakedUSDat is ERC4626 {
 
     uint256 public constant BPS_DENOMINATOR = 10000;
     uint256 public depositFeeBps = 10; // 0.1%
-    address public feeRecipient;
 
-    // Vesting state
-    uint256 public vestingAmount;
-    uint256 public vestingPeriod;
-    uint256 public lastDistributionTimestamp;
-    uint256 public strcBalance;
+    // V2: Surplus vesting state (replaces V1's STRC vesting)
+    uint256 public surplusVestingAmount;
+    uint256 public surplusVestingPeriod;
+    uint256 public surplusVestingStartTimestamp;
+    uint256 private _surplusSwept;
+
+    // Internally tracked USDat balance (6 decimals)
     uint256 public usdatBalance;
 
-    // STRC oracle
-    MockStrcPriceOracle public strcOracle;
-
-    // Withdrawal queue
-    struct WithdrawalRequest {
-        address owner;
-        uint256 shares;
-        uint256 assets;
-        bool processed;
-        bool claimed;
-    }
-
-    uint256 public nextRequestId;
-    mapping(uint256 => WithdrawalRequest) public requests;
-    mapping(address => uint256[]) public userRequests;
+    // V2: Separate withdrawal queue contract
+    MockWithdrawalQueueV2 public queue;
 
     error OperationNotAllowed();
-    error NothingToClaim();
 
     constructor(
         IERC20 asset_,
-        address admin_
+        address /* admin_ (unused in V2 mock) */
     ) ERC4626(asset_) ERC20("Staked USDat", "sUSDat") {
-        feeRecipient = admin_;
+        // Deploy separate mock withdrawal queue
+        queue = new MockWithdrawalQueueV2(address(asset_), address(this));
 
-        // Default: STRC price ~$100 with 8 decimal precision
-        strcOracle = new MockStrcPriceOracle(100e8, 8);
+        // Default surplus vesting period: 3 days (matches V2's initializeV2)
+        surplusVestingPeriod = 3 days;
     }
 
     // ============ ERC4626 Overrides ============
@@ -98,7 +195,7 @@ contract MockStakedUSDat is ERC4626 {
 
     /// @dev previewDeposit accounts for the deposit fee
     function previewDeposit(uint256 assets) public view override returns (uint256) {
-        if (depositFeeBps == 0 || feeRecipient == address(0)) {
+        if (depositFeeBps == 0) {
             return super.previewDeposit(assets);
         }
         uint256 fee = Math.mulDiv(assets, depositFeeBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
@@ -107,31 +204,22 @@ contract MockStakedUSDat is ERC4626 {
 
     /// @dev previewMint accounts for the deposit fee
     function previewMint(uint256 shares) public view override returns (uint256) {
-        if (depositFeeBps == 0 || feeRecipient == address(0)) {
+        if (depositFeeBps == 0) {
             return super.previewMint(shares);
         }
         uint256 assets = super.previewMint(shares);
         return Math.mulDiv(assets, BPS_DENOMINATOR, BPS_DENOMINATOR - depositFeeBps, Math.Rounding.Ceil);
     }
 
-    /// @dev _deposit handles fee transfer
+    /// @dev V2: deposit fee stays in vault (usdatBalance includes fee)
     function _deposit(address caller, address receiver, uint256 assets, uint256 shares) internal override {
-        if (depositFeeBps > 0 && feeRecipient != address(0)) {
-            uint256 fee = Math.mulDiv(assets, depositFeeBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
-            IERC20(asset()).safeTransferFrom(caller, feeRecipient, fee);
-            uint256 netAssets = assets - fee;
-            usdatBalance += netAssets;
-            // Standard ERC4626 deposit with net assets
-            IERC20(asset()).safeTransferFrom(caller, address(this), netAssets);
-            _mint(receiver, shares);
-            emit Deposit(caller, receiver, netAssets, shares);
-        } else {
-            usdatBalance += assets;
-            super._deposit(caller, receiver, assets, shares);
-        }
+        // V2: _sweep vested surplus first, then entire deposit (including fee) goes to vault
+        _sweep();
+        usdatBalance += assets;
+        super._deposit(caller, receiver, assets, shares);
     }
 
-    /// @dev Disable standard withdraw/redeem — must use requestRedeem/claim
+    /// @dev Disable standard withdraw/redeem -- must use requestRedeem/claim
     function withdraw(uint256, address, address) public pure override returns (uint256) {
         revert OperationNotAllowed();
     }
@@ -144,106 +232,114 @@ contract MockStakedUSDat is ERC4626 {
         return 0;
     }
 
-    function maxRedeem(address) public pure override returns (uint256) {
+    function maxRedeem(address owner) public view override returns (uint256) {
+        return balanceOf(owner);
+    }
+
+    /// @dev V2: previewWithdraw returns 0 (withdraw is disabled)
+    function previewWithdraw(uint256) public pure override returns (uint256) {
         return 0;
     }
 
-    /// @dev totalAssets = usdatBalance + vestedSTRC in USD
+    /// @dev totalAssets = usdatBalance + vestedSurplus
+    /// Matches V2 formula: usdatBalance + _unsweptSurplus() - getUnvestedSurplus()
+    /// Note: No module values in mock (STRCMirrorModule / STRConModule = 0)
     function totalAssets() public view override returns (uint256) {
-        return usdatBalance + _strcTotalAssets();
+        uint256 unswept = _unsweptSurplus();
+        uint256 unvested = getUnvestedSurplus();
+        uint256 vestedSurplus = unswept > unvested ? unswept - unvested : 0;
+        return usdatBalance + vestedSurplus;
     }
 
-    function _strcTotalAssets() internal view returns (uint256) {
-        (uint256 strcPrice, uint8 priceDecimals) = strcOracle.getPrice();
-        uint256 unvested = getUnvestedAmount();
-        uint256 vestedBalance = strcBalance > unvested ? strcBalance - unvested : 0;
-        return Math.mulDiv(vestedBalance, strcPrice, 10 ** priceDecimals, Math.Rounding.Floor);
+    // ============ Surplus Vesting (V2) ============
+
+    /// @notice Returns the unvested portion of the current surplus tranche
+    function getUnvestedSurplus() public view returns (uint256) {
+        uint256 amount = surplusVestingAmount;
+        if (amount == 0) return 0;
+
+        uint256 period = surplusVestingPeriod;
+        uint256 elapsed = block.timestamp - surplusVestingStartTimestamp;
+        if (elapsed >= period) return 0;
+
+        return Math.mulDiv(period - elapsed, amount, period, Math.Rounding.Ceil);
     }
 
-    // ============ Vesting ============
-
-    function getUnvestedAmount() public view returns (uint256) {
-        if (lastDistributionTimestamp == 0 || vestingPeriod == 0) return 0;
-        uint256 timeSinceLastDistribution = block.timestamp - lastDistributionTimestamp;
-        if (timeSinceLastDistribution >= vestingPeriod) return 0;
-        return Math.mulDiv(vestingPeriod - timeSinceLastDistribution, vestingAmount, vestingPeriod, Math.Rounding.Ceil);
+    /// @dev Returns the portion of the active tranche not yet folded into usdatBalance
+    function _unsweptSurplus() internal view returns (uint256) {
+        return surplusVestingAmount - _surplusSwept;
     }
 
-    /// @notice Simulate STRC reward distribution (like transferInRewards)
-    function transferInRewards(uint256 strcAmount, uint256 period) external {
-        vestingAmount = strcAmount;
-        vestingPeriod = period;
-        lastDistributionTimestamp = block.timestamp;
-        strcBalance += strcAmount;
-    }
+    /// @dev Partial sweep: folds vested surplus into usdatBalance
+    /// Matches the L-06 audit fix implementation
+    function _sweep() internal {
+        uint256 amount = surplusVestingAmount;
+        if (amount == 0) return;
 
-    // ============ Withdrawal Queue ============
+        uint256 unvested = getUnvestedSurplus();
+        uint256 vested = amount - unvested;
+        uint256 releasable = vested - _surplusSwept;
 
-    /// @notice Request redemption of sUSDat shares
-    function requestRedeem(uint256 shares, uint256 /* minUsdatReceived */) external returns (uint256 requestId) {
-        // Transfer shares from caller to this contract (simulates queue holding)
-        _transfer(msg.sender, address(this), shares);
-
-        uint256 assets = previewRedeem(shares);
-        requestId = nextRequestId++;
-
-        requests[requestId] = WithdrawalRequest({
-            owner: msg.sender,
-            shares: shares,
-            assets: assets,
-            processed: false,
-            claimed: false
-        });
-        userRequests[msg.sender].push(requestId);
-        return requestId;
-    }
-
-    /// @notice Claim all processed withdrawal requests
-    function claim() external returns (uint256 totalAmount) {
-        uint256[] storage ids = userRequests[msg.sender];
-        bool hasClaimed = false;
-        for (uint256 i = 0; i < ids.length; i++) {
-            WithdrawalRequest storage req = requests[ids[i]];
-            if (req.processed && !req.claimed) {
-                req.claimed = true;
-                totalAmount += req.assets;
-                hasClaimed = true;
-
-                // Burn the shares held by this contract
-                _burn(address(this), req.shares);
-                usdatBalance -= req.assets;
-            }
+        if (releasable != 0) {
+            _surplusSwept = vested;
+            usdatBalance += releasable;
         }
-        if (!hasClaimed) revert NothingToClaim();
 
-        IERC20(asset()).safeTransfer(msg.sender, totalAmount);
-        return totalAmount;
+        if (unvested == 0) {
+            surplusVestingAmount = 0;
+            _surplusSwept = 0;
+        }
     }
 
+    /// @notice Simulate surplus distribution (like transferInSurplus in V2)
+    /// @dev Transfers USDat from caller and starts a new vesting tranche
+    function transferInSurplus(uint256 amount) external {
+        // Sweep any remaining vested surplus first
+        _sweep();
+
+        // Pull USDat from the caller (simulates the SURPLUS_SOURCE)
+        IERC20(asset()).safeTransferFrom(msg.sender, address(this), amount);
+
+        surplusVestingAmount = amount;
+        surplusVestingStartTimestamp = block.timestamp;
+        _surplusSwept = 0;
+    }
+
+    // ============ Withdrawal Queue (V2) ============
+
+    /// @notice Request redemption of sUSDat shares via the withdrawal queue
+    /// @dev Transfers shares to the queue, mints an NFT to the caller
+    function requestRedeem(uint256 shares, uint256 minSharePrice) external returns (uint256 requestId) {
+        require(shares <= maxRedeem(msg.sender), "ExceedsMaxRedeem");
+
+        // Transfer shares from caller to the withdrawal queue
+        _transfer(msg.sender, address(queue), shares);
+
+        // Queue creates the request and mints NFT to caller
+        requestId = queue.addRequest(msg.sender, shares, minSharePrice);
+    }
+
+    /// @notice Returns the address of the WithdrawalQueueERC721 contract
     function getWithdrawalQueue() external view returns (address) {
-        return address(this); // Self-contained mock
+        return address(queue);
     }
 
-    // ============ Oracle ============
+    /// @notice Settles queued shares - burns shares held by queue, sends USDat to queue
+    /// @dev Called by MockWithdrawalQueueV2 during processRequests
+    function settleQueuedShares(uint256 shares, uint256 usdatAmount) external {
+        require(msg.sender == address(queue), "OnlyQueue");
 
-    function getStrcOracle() external view returns (address) {
-        return address(strcOracle);
+        _sweep();
+        _burn(address(queue), shares);
+        usdatBalance -= usdatAmount;
+        IERC20(asset()).safeTransfer(address(queue), usdatAmount);
     }
 
     // ============ Test Helpers ============
 
     /// @notice Process all pending withdrawal requests (test-only)
     function processAllPending() external {
-        for (uint256 i = 0; i < nextRequestId; i++) {
-            if (!requests[i].processed && !requests[i].claimed) {
-                requests[i].processed = true;
-            }
-        }
-    }
-
-    /// @notice Set the mock STRC price (test-only)
-    function setMockStrcPrice(uint256 newPrice) external {
-        strcOracle.setPrice(newPrice);
+        queue.processAllPending();
     }
 
     /// @notice Set the deposit fee (test-only)
@@ -251,18 +347,13 @@ contract MockStakedUSDat is ERC4626 {
         depositFeeBps = feeBps;
     }
 
-    /// @notice Set the fee recipient (test-only)
-    function setFeeRecipient(address recipient) external {
-        feeRecipient = recipient;
-    }
-
     /// @notice Directly set USDat balance (test-only, for simulating yield/loss)
     function setUsdatBalance(uint256 amount) external {
         usdatBalance = amount;
     }
 
-    /// @notice Directly set STRC balance (test-only, for simulating vesting state)
-    function setStrcBalance(uint256 amount) external {
-        strcBalance = amount;
+    /// @notice Set the surplus vesting period (test-only)
+    function setSurplusVestingPeriod(uint256 period) external {
+        surplusVestingPeriod = period;
     }
 }

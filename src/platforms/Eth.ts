@@ -86,7 +86,7 @@ export const Eth: IPlatform = {
     },
 
     saturn: {
-        // Resolve from sUSDat on-chain: sUSDat.getWithdrawalQueue(), sUSDat.getStrcOracle()
+        // V2: sUSDat.getWithdrawalQueue() resolves the queue address on-chain
         sUSDat: '0xD166337499E176bbC38a1FBd113Ab144e5bd2Df7',
     },
     figure: {
