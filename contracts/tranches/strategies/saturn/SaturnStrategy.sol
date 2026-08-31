@@ -54,11 +54,40 @@ contract SaturnStrategy is Strategy {
 
     mapping(address token => TTokenConfig) public tokenConfigs;
 
+    /** Junior Premium Fee - anti-dilution protection
+     *
+     * When STRC drops, Junior PPS drops (Juniors cover Seniors). New depositors could buy
+     * Juniors cheaply, diluting existing holders. The premium fee charges new Junior depositors
+     * the difference between the 30-day max PPS and the current PPS, keeping the value with
+     * existing Junior holders.
+     */
+
+    /// @notice Junior tranche vault address (set via setJrtVault)
+    address public jrtVault;
+
+    /// @notice Rolling 30-day max Junior PPS (18 decimals, matching CDO.pricePerShare format)
+    uint256 public maxJrtPricePerShare;
+
+    /// @notice Timestamp when maxJrtPricePerShare was last set
+    uint256 public maxJrtPricePerShareTimestamp;
+
+    /// @notice Protection window duration for the Junior premium
+    uint256 public constant JRT_PREMIUM_WINDOW = 30 days;
+
+    /// @notice Safety cap to prevent underflow in Tranche.quoteDeposit (saturnFee + premiumBps must be < 10000)
+    uint256 private constant MAX_PREMIUM_BPS = 9500;
+
     /// @dev sUSDat._decimalsOffset() = 12, used for manual ceil conversion
     uint256 private constant DECIMALS_OFFSET = 1e12;
 
+    /// @dev USDat has 6 decimals -> PPS scaling factor = 10^(18-6) * 1e18 = 1e30
+    uint256 private constant PPS_SCALING = 1e30;
+
     event CooldownsChanged(uint256 jrt, uint256 srt);
     event TokenConfigChanged(address token, TTokenConfig config);
+    event JrtVaultSet(address jrtVault);
+    event MaxJrtPricePerShareUpdated(uint256 pps, uint256 timestamp);
+    event MaxJrtPricePerShareReset();
 
     error TokenDepositPaused(address tranche, address token);
     error TokenWithdrawalPaused(address tranche, address token);
@@ -112,18 +141,26 @@ contract SaturnStrategy is Strategy {
 
         SafeERC20.safeTransferFrom(IERC20(token), owner, address(this), tokenAmount);
 
+        uint256 result;
         if (token == address(USDat)) {
             SafeERC20.forceApprove(USDat, address(sUSDat), tokenAmount);
             uint256 sharesReceived = sUSDat.deposit(tokenAmount, address(this));
             // Return actual base value after sUSDat's deposit fee
-            uint256 baseAssetsNet = sUSDat.convertToAssets(sharesReceived);
-            return baseAssetsNet;
-        }
-        if (token == address(sUSDat)) {
+            result = sUSDat.convertToAssets(sharesReceived);
+        } else if (token == address(sUSDat)) {
             // already transferred in ↑
-            return baseAssets;
+            result = baseAssets;
+        } else {
+            revert UnsupportedToken(token);
         }
-        revert UnsupportedToken(token);
+
+        // NOTE: Do NOT call updateMaxJrtPricePerShare() here.
+        // At this point, accounting.nav has not been updated yet (updateBalanceFlow runs
+        // after strategy.deposit returns), so cdo.totalAssets(jrtVault) would treat
+        // this deposit's principal as yield gain, inflating maxPPS.
+        // Instead, call updateMaxJrtPricePerShare() via keeper or after accounting sync.
+
+        return result;
     }
 
     /**
@@ -167,7 +204,6 @@ contract SaturnStrategy is Strategy {
             revert TokenWithdrawalPaused(tranche, token);
         }
 
-        // Convert base assets to sUSDat shares needed (ceil rounding, favors protocol)
         // V2: previewWithdraw returns 0 (withdraw is disabled), use convertToShares instead
         uint256 shares = sUSDat.convertToShares(baseAssets);
         if (token == address(sUSDat)) {
@@ -210,7 +246,7 @@ contract SaturnStrategy is Strategy {
     /**
      * @notice Calculates the total assets managed by this strategy
      * @dev Returns the real spot value of all sUSDat shares held, including STRC price component.
-     *      No smoothing applied - Junior tranche absorbs STRCon price volatility.
+     *      No smoothing applied - Junior tranche absorbs STRC price volatility.
      * @return baseAssets The total amount of USDat managed by this strategy
      */
     function totalAssets () public view returns (uint256 baseAssets) {
@@ -377,14 +413,139 @@ contract SaturnStrategy is Strategy {
     }
 
     /**
-     * @notice Returns the deposit fee percentage for the underlying protocol
-     * @return feeBps The deposit fee in basis points (e.g., 10 = 0.1%)
+     * @notice Returns the deposit fee percentage for the underlying protocol + Junior premium
+     * @dev V2: sUSDat.depositFeeBps() returns market-mode-dependent value.
+     *      When the caller is the Junior tranche (msg.sender == jrtVault), an additional
+     *      premium fee is applied based on the 30-day max PPS vs current PPS.
+     *      This prevents new Junior depositors from diluting existing holders after NAV drops.
+     *
+     *      Fee matrix:
+     *        USDat  -> Junior: saturnFee + premiumBps
+     *        USDat  -> Senior: saturnFee
+     *        sUSDat -> Junior: premiumBps only
+     *        sUSDat -> Senior: 0
+     *
+     * @param tokenIn The token being deposited
+     * @return feeBps The total deposit fee in basis points
      */
     function depositFeeBps (address tokenIn) public view returns (uint256 feeBps) {
         if (tokenIn == address(sUSDat)) {
+            // sUSDat has no Saturn deposit fee, but Junior premium applies
+            if (msg.sender == jrtVault) {
+                uint256 premium = _juniorPremiumBps();
+                // Cap at MAX_PREMIUM_BPS to prevent quoteDeposit underflow
+                return premium > MAX_PREMIUM_BPS ? MAX_PREMIUM_BPS : premium;
+            }
             return 0;
         }
-        return sUSDat.depositFeeBps();
+        // USDat: Saturn fee + Junior premium (if caller is jrtVault)
+        uint256 saturnFee = sUSDat.depositFeeBps();
+        if (msg.sender == jrtVault) {
+            uint256 premium = _juniorPremiumBps();
+            uint256 totalFee = saturnFee + premium;
+            // Cap total at 9999 bps to prevent underflow in Tranche.quoteDeposit
+            return totalFee > 9999 ? 9999 : totalFee;
+        }
+        return saturnFee;
+    }
+
+    /**
+     * ============================================
+     *        Junior Premium Fee Functions
+     * ============================================
+     */
+
+    /**
+     * @notice Computes the Junior tranche price per share (18 decimals)
+     * @dev Replicates StrataCDO.calculatePricePerShare(assets, supply, 6):
+     *      PPS = assets * 10^(18-6) * 1e18 / supply = assets * 1e30 / supply
+     *      Uses IStrataCDO.totalAssets(jrtVault) which reads live NAV from the strategy.
+     * @return PPS in 18-decimal format (1e18 = $1.00)
+     */
+    function _jrtPricePerShare() internal view returns (uint256) {
+        uint256 assets = cdo.totalAssets(jrtVault);
+        uint256 supply = IERC20(jrtVault).totalSupply();
+        if (supply == 0) return 1e18;
+        return Math.mulDiv(assets, PPS_SCALING, supply, Math.Rounding.Floor);
+    }
+
+    /**
+     * @notice Calculates the Junior premium fee in basis points
+     * @dev Premium = (maxPPS - currentPPS) / maxPPS * 10000
+     *      Capped at MAX_PREMIUM_BPS to prevent quoteDeposit underflow.
+     *      Returns 0 if:
+     *        - jrtVault is not set
+     *        - maxJrtPricePerShare is 0 (not yet tracked)
+     *        - 30-day window has expired
+     *        - currentPPS >= maxPPS (no drop)
+     * @return premiumBps The premium fee in basis points
+     */
+    function _juniorPremiumBps() internal view returns (uint256) {
+        if (jrtVault == address(0) || maxJrtPricePerShare == 0) return 0;
+
+        // Check if window has expired
+        if (block.timestamp > maxJrtPricePerShareTimestamp + JRT_PREMIUM_WINDOW) {
+            return 0;
+        }
+
+        uint256 currentPPS = _jrtPricePerShare();
+        if (currentPPS >= maxJrtPricePerShare) return 0;
+
+        // premiumBps = (maxPPS - currentPPS) / maxPPS * 10000
+        uint256 premiumBps = (maxJrtPricePerShare - currentPPS) * 10000 / maxJrtPricePerShare;
+
+        // Safety cap: ensure saturnFee + premiumBps < 10000 bps
+        if (premiumBps > MAX_PREMIUM_BPS) {
+            premiumBps = MAX_PREMIUM_BPS;
+        }
+        return premiumBps;
+    }
+
+    /**
+     * @notice Updates the 30-day rolling max Junior PPS
+     * @dev Must be called by a keeper (or admin) when accounting is synced.
+     *      Do NOT call from within strategy.deposit() - at that point accounting.nav
+     *      has not been updated yet, and cdo.totalAssets(jrtVault) would be inflated.
+     *      If the 30-day window has expired, resets maxPPS to 0 before checking current PPS.
+     *      Only updates if currentPPS > maxPPS (new high).
+     */
+    function updateMaxJrtPricePerShare() public {
+        if (jrtVault == address(0)) return;
+
+        // Expire old max if beyond 30-day window
+        if (block.timestamp > maxJrtPricePerShareTimestamp + JRT_PREMIUM_WINDOW) {
+            maxJrtPricePerShare = 0;
+        }
+
+        uint256 currentPPS = _jrtPricePerShare();
+        if (currentPPS > maxJrtPricePerShare) {
+            maxJrtPricePerShare = currentPPS;
+            maxJrtPricePerShareTimestamp = block.timestamp;
+            emit MaxJrtPricePerShareUpdated(currentPPS, block.timestamp);
+        }
+    }
+
+    /**
+     * @notice Admin override to reset the Junior premium immediately
+     * @dev Use in case of market dislocation or when the premium should be manually cleared.
+     *      Sets both maxPPS and timestamp to 0, effectively disabling the premium until
+     *      the next updateMaxJrtPricePerShare() call sets a new baseline.
+     */
+    function resetMaxJrtPricePerShare() external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
+        maxJrtPricePerShare = 0;
+        maxJrtPricePerShareTimestamp = 0;
+        emit MaxJrtPricePerShareReset();
+    }
+
+    /**
+     * @notice Sets the Junior tranche vault address for premium fee calculation
+     * @dev Must be called during deployment after both CDO and strategy are initialized.
+     *      Can also be called to update if the Junior vault changes (unlikely).
+     * @param jrtVault_ The Junior tranche vault address
+     */
+    function setJrtVault(address jrtVault_) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
+        jrtVault = jrtVault_;
+        emit JrtVaultSet(jrtVault_);
     }
 
     /**
@@ -394,6 +555,8 @@ contract SaturnStrategy is Strategy {
     function depositFeeBps (address /*tranche*/, address tokenIn, uint256 /*tokenAmount*/) external override view returns (uint256 feeBps) {
         return depositFeeBps(tokenIn);
     }
+
+
 
     function supportsToken(address token) external view returns (bool) {
         return token == address(sUSDat) || token == address(USDat);

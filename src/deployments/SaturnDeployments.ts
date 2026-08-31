@@ -171,6 +171,19 @@ export class SaturnDeployments extends DeploymentsBase<{
                 BigInt(srtCooldown)
             );
         }
+
+        // Configure Junior Premium Fee: set jrtVault address on strategy
+        // Note: Cannot call this.ensureCDO() here - configureCooldowns is called from within
+        // ensureCDO()'s setupCdo(), and the memoized ensureCDO promise is still pending.
+        // Instead, read jrtVault directly from the CDO contract (already configured at this point).
+        const jrtVaultAddr = await saturnStrategy.cdo().then(async cdo => {
+            const cdoContract = new StrataCDO(cdo, saturnStrategy.client);
+            return cdoContract.jrtVault();
+        });
+        const currentJrtVault = await saturnStrategy.jrtVault();
+        if (currentJrtVault !== jrtVaultAddr) {
+            await saturnStrategy.$receipt().setJrtVault(this.owner, jrtVaultAddr);
+        }
     }
 
     async configureDepositor(depositor: TrancheDepositor) {

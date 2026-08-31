@@ -3,6 +3,7 @@ import { $require } from 'dequanto/utils/$require';
 import { $address } from 'dequanto/utils/$address';
 import { $date } from 'dequanto/utils/$date';
 import { $contract } from 'dequanto/utils/$contract';
+import { SaturnStrategy } from '@0xc/hardhat/SaturnStrategy/SaturnStrategy';
 import { $hh } from '../utils/$hh';
 import { $erc20 } from '../utils/$erc20';
 import { $tranche } from '../utils/$tranche';
@@ -300,6 +301,249 @@ UTest.create({
         });
     },
 
+    // ============================================================
+    // Junior Premium Fee - Anti-dilution Protection
+    // ============================================================
+
+    async 'SaturnStrategy::junior premium - jrtVault configured'() {
+        const { strategy } = test.tranches;
+        const { jrtVault } = test.tranches;
+        const saturnStrategy = new SaturnStrategy(strategy.address, strategy.client);
+
+        const configuredJrt = await saturnStrategy.jrtVault();
+        $require.eq(configuredJrt, jrtVault.address, 'Strategy jrtVault should be set to JRT tranche');
+    },
+
+    async 'SaturnStrategy::junior premium - no premium at peak PPS'() {
+        const { deployer } = test.factory;
+        const { base } = await test.factory.ensureUnderlying();
+        const { jrtVault, strategy, cdo } = test.tranches;
+        const saturnStrategy = new SaturnStrategy(strategy.address, strategy.client);
+
+        // Deposit to establish PPS baseline
+        const AMOUNT = $bigint.toWei(10_000, 6);
+        await $erc20.mint(base, deployer, deployer.address, AMOUNT);
+        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
+
+        // Manually call updateMaxJrtPricePerShare (keeper role)
+        // Accounting has been synced by the deposit flow, so PPS is now accurate
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // maxPPS should be set
+        const maxPPS = await saturnStrategy.maxJrtPricePerShare();
+        $require.True(maxPPS > 0n, 'maxPPS should be set after keeper update');
+
+        // Current PPS should be at or near maxPPS -> no premium
+        const currentPPS = await cdo.pricePerShare(jrtVault.address);
+        $require.True(currentPPS >= maxPPS || maxPPS - currentPPS < 10n, 'PPS should be at max');
+    },
+
+    async 'SaturnStrategy::junior premium - premium after NAV drop'() {
+        const { deployer } = test.factory;
+        const { base, sUSDat } = await test.factory.ensureUnderlying();
+        const { jrtVault, srtVault, strategy, cdo, accounting } = test.tranches;
+        const saturnStrategy = new SaturnStrategy(strategy.address, strategy.client);
+        const mockSUSDat = new MockStakedUSDat(sUSDat.address, sUSDat.client);
+
+        // Deposit to establish baseline
+        const AMOUNT = $bigint.toWei(10_000, 6);
+        await $erc20.mint(base, deployer, deployer.address, AMOUNT * 3n);
+        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
+        await $tranche.deposit(srtVault, deployer, base, AMOUNT);
+
+        // Keeper sets maxPPS after accounting has synced
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // Record pre-drop state
+        const ppsBefore = await cdo.pricePerShare(jrtVault.address);
+        const maxPPS = await saturnStrategy.maxJrtPricePerShare();
+        $require.True(maxPPS > 0n, 'maxPPS should be set');
+
+        // Simulate NAV drop: reduce sUSDat share balance by 15%
+        const currentBalance = await strategy.totalAssets();
+        const droppedBalance = currentBalance * 85n / 100n;
+        const shares = await mockSUSDat.convertToShares(droppedBalance);
+        await $erc20.setBalanceAny(sUSDat as any, strategy.address, shares);
+        await accounting.$receipt().onAprChanged(deployer);
+
+        // Verify PPS dropped
+        const ppsAfter = await cdo.pricePerShare(jrtVault.address);
+        $require.True(ppsAfter < ppsBefore, 'PPS should drop after NAV reduction');
+
+        // Deposit as new Junior - should see a premium
+        const sharesBefore = await jrtVault.totalSupply();
+        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
+
+        // The premium should have compensated existing holders: PPS should increase
+        const ppsAfterDeposit = await cdo.pricePerShare(jrtVault.address);
+        $require.True(ppsAfterDeposit > ppsAfter, 'PPS should increase from premium deposit');
+    },
+
+    async 'SaturnStrategy::junior premium - no premium for Senior'() {
+        const { deployer } = test.factory;
+        const { base, sUSDat } = await test.factory.ensureUnderlying();
+        const { jrtVault, srtVault, strategy, cdo, accounting } = test.tranches;
+        const saturnStrategy = new SaturnStrategy(strategy.address, strategy.client);
+        const mockSUSDat = new MockStakedUSDat(sUSDat.address, sUSDat.client);
+
+        // Setup: deposit and then drop NAV
+        const AMOUNT = $bigint.toWei(10_000, 6);
+        await $erc20.mint(base, deployer, deployer.address, AMOUNT * 3n);
+        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
+        await $tranche.deposit(srtVault, deployer, base, AMOUNT);
+
+        // Keeper sets maxPPS
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // Drop NAV 15%
+        const currentBalance = await strategy.totalAssets();
+        const droppedBalance = currentBalance * 85n / 100n;
+        const sharesToSet = await mockSUSDat.convertToShares(droppedBalance);
+        await $erc20.setBalanceAny(sUSDat as any, strategy.address, sharesToSet);
+        await accounting.$receipt().onAprChanged(deployer);
+
+        // Deposit into Senior - should get shares without premium
+        const srtSharesBefore = await srtVault.totalSupply();
+        await $tranche.deposit(srtVault, deployer, base, AMOUNT);
+        const srtSharesReceived = await srtVault.totalSupply() - srtSharesBefore;
+        $require.True(srtSharesReceived > 0n, 'Senior should receive shares');
+    },
+
+    async 'SaturnStrategy::junior premium - sUSDat deposits pay premium'() {
+        const { deployer } = test.factory;
+        const { base, sUSDat } = await test.factory.ensureUnderlying();
+        const { jrtVault, srtVault, strategy, cdo, accounting } = test.tranches;
+        const saturnStrategy = new SaturnStrategy(strategy.address, strategy.client);
+        const mockSUSDat = new MockStakedUSDat(sUSDat.address, sUSDat.client);
+
+        // Setup: deposit and then drop NAV
+        const AMOUNT = $bigint.toWei(10_000, 6);
+        await $erc20.mint(base, deployer, deployer.address, AMOUNT * 2n);
+        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
+        await $tranche.deposit(srtVault, deployer, base, AMOUNT);
+
+        // Keeper sets maxPPS
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // Drop NAV 15%
+        const currentBalance = await strategy.totalAssets();
+        const droppedBalance = currentBalance * 85n / 100n;
+        const sharesToSet = await mockSUSDat.convertToShares(droppedBalance);
+        await $erc20.setBalanceAny(sUSDat as any, strategy.address, sharesToSet);
+        await accounting.$receipt().onAprChanged(deployer);
+
+        // Mint sUSDat shares directly for depositing
+        await $erc4626.deposit(sUSDat as any, deployer, 500);
+
+        // Deposit sUSDat into Junior (should have premium)
+        const jrtSharesBefore = await jrtVault.totalSupply();
+        await $erc4626.depositMeta(jrtVault, sUSDat, deployer, 50);
+        const jrtSharesReceived = await jrtVault.totalSupply() - jrtSharesBefore;
+
+        // Deposit sUSDat into Senior (should NOT have premium)
+        const srtSharesBefore = await srtVault.totalSupply();
+        await $erc4626.depositMeta(srtVault, sUSDat, deployer, 50);
+        const srtSharesReceived = await srtVault.totalSupply() - srtSharesBefore;
+
+        // Junior should receive fewer shares than Senior due to premium
+        $require.True(jrtSharesReceived < srtSharesReceived,
+            'Junior should receive fewer sUSDat shares than Senior due to premium');
+    },
+
+    async 'SaturnStrategy::junior premium - window expiry'() {
+        const { client } = test;
+        const { deployer } = test.factory;
+        const { base, sUSDat } = await test.factory.ensureUnderlying();
+        const { jrtVault, srtVault, strategy, cdo, accounting } = test.tranches;
+        const saturnStrategy = new SaturnStrategy(strategy.address, strategy.client);
+        const mockSUSDat = new MockStakedUSDat(sUSDat.address, sUSDat.client);
+
+        // Setup: deposit and then drop NAV
+        const AMOUNT = $bigint.toWei(10_000, 6);
+        await $erc20.mint(base, deployer, deployer.address, AMOUNT * 3n);
+        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
+        await $tranche.deposit(srtVault, deployer, base, AMOUNT);
+
+        // Keeper sets maxPPS
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // Drop NAV 15%
+        const currentBalance = await strategy.totalAssets();
+        const droppedBalance = currentBalance * 85n / 100n;
+        const sharesToSet = await mockSUSDat.convertToShares(droppedBalance);
+        await $erc20.setBalanceAny(sUSDat as any, strategy.address, sharesToSet);
+        await accounting.$receipt().onAprChanged(deployer);
+
+        // Verify maxPPS is set
+        const maxPPSBefore = await saturnStrategy.maxJrtPricePerShare();
+        $require.True(maxPPSBefore > 0n, 'maxPPS should be set');
+
+        // Advance past 30-day window
+        await client.debug.mine('31days');
+
+        // Deposit to add more assets (deposit itself no longer calls updateMaxJrtPricePerShare)
+        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
+
+        // Keeper calls update - expired window resets maxPPS to 0, then sets current PPS
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // maxPPS should have been reset and set to current (lower) PPS
+        const maxPPSAfter = await saturnStrategy.maxJrtPricePerShare();
+        $require.True(maxPPSAfter < maxPPSBefore, 'maxPPS should reset to current lower PPS after window expiry');
+    },
+
+    async 'SaturnStrategy::junior premium - admin reset'() {
+        const { deployer } = test.factory;
+        const { base, sUSDat } = await test.factory.ensureUnderlying();
+        const { jrtVault, srtVault, strategy, cdo, accounting } = test.tranches;
+        const saturnStrategy = new SaturnStrategy(strategy.address, strategy.client);
+        const mockSUSDat = new MockStakedUSDat(sUSDat.address, sUSDat.client);
+
+        // Setup: deposit and then drop NAV
+        const AMOUNT = $bigint.toWei(10_000, 6);
+        await $erc20.mint(base, deployer, deployer.address, AMOUNT * 2n);
+        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
+        await $tranche.deposit(srtVault, deployer, base, AMOUNT);
+
+        // Keeper sets maxPPS
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // Drop NAV 15%
+        const currentBalance = await strategy.totalAssets();
+        const droppedBalance = currentBalance * 85n / 100n;
+        const sharesToSet = await mockSUSDat.convertToShares(droppedBalance);
+        await $erc20.setBalanceAny(sUSDat as any, strategy.address, sharesToSet);
+        await accounting.$receipt().onAprChanged(deployer);
+
+        // Verify maxPPS is set (from keeper call above, before the drop)
+        $require.True(await saturnStrategy.maxJrtPricePerShare() > 0n, 'maxPPS should be set');
+
+        // Admin reset
+        await saturnStrategy.$receipt().resetMaxJrtPricePerShare(deployer);
+
+        // Verify reset
+        $require.eq(await saturnStrategy.maxJrtPricePerShare(), 0n, 'maxPPS should be 0 after reset');
+        $require.eq(await saturnStrategy.maxJrtPricePerShareTimestamp(), 0n, 'timestamp should be 0 after reset');
+    },
+
+    // ============================================================
+    // Token Pause-States
+    // ============================================================
+
+    async 'SaturnStrategy:: Token Pause-States'() {
+        const { deployer } = test.factory;
+        const { base, sUSDat } = await test.factory.ensureUnderlying();
+        const { accounting, jrtVault, srtVault, strategy } = test.tranches;
+
+        await $erc4626.deposit(sUSDat as any, deployer, 500);
+
+        return UTest.create({
+            async 'disable and enable Senior sUSDat'() {
+                await strategy.$receipt().setTokenConfig(deployer, sUSDat.address, {
+                    jrtDepositsPaused: false,
+                    jrtWithdrawalsPaused: false,
+                    srtDepositsPaused: true,
+                    srtWithdrawalsPaused: false,
                 });
 
                 await $erc4626.depositMeta(jrtVault, sUSDat, deployer, 50)
