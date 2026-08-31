@@ -43,9 +43,14 @@ exposes `payPremium`, `trueUp`, and `setNetworkMiddleware`.
 ## Premium
 
 `premiumBps` skims a share of realized gains into a separate `premiumNav` bucket (threaded through
-the accounting split like the reserve; it never absorbs losses). `payPremium` sends the accrued
-premium — in the strategy share token — to the AppAdapter, which `convert()`s it to the vault asset;
-a `deallocate` then pushes it into the vault so underwriter shares appreciate (no shares minted).
+the accounting split like the reserve; it never absorbs losses). `payPremium` sweeps the accrued
+premium — in the strategy share token — down one of two routes:
+
+- **Automatic:** to the AppAdapter, which `convert()`s it to the vault asset; a `deallocate` then
+  pushes it into the Symbiotic vault so underwriter shares appreciate (no shares minted).
+- **Manual:** to a dedicated multisig, which deposits it into the Symbiotic vault directly as the
+  Strata underlying asset.
+
 Premium is discretionary (Symbiotic gives full flexibility) — there is no fixed accrual schedule.
 
 ## Loss coverage: the `insuranceAmount` model
