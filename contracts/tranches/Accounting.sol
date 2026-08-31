@@ -114,7 +114,7 @@ contract Accounting is IAccounting, CDOComponent {
     /// @notice High-water mark used to charge performance fees only on new NAV gains.
     uint256 public feeWatermarkNav;
 
-    /// Coverage Premium (Symbiotic) Parameters
+    /* Coverage Premium (Symbiotic) Parameters */
 
     /// @notice The portion of gains diverted to the coverage premium bucket (1e18 = 100%)
     /// @dev Applied to the same total gain as reserveBps. See `calculateNAVSplit()`.

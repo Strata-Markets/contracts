@@ -9,6 +9,7 @@ import {IAprPairFeed} from "./interfaces/IAprPairFeed.sol";
 import {CDOComponent} from "./base/CDOComponent.sol";
 import {UD60x18Ext} from "./utils/UD60x18Ext.sol";
 import {AccountingLib} from "./utils/AccountingLib.sol";
+import {IInsurancePool} from "./symbiotic/interfaces/IInsurancePool.sol";
 
 /**
  * @title CDO::DYSAccounting
@@ -211,11 +212,15 @@ contract DYSAccounting is IAccounting, CDOComponent {
     /// @notice Accrued coverage premium owed to underwriters, not yet paid out (part of nav)
     uint256 public premiumNav;
 
-    /// @notice Cumulative shortfall that the Symbiotic coverage should absorb, in base assets
-    uint256 public pendingCoverageDeficit;
+    /// @notice Coverage claimed from the network middleware but not yet settled, in base assets
+    /// @dev Holds Senior whole against assets not yet in the strategy, so the NAV identity carries a
+    ///      `- insuranceAmount` term. Increases on a covered loss, unwinds on a later gain, and is
+    ///      cleared by `trueUp()`. See base Accounting for the full model.
+    uint256 public insuranceAmount;
 
-    /// @notice Position of the Symbiotic coverage in the loss waterfall. See base Accounting.
-    bool public coverageFirst;
+    /// @notice The Symbiotic network middleware (insurance pool) queried for coverage
+    /// @dev When unset (address(0)) no coverage is requested and losses hit the tranches as usual.
+    address public networkMiddleware;
 
     error InvalidNavSplit(
         uint256 navT1,
@@ -232,9 +237,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
     event ReservePercentageChanged(uint256 reserveBps);
     event PremiumPercentageChanged(uint256 premiumBps);
     event PremiumReduced(uint256 amount);
-    event CoverageDeficitAccrued(uint256 amount, uint256 pendingCoverageDeficit);
-    event CoverageFirstChanged(bool coverageFirst);
-    event TrueUpApplied(uint256 amount, bool jrtCredited, uint256 pendingCoverageDeficit);
+    event CoverageClaimed(uint256 amount, uint256 insuranceAmount);
+    event NetworkMiddlewareSet(address networkMiddleware);
+    event TrueUpApplied(uint256 amount, uint256 insuranceAmount);
     event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
     event MinimumJrtSrtRatioChanged(uint256 ratio);
     event MinimumJrtSrtRatioBufferChanged(uint256 ratio);
@@ -376,6 +381,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             ,
             /*jrtNavT1Real*/ srtNavT1,
             reserveNavT1,
+            /*premiumNavT1*/,
+            /*insuranceAmountT1*/
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
@@ -383,6 +390,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 srtBaseNav,
                 reserveNav,
                 premiumNav,
+                insuranceAmount,
                 navT1
             );
         (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
@@ -405,6 +413,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             ,
             /*jrtNavT1Real*/ srtNavT1,
             reserveNavT1,
+            /*premiumNavT1*/,
+            /*insuranceAmountT1*/
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
@@ -412,6 +422,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 srtBaseNav,
                 reserveNav,
                 premiumNav,
+                insuranceAmount,
                 navT1
             );
         (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
@@ -435,6 +446,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             jrtNavT1Real,
             srtNavT1,
             reserveNavT1,
+            /*premiumNavT1*/,
+            /*insuranceAmountT1*/
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
@@ -442,6 +455,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 srtBaseNav,
                 reserveNav,
                 premiumNav,
+                insuranceAmount,
                 navT1
             );
 
@@ -497,8 +511,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Returns the current accrued coverage premium value
     function totalPremium () external view returns (uint256 premiumNavT1) {
-        (,,,, premiumNavT1) = calculateNAVSplit(
-            nav, jrtNavProjected, jrtBaseNav, srtBaseNav, reserveNav, premiumNav,
+        (,,,, premiumNavT1,) = calculateNAVSplit(
+            nav, jrtNavProjected, jrtBaseNav, srtBaseNav, reserveNav, premiumNav, insuranceAmount,
             cdo.totalStrategyAssets(nav, _navAnchor())
         );
     }
@@ -516,28 +530,18 @@ contract DYSAccounting is IAccounting, CDOComponent {
         emit PremiumReduced(amount);
     }
 
-    /// @notice Books a coverage true-up: slashed collateral proceeds re-entering the protocol.
-    /// @dev Credits the tranche that carried the covered loss, chosen by {coverageFirst}.
+    /// @notice Settles outstanding coverage: slashed collateral proceeds close the insuranceAmount claim.
+    /// @dev Tranche NAVs were held whole while under coverage, so settlement only raises nav and
+    ///      reduces insuranceAmount by the same amount; no tranche is credited.
     /// @param baseAssets The injected amount in base assets
-    /// @return jrtCredited True when the Junior tranche was credited (coverageFirst mode)
+    /// @return jrtCredited Retained for interface compatibility; always false
     function trueUp (uint256 baseAssets) external onlyCDO returns (bool jrtCredited) {
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
-        jrtCredited = coverageFirst;
-        if (jrtCredited) {
-            jrtBaseNav += baseAssets;
-            jrtNavProjected += baseAssets;
-        } else {
-            srtBaseNav += baseAssets;
-        }
-        nav += baseAssets;
+        uint256 settled = Math.min(baseAssets, insuranceAmount);
+        nav += settled;
         navTimestamp = block.timestamp;
-        pendingCoverageDeficit = Math.saturatingSub(pendingCoverageDeficit, baseAssets);
-
-        (bool modified, UD60x18 aprTarget_, UD60x18 aprBase_) = fetchAprs();
-        if (modified == false) {
-            updateAprSrt(aprTarget_, aprBase_);
-        }
-        emit TrueUpApplied(baseAssets, jrtCredited, pendingCoverageDeficit);
+        insuranceAmount -= settled;
+        emit TrueUpApplied(settled, insuranceAmount);
     }
 
     /// @notice Sets the percentage of gains allocated to the coverage premium bucket
@@ -548,11 +552,19 @@ contract DYSAccounting is IAccounting, CDOComponent {
         emit PremiumPercentageChanged(premiumBps);
     }
 
-    /// @notice Sets the position of the Symbiotic coverage in the loss waterfall
-    function setCoverageFirst (bool coverageFirst_) external onlyOwner {
+    /// @notice Sets the Symbiotic network middleware (insurance pool) queried for coverage.
+    function setNetworkMiddleware (address networkMiddleware_) external onlyOwner {
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
-        coverageFirst = coverageFirst_;
-        emit CoverageFirstChanged(coverageFirst_);
+        networkMiddleware = networkMiddleware_;
+        emit NetworkMiddlewareSet(networkMiddleware_);
+    }
+
+    /// @dev Queries the network middleware for how much of `loss` it can cover. View; returns 0 when unset.
+    function _requestCoverage (uint256 loss) internal view returns (uint256) {
+        if (loss == 0 || networkMiddleware == address(0)) {
+            return 0;
+        }
+        return IInsurancePool(networkMiddleware).request(address(cdo), loss);
     }
 
     /// @notice Reduces the reserve by the specified amount
@@ -764,6 +776,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 srtNavT0,
         uint256 reserveNavT0,
         uint256 premiumNavT0,
+        uint256 insuranceAmountT0,
         uint256 navT1
     )
         public
@@ -773,11 +786,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 jrtNavT1Real,
             uint256 srtNavT1,
             uint256 reserveNavT1,
-            uint256 premiumNavT1
+            uint256 premiumNavT1,
+            uint256 insuranceAmountT1
         )
     {
         if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 > 0) {
-            return (0, 0, 0, navT1 - premiumNavT0, premiumNavT0);
+            return (0, 0, 0, navT1 - premiumNavT0, premiumNavT0, insuranceAmountT0);
         }
 
         if (!_shouldReconcile(navT0, navT1)) {
@@ -789,7 +803,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
                     jrtNavT0Real,
                     srtNavT0,
                     reserveNavT0,
-                    premiumNavT0
+                    premiumNavT0,
+                    insuranceAmountT0
                 );
         }
 
@@ -801,6 +816,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 srtNavT0,
                 reserveNavT0,
                 premiumNavT0,
+                insuranceAmountT0,
                 navT1
             );
     }
@@ -813,7 +829,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 jrtNavT0Real,
         uint256 srtNavT0,
         uint256 reserveNavT0,
-        uint256 premiumNavT0
+        uint256 premiumNavT0,
+        uint256 insuranceAmountT0
     )
         internal
         view
@@ -822,13 +839,16 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 jrtNavT1Real,
             uint256 srtNavT1,
             uint256 reserveNavT1,
-            uint256 premiumNavT1
+            uint256 premiumNavT1,
+            uint256 insuranceAmountT1
         )
     {
         // Premium (like reserve) is not accrued on the projection; only the real path accrues it.
+        // The insurance claim is likewise untouched on the projection (no realized loss to cover).
         premiumNavT1 = premiumNavT0;
+        insuranceAmountT1 = insuranceAmountT0;
         if (jrtNavT0Projected == 0 && srtNavT0 == 0) {
-            return (0, 0, 0, 0, premiumNavT0);
+            return (0, 0, 0, 0, premiumNavT0, insuranceAmountT0);
         }
 
         uint256 navTargetIndexT1 = getNavTargetIndexT1();
@@ -859,7 +879,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             srtNavT1 = srtNavT0 - srtLoss;
             reserveNavT1 = reserveNavT0 - reserveLoss;
 
-            return (jrtNavT1Projected, jrtNavT1Real, srtNavT1, reserveNavT1, premiumNavT0);
+            return (jrtNavT1Projected, jrtNavT1Real, srtNavT1, reserveNavT1, premiumNavT0, insuranceAmountT0);
         }
 
         uint256 gain_dTAbs = uint256(gain_dT);
@@ -916,7 +936,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // No changes to NAV and reserve on Projection
         reserveNavT1 = reserveNavT0;
 
-        return (jrtNavT1Projected, jrtNavT1Real, srtNavT1, reserveNavT1, premiumNavT0);
+        return (jrtNavT1Projected, jrtNavT1Real, srtNavT1, reserveNavT1, premiumNavT0, insuranceAmountT0);
     }
 
     /// @notice Reconciliation at epoch end — DYS-based PnL allocation with true-up
@@ -927,6 +947,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 srtNavT0,
         uint256 reserveNavT0,
         uint256 premiumNavT0,
+        uint256 insuranceAmountT0,
         uint256 navT1
     )
         internal
@@ -936,11 +957,21 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 jrtNavT1Real,
             uint256 srtNavT1,
             uint256 reserveNavT1,
-            uint256 premiumNavT1
+            uint256 premiumNavT1,
+            uint256 insuranceAmountT1
         )
     {
         int256 pnl = int256(navT1) - int256(navT0);
         int256 pnlTotal = pnl; // total realized profit before reserve/premium skims
+
+        // A realized gain first unwinds any outstanding insurance claim before it is skimmed/split.
+        insuranceAmountT1 = insuranceAmountT0;
+        if (pnl > 0 && insuranceAmountT1 > 0) {
+            uint256 unwind = Math.min(uint256(pnl), insuranceAmountT1);
+            insuranceAmountT1 -= unwind;
+            pnl -= int256(unwind);
+            pnlTotal -= int256(unwind);
+        }
 
         // Reserve allocation
         uint256 reserve_dT = 0;
@@ -1089,6 +1120,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
             loss -= jrtLoss;
             uint256 reserveLoss = Math.min(reserveNavT1, loss);
             loss -= reserveLoss;
+            // Symbiotic coverage takes the Senior-bound remainder (Srt held whole, booked to insuranceAmount).
+            uint256 covered = _requestCoverage(loss);
+            loss -= covered;
             // Apply SRT loss to recently accrued balance
             uint256 srtLoss = Math.min(srtNavT1, loss);
             // The market is considered abandoned if losses would consume the protected dust NAV
@@ -1097,15 +1131,16 @@ contract DYSAccounting is IAccounting, CDOComponent {
             jrtNavT1Real = jrtNavT0Real - jrtLoss;
             srtNavT1 -= srtLoss;
             reserveNavT1 -= reserveLoss;
+            insuranceAmountT1 = insuranceAmountT1 + covered;
         }
 
         // Invariant: Total new NAV must equal sum of all NAVs
         // This ensures no value is created or destroyed during reconciliation
-        if (navT1 != (jrtNavT1Real + srtNavT1 + reserveNavT1 + premiumNavT1)) {
+        if (navT1 + insuranceAmountT1 != (jrtNavT1Real + srtNavT1 + reserveNavT1 + premiumNavT1)) {
             revert InvalidNavSplit(navT1, jrtNavT1Real, srtNavT1, reserveNavT1, premiumNavT1);
         }
 
-        return (jrtNavT1Real, jrtNavT1Real, srtNavT1, reserveNavT1, premiumNavT1);
+        return (jrtNavT1Real, jrtNavT1Real, srtNavT1, reserveNavT1, premiumNavT1, insuranceAmountT1);
     }
 
     /// @notice Computes the Senior NAV floor based on the rolling 24h window
@@ -1139,16 +1174,15 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
         bool isReconciliation = _shouldReconcile(nav, navT1);
 
-        uint256 jrtRealT0 = jrtBaseNav;
-        // Senior target NAV for the elapsed period; used to detect a coverage deficit below.
-        uint256 srtTargetNavT1 = srtBaseNav * getSrtTargetIndexT1() / srtTargetIndex;
+        uint256 insuranceAmountT0 = insuranceAmount;
 
         (
             uint256 jrtNavT1Projected,
             uint256 jrtNavT1Real,
             uint256 srtNavT1,
             uint256 reserveNavT1,
-            uint256 premiumNavT1
+            uint256 premiumNavT1,
+            uint256 insuranceAmountT1
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
@@ -1156,6 +1190,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 srtBaseNav,
                 reserveNav,
                 premiumNav,
+                insuranceAmount,
                 navT1
             );
 
@@ -1215,14 +1250,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
         jrtBaseNav = jrtNavT1Real;
         reserveNav = reserveNavT1;
         premiumNav = premiumNavT1;
+        insuranceAmount = insuranceAmountT1;
 
-        // Accrue the deficit that the Symbiotic coverage should absorb; see {coverageFirst}.
-        uint256 deficit_dT = coverageFirst
-            ? Math.saturatingSub(jrtRealT0, jrtNavT1Real)
-            : Math.saturatingSub(srtTargetNavT1, srtNavT1);
-        if (deficit_dT > 0) {
-            pendingCoverageDeficit += deficit_dT;
-            emit CoverageDeficitAccrued(deficit_dT, pendingCoverageDeficit);
+        if (insuranceAmountT1 > insuranceAmountT0) {
+            emit CoverageClaimed(insuranceAmountT1 - insuranceAmountT0, insuranceAmountT1);
         }
     }
 

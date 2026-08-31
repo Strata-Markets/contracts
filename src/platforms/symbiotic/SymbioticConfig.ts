@@ -6,7 +6,7 @@ export interface ISymbioticMarketConfig {
     name: string;
     /// The market's StrataCDO proxy.
     cdo: TEth.Address;
-    /// The market's Accounting proxy (source of pendingCoverageDeficit).
+    /// The market's Accounting proxy.
     accounting: TEth.Address;
     /// Token symbol of the market's base asset; resolved to an address via Addresses[network].
     baseAsset: string;
