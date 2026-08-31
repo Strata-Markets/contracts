@@ -54,8 +54,11 @@ contract DYSTrueUpTest is Test {
         );
         pool = new MockInsurancePool();
         pool.setCapacity(1_000_000e18);
+        accounting.setNetworkMiddleware(address(pool));
 
         accounting.setReserveBps(0.1e18);
+        // Premium policy is owned by the middleware, so the pool sets it.
+        vm.prank(address(pool));
         accounting.setPremiumBps(0.1e18);
 
         // Seed 1000 Jrt + 1000 Srt.
@@ -65,7 +68,6 @@ contract DYSTrueUpTest is Test {
 
     function setUp() public {
         _deploy();
-        accounting.setNetworkMiddleware(address(pool));
     }
 
     /// A loss large enough to overflow Junior + reserve into Senior engages coverage; trueUp settles.
@@ -108,6 +110,7 @@ contract DYSTrueUpTest is Test {
 
         // Fresh instance without a pool, same loss.
         _deploy();
+        accounting.setNetworkMiddleware(address(0));
         mockStrategyTvl = 500e18;
         accounting.updateAccounting();
         uint256 srtNoPool = accounting.srtBaseNav();

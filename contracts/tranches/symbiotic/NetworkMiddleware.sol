@@ -139,6 +139,15 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
         emit MarketSet(cdo, address(accounting), baseAsset, bufferBps, enabled);
     }
 
+    /// @notice Sets the premium skim rate on a market's accounting contract.
+    /// @dev The accounting contract restricts setPremiumBps to this middleware, so the premium
+    ///      policy is owned here rather than by the market's own owner.
+    /// @param cdo The CDO address identifying the market in the coverage registry.
+    /// @param bps The new premium percentage in basis points (1e18 = 100%).
+    function setMarketPremiumBps(address cdo, uint256 bps) external onlyOwner {
+        markets[cdo].accounting.setPremiumBps(bps);
+    }
+
     /// @notice Sets the shared price source used for all deficit -> vault-asset conversions.
     function setOracle(IOracleAdapter oracle_) external onlyOwner {
         oracle = oracle_;

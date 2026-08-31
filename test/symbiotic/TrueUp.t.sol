@@ -58,6 +58,8 @@ contract TrueUp is Test {
         // Non-zero reserve and premium skims: if coverage or settlement ever ran through the gain
         // waterfall, these would silently eat part of the covered/injected amount.
         accounting.setReserveBps(0.1e18);
+        // Premium policy is owned by the middleware, so the pool sets it.
+        vm.prank(address(pool));
         accounting.setPremiumBps(0.1e18);
 
         // Seed an initial deposit: 1000 Jrt + 1000 Srt, mirroring what CDO.deposit() would book.

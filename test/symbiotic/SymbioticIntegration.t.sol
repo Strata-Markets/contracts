@@ -337,10 +337,9 @@ contract SymbioticIntegrationTest is Test {
     }
 
     function test_premium_accruesAndFlowsToUnderwriters() public {
-        // Enable the premium skim
-        address accountingOwner = IOwnableLike(ACCOUNTING_PROXY).owner();
-        vm.prank(accountingOwner);
-        accounting.setPremiumBps(0.1e18); // 10% of gains
+        // Enable the premium skim (the middleware owns the premium policy)
+        vm.prank(strataOps);
+        middleware.setMarketPremiumBps(CDO_PROXY, 0.1e18); // 10% of gains
 
         // Strategy earns yield -> premium accrues
         _induceGain(strategy.totalAssets() / 50); // 2% gain
@@ -383,9 +382,8 @@ contract SymbioticIntegrationTest is Test {
         cdo.setManualPremiumDistribution(true);
         vm.stopPrank();
 
-        address accountingOwner = IOwnableLike(ACCOUNTING_PROXY).owner();
-        vm.prank(accountingOwner);
-        accounting.setPremiumBps(0.1e18);
+        vm.prank(strataOps);
+        middleware.setMarketPremiumBps(CDO_PROXY, 0.1e18);
 
         _induceGain(strategy.totalAssets() / 50); // 2% gain
         assertGt(accounting.totalPremium(), 0, "premium should accrue on gains");

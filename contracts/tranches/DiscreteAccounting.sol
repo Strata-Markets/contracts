@@ -166,6 +166,14 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         useNavAtReconciliation = useNavAtReconciliation_;
     }
 
+    /// @notice Restricts a call to the registered Symbiotic network middleware.
+    modifier onlyNetworkMiddleware() {
+        if (msg.sender != networkMiddleware) {
+            revert InvalidCaller(msg.sender);
+        }
+        _;
+    }
+
     function _navAnchor() private view returns (uint256) {
         return useNavAtReconciliation ? lastReconciliation : navTimestamp;
     }
@@ -268,7 +276,8 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     }
 
     /// @notice Sets the percentage of gains allocated to the coverage premium bucket
-    function setPremiumBps (uint256 bps) external onlyOwner {
+    /// @dev Only callable by the Symbiotic network middleware, which owns the premium policy
+    function setPremiumBps (uint256 bps) external onlyNetworkMiddleware {
         require(bps <= PREMIUM_BPS_MAX && bps != premiumBps, "InvalidNewPremium");
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         premiumBps = bps;

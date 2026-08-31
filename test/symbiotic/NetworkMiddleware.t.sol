@@ -60,9 +60,15 @@ contract MockAppAdapter {
 /// @notice Minimal accounting mock exposing a settable coverage deficit.
 contract MockStrataAccounting is IStrataAccounting {
     uint256 public insuranceAmount;
+    uint256 public premiumBps;
 
     function setInsuranceAmount(uint256 deficit) external {
         insuranceAmount = deficit;
+    }
+
+    /// @dev Mirrors the real accounting: only the middleware may set the premium.
+    function setPremiumBps(uint256 bps) external {
+        premiumBps = bps;
     }
 }
 
@@ -133,6 +139,18 @@ contract NetworkMiddlewareTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vm.prank(stranger);
         middleware.setMarket(cdo, accounting, address(usde), 0, true);
+    }
+
+    function test_setMarketPremiumBps_forwardsToAccounting() public {
+        vm.prank(owner);
+        middleware.setMarketPremiumBps(cdo, 0.1e18);
+        assertEq(accounting.premiumBps(), 0.1e18, "premium should be set on the market's accounting");
+    }
+
+    function test_setMarketPremiumBps_onlyOwner() public {
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.prank(stranger);
+        middleware.setMarketPremiumBps(cdo, 0.1e18);
     }
 
     function test_slash_convertsDeficitAndBooks() public {

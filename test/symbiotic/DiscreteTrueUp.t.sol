@@ -52,6 +52,8 @@ contract DiscreteTrueUpTest is Test {
         accounting.setNetworkMiddleware(address(pool));
 
         accounting.setReserveBps(0.1e18);
+        // Premium policy is owned by the middleware, so the pool sets it.
+        vm.prank(address(pool));
         accounting.setPremiumBps(0.1e18);
 
         // Seed 1000 Jrt + 1000 Srt.
@@ -134,6 +136,17 @@ contract DiscreteTrueUpTest is Test {
         assertEq(accounting.insuranceAmount(), 0, "no claim without a pool");
         assertEq(accounting.jrtBaseNav(), 0, "Jrt fully absorbs");
         assertEq(accounting.srtBaseNav(), 950e18, "Srt absorbs the residual loss");
+    }
+
+    function test_setPremiumBps_onlyNetworkMiddleware() public {
+        // The owner (this contract) is not the middleware, so it cannot set the premium.
+        vm.expectRevert();
+        accounting.setPremiumBps(0.2e18);
+
+        // The middleware can.
+        vm.prank(address(pool));
+        accounting.setPremiumBps(0.2e18);
+        assertEq(accounting.premiumBps(), 0.2e18);
     }
 
     function test_reducePremium_withdrawsFromBucketAndNav() public {

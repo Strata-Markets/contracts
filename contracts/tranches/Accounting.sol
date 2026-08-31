@@ -159,6 +159,14 @@ contract Accounting is IAccounting, CDOComponent {
         ONE_ASSET = 10 ** navDecimals;
     }
 
+    /// @notice Restricts a call to the registered Symbiotic network middleware.
+    modifier onlyNetworkMiddleware() {
+        if (msg.sender != networkMiddleware) {
+            revert InvalidCaller(msg.sender);
+        }
+        _;
+    }
+
     function initialize(
         address owner_,
         address acm_,
@@ -787,9 +795,9 @@ contract Accounting is IAccounting, CDOComponent {
 
     /// @notice Sets the percentage of gains allocated to the coverage premium bucket
     /// @param bps The new premium percentage in basis points (1e18 = 100%)
-    /// @dev Only callable by the protocol owner
+    /// @dev Only callable by the Symbiotic network middleware, which owns the premium policy
     /// @dev The maximum allowed value is defined by PREMIUM_BPS_MAX
-    function setPremiumBps (uint256 bps) external onlyOwner {
+    function setPremiumBps (uint256 bps) external onlyNetworkMiddleware {
         require(bps <= PREMIUM_BPS_MAX && bps != premiumBps, "InvalidNewPremium");
         updateAccountingInner(cdo.totalStrategyAssets());
         premiumBps = bps;

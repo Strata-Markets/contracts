@@ -267,6 +267,14 @@ contract DYSAccounting is IAccounting, CDOComponent {
         useConservativeRedemptionPrice = useConservativeRedemptionPrice_;
     }
 
+    /// @notice Restricts a call to the registered Symbiotic network middleware.
+    modifier onlyNetworkMiddleware() {
+        if (msg.sender != networkMiddleware) {
+            revert InvalidCaller(msg.sender);
+        }
+        _;
+    }
+
     function initialize(
         address owner_,
         address acm_,
@@ -545,7 +553,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
     }
 
     /// @notice Sets the percentage of gains allocated to the coverage premium bucket
-    function setPremiumBps (uint256 bps) external onlyOwner {
+    /// @dev Only callable by the Symbiotic network middleware, which owns the premium policy
+    function setPremiumBps (uint256 bps) external onlyNetworkMiddleware {
         require(bps <= PREMIUM_BPS_MAX && bps != premiumBps, "InvalidNewPremium");
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         premiumBps = bps;
