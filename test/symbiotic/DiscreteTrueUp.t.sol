@@ -8,10 +8,11 @@ import { DiscreteAccounting } from "../../contracts/tranches/DiscreteAccounting.
 import { IStrataCDO } from "../../contracts/tranches/interfaces/IStrataCDO.sol";
 import { IAprPairFeed } from "../../contracts/tranches/interfaces/IAprPairFeed.sol";
 import { AccessControlManager } from "../../contracts/governance/AccessControlManager.sol";
+import { MockInsurancePool } from "./mocks/MockInsurancePool.sol";
 
-/// @notice Verifies the Symbiotic coverage additions on DiscreteAccounting: premium accrues on
-///         realized gains, trueUp() restores the covered tranche directly (never skimmed by
-///         reserve/premium and never re-detected as a fresh gain), for both coverageFirst modes.
+/// @notice Verifies the insuranceAmount coverage model on DiscreteAccounting: a covered loss holds
+///         Senior whole and books insuranceAmount, trueUp() settles it (no tranche credit, never
+///         skimmed), a later gain unwinds it, and premium still accrues/pays out.
 /// @dev The test contract plays the CDO: it implements the two-arg totalStrategyAssets(nav, anchor)
 ///      that DiscreteAccounting calls, and being `cdo`, its calls pass the onlyCDO checks.
 contract DiscreteTrueUpTest is Test {
@@ -19,9 +20,10 @@ contract DiscreteTrueUpTest is Test {
     uint256 constant ONE_ASSET = 1e18;
 
     DiscreteAccounting accounting;
+    MockInsurancePool pool;
     uint256 mockStrategyTvl;
 
-    event TrueUpApplied(uint256 amount, bool jrtCredited, uint256 pendingCoverageDeficit);
+    event TrueUpApplied(uint256 amount, uint256 insuranceAmount);
 
     /// @dev DiscreteAccounting reads the strategy through this two-arg overload.
     function totalStrategyAssets(uint256, uint256) external view returns (uint256) {
@@ -45,6 +47,10 @@ contract DiscreteTrueUpTest is Test {
             )
         );
 
+        pool = new MockInsurancePool();
+        pool.setCapacity(1_000_000e18);
+        accounting.setNetworkMiddleware(address(pool));
+
         accounting.setReserveBps(0.1e18);
         accounting.setPremiumBps(0.1e18);
 
@@ -62,66 +68,72 @@ contract DiscreteTrueUpTest is Test {
         assertEq(accounting.totalPremium(), 10e18, "premium should skim 10% of the gain");
         assertEq(accounting.jrtBaseNav(), 1080e18, "Junior gets the gain net of both skims");
         assertEq(accounting.srtBaseNav(), 1000e18, "Senior unaffected (apr feed = 0)");
+        assertEq(accounting.insuranceAmount(), 0, "no coverage claim on a gain");
     }
 
-    function test_coverageFirstFalse_trueUpRestoresSrt_bypassingSkim() public {
-        // Realize a gain first so reserve + premium hold non-zero balances.
-        mockStrategyTvl = 2100e18;
-        accounting.updateAccounting();
-        uint256 premiumBefore = accounting.totalPremium();
-        assertEq(premiumBefore, 10e18);
-
-        // Loss large enough (1100) to wipe Junior (1080) + reserve (10) and reach Senior.
-        mockStrategyTvl = 1000e18;
+    function test_coverageHoldsSrtWhole_thenTrueUpSettles() public {
+        // Loss 1050: Jrt fully absorbs (1000), the Srt-bound 50 is covered, so Srt stays whole.
+        mockStrategyTvl = 950e18;
         accounting.updateAccounting();
 
-        uint256 deficit = accounting.pendingCoverageDeficit();
-        assertGt(deficit, 0, "Senior shortfall should accrue a coverage deficit");
-        assertEq(accounting.premiumNav(), premiumBefore, "premium must never absorb losses");
-        uint256 srtAfterLoss = accounting.srtBaseNav();
+        assertEq(accounting.jrtBaseNav(), 0, "Jrt absorbs first");
+        assertEq(accounting.srtBaseNav(), 1000e18, "Srt held whole by coverage");
+        assertEq(accounting.insuranceAmount(), 50e18, "claim equals the Srt-bound loss");
+        assertEq(accounting.premiumNav(), 0, "premium never absorbs losses");
+
+        uint256 reserveBefore = accounting.reserveNav();
 
         vm.expectEmit(false, false, false, true);
-        emit TrueUpApplied(deficit, false, 0);
-        bool jrtCredited = accounting.trueUp(deficit);
+        emit TrueUpApplied(50e18, 0);
+        accounting.trueUp(50e18);
 
-        assertFalse(jrtCredited, "Srt is the credited tranche in coverageFirst=false");
-        assertEq(accounting.srtBaseNav(), srtAfterLoss + deficit, "Srt restored by exactly the deficit");
-        assertEq(accounting.premiumNav(), premiumBefore, "true-up must not touch the premium bucket");
-        assertEq(accounting.pendingCoverageDeficit(), 0, "deficit cleared");
+        assertEq(accounting.insuranceAmount(), 0, "claim fully settled");
+        assertEq(accounting.srtBaseNav(), 1000e18, "Srt untouched by settlement (already whole)");
+        assertEq(accounting.reserveNav(), reserveBefore, "settlement not skimmed by reserve");
+        assertEq(accounting.nav(), 950e18 + 50e18, "nav rises by exactly the settled amount");
 
-        // Non-regression: with the injected funds now in the strategy, a re-accounting must not
-        // re-detect them as a gain (which would skim reserve/premium or inflate Junior).
+        // Funds land in the strategy; re-accounting must not re-detect them as a gain.
         mockStrategyTvl = accounting.nav();
-        uint256 premiumSnapshot = accounting.premiumNav();
-        uint256 reserveSnapshot = accounting.reserveNav();
-        uint256 srtSnapshot = accounting.srtBaseNav();
         accounting.updateAccounting();
-        assertEq(accounting.premiumNav(), premiumSnapshot, "no phantom gain to premium");
-        assertEq(accounting.reserveNav(), reserveSnapshot, "no phantom gain to reserve");
-        assertEq(accounting.srtBaseNav(), srtSnapshot, "Srt stays restored");
-        assertEq(accounting.pendingCoverageDeficit(), 0, "no new deficit");
+        assertEq(accounting.insuranceAmount(), 0, "no new claim");
+        assertEq(accounting.srtBaseNav(), 1000e18, "Srt stays whole");
     }
 
-    function test_coverageFirstTrue_trueUpRestoresJrt() public {
-        accounting.setCoverageFirst(true);
-
-        // Pure Junior-side loss (100), Senior untouched, Junior far from floor.
+    function test_smallLossHitsJrt_noClaim() public {
+        // Loss 100, within Jrt's capacity: Jrt eats it, nothing reaches Srt, no coverage.
         mockStrategyTvl = 1900e18;
         accounting.updateAccounting();
 
-        uint256 deficit = accounting.pendingCoverageDeficit();
-        assertEq(deficit, 100e18, "deficit equals the Junior decline");
-        assertEq(accounting.srtBaseNav(), 1000e18, "Senior untouched");
-        uint256 jrtAfterLoss = accounting.jrtBaseNav();
+        assertEq(accounting.jrtBaseNav(), 900e18, "Jrt absorbs the loss it can cover");
+        assertEq(accounting.srtBaseNav(), 1000e18, "Srt untouched");
+        assertEq(accounting.insuranceAmount(), 0, "no claim: nothing reached Srt");
+    }
 
-        vm.expectEmit(false, false, false, true);
-        emit TrueUpApplied(deficit, true, 0);
-        bool jrtCredited = accounting.trueUp(deficit);
+    function test_recoveryGain_unwindsClaim_beforeSkim() public {
+        // Covered loss: 50 booked to the claim.
+        mockStrategyTvl = 950e18;
+        accounting.updateAccounting();
+        assertEq(accounting.insuranceAmount(), 50e18);
 
-        assertTrue(jrtCredited, "Jrt is the credited tranche in coverageFirst=true");
-        assertEq(accounting.jrtBaseNav(), jrtAfterLoss + deficit, "Jrt restored by exactly the deficit");
-        assertEq(accounting.jrtNavProjected(), accounting.jrtBaseNav(), "projected tracks real after true-up");
-        assertEq(accounting.pendingCoverageDeficit(), 0, "deficit cleared");
+        uint256 premiumBefore = accounting.premiumNav();
+
+        // A 30 recovery gain: fully consumed unwinding the claim, so it skims nothing.
+        mockStrategyTvl = 980e18;
+        accounting.updateAccounting();
+
+        assertEq(accounting.insuranceAmount(), 20e18, "gain unwinds the claim first");
+        assertEq(accounting.premiumNav(), premiumBefore, "recovery gain not skimmed by premium");
+    }
+
+    function test_noPool_lossHitsTranches_noClaim() public {
+        accounting.setNetworkMiddleware(address(0));
+
+        mockStrategyTvl = 950e18;
+        accounting.updateAccounting();
+
+        assertEq(accounting.insuranceAmount(), 0, "no claim without a pool");
+        assertEq(accounting.jrtBaseNav(), 0, "Jrt fully absorbs");
+        assertEq(accounting.srtBaseNav(), 950e18, "Srt absorbs the residual loss");
     }
 
     function test_reducePremium_withdrawsFromBucketAndNav() public {
@@ -142,6 +154,6 @@ contract DiscreteTrueUpTest is Test {
         uint256 jrtSnapshot = accounting.jrtBaseNav();
         accounting.updateAccounting();
         assertEq(accounting.jrtBaseNav(), jrtSnapshot, "no phantom loss to Junior");
-        assertEq(accounting.pendingCoverageDeficit(), 0, "no deficit from the premium payout");
+        assertEq(accounting.insuranceAmount(), 0, "no claim from the premium payout");
     }
 }
