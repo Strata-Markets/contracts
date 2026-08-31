@@ -19,13 +19,22 @@ UAction.create({
     async 'deploy'() {
         const config = await PlatformFactory.ConfigLoader.fetch();
         const cdo = config.cdo as TCDOKey;
+        const batch = new BatchAgent().enable();
         $require.oneOf(cdo, Object.keys(Tranches));
         const { tranches, deployer, client } = await PlatformFactory.init({
             cdo,
-            accounts: 'operator'
+            deployments: 'redeploy'
         });
 
         await tranches.ensureDeployment({ initialDeposit: true });
+
+        console.log(await batch.print({
+            deployments: [
+                tranches.ds,
+                tranches.common
+            ]
+        }));
+        await batch.execute();
     },
     async 'update and configure'() {
         const config = await PlatformFactory.ConfigLoader.fetch();

@@ -501,5 +501,18 @@
     "gas": "670303",
     "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
     "timestamp": 1777071811
+  },
+  {
+    "id": "SaturnLensPriceFeed",
+    "name": "LensPriceFeed",
+    "main": "./0xc/hardhat/LensPriceFeed/LensPriceFeed.ts",
+    "bytecodeHash": "0xa49193d4fb5e68f27ee68a95bd9dab48b2b5029bf771c7b724a04f43233b0c12",
+    "address": "0x6EeF904681b83f6056eF009Ab0375185E53466ED",
+    "block": 25544500,
+    "tx": "0x2c48b3fc4925dc1960dd00fe832becea65e38c91beef2eac446a1998820f0daa",
+    "gas": "165381",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1784196122,
+    "verified": "2026-07-16T10:02:17.015Z"
   }
 ]

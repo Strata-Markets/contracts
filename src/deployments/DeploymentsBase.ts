@@ -41,6 +41,13 @@ import { DiscreteAccounting } from '@0xc/hardhat/DiscreteAccounting/DiscreteAcco
 import { DYSAccounting } from '@0xc/hardhat/DYSAccounting/DYSAccounting';
 import { ERC20 } from 'dequanto/prebuilt/openzeppelin/ERC20';
 import { KyberSwapAdapter } from '@0xc/hardhat/KyberSwapAdapter/KyberSwapAdapter';
+import { ChainAccountService } from 'dequanto/ChainAccountService';
+import { $is } from 'dequanto/utils/$is';
+import { AccountablePushOracle } from '@0xc/hardhat/AccountablePushOracle/AccountablePushOracle';
+import { $promise } from 'dequanto/utils/$promise';
+import { $account } from 'dequanto/utils/$account';
+import { Ownable } from 'dequanto/prebuilt/openzeppelin/Ownable';
+import { RiskPremiumSigmoid } from '@0xc/hardhat/RiskPremiumSigmoid/RiskPremiumSigmoid';
 
 
 export interface ICdoDeploymentsBase {
@@ -108,29 +115,26 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         this.platform = Platforms[params.client.network];
         this.accounts = params.accounts;
         this.pfx = $require.notNull(params.cdoInfo?.pfx ?? ContractsPrefixMapping[params.cdo], `No contract prefix for ${params.cdo} found`);
-
-        let directoryPfx = '';
-        if (params.cdo !== 'ethena' && params.cdo !== 'neutrl') {
-            // @TODO split current ethena and neutrl deployments into subfolders
-            directoryPfx = params.cdo + '/';
-        }
+        let directoryPfx = params.cdo + '/';
 
         this.ds = new Deployments(params.client, params.deployer, {
             directory: `./deployments/${params.isTest ? 'test/' : ''}${directoryPfx}`,
             whenBytecodeChanged: params.deployments ?? (this.isTestnet() ? null : 'throw'),
             fork: params.client.forked?.platform,
             whenUpgradeRequired: params.whenUpgradeRequired,
+            owner: this.owner,
         });
         this.common = new Deployments(params.client, params.deployer, {
             directory: `./deployments/${params.isTest ? 'test/' : ''}`,
             whenBytecodeChanged: params.deployments ?? (this.isTestnet() ? null : 'throw'),
             fork: params.client.forked?.platform,
             whenUpgradeRequired: params.whenUpgradeRequired,
+            owner: this.owner,
         });
 
         let info = JSON.parse(JSON.stringify(Tranches[params.cdo])) as ICDO;
 
-        if (this.platform.Tranches?.ethena) {
+        if (this.platform?.Tranches?.ethena) {
             info.jrt = { ...info.jrt, ...(this.platform.Tranches?.[params.cdo]?.jrt ?? {}) } as any;
             info.srt = { ...info.srt, ...(this.platform.Tranches?.[params.cdo]?.srt ?? {}) } as any;
         }
@@ -180,6 +184,10 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         return base;
     }
 
+    protected getDepositAmount (): number {
+        return 40;
+    }
+
 
     async get<T extends ContractBase>(Ctor: Constructor<T>, params?: {
         id?: 'jrUSDe' | 'srUSDe' | string,
@@ -212,10 +220,13 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             if (contract) {
                 return { contract };
             }
-            throw new Error(`No ${Ctor.name} found for id ${id} and ${this.pfx} in deployments`);
+            let byId = all.filter(d => params?.sfx ? d.id.endsWith(params.id) : d.id === params.id);
+            if (byId.length === 1) {
+                let contract = await ds.getIfExists<T>(Ctor, { id: byId[0].id });
+                return { contract };
+            }
+            return { error: `No ${Ctor.name} found for id ${id} and ${this.pfx} in deployments` };
         }
-
-
         let byName = all.filter(d => params?.sfx ? d.name.endsWith(Ctor.name) : d.name === Ctor.name);
         if (byName.length === 0) {
             return { error: `${Ctor.name} not found in deployments` }
@@ -280,13 +291,17 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         return acm;
     }
 
-    async ensureRole(role: TEth.Hex, account: TEth.Address) {
+    async ensureRole(roleOrName: TEth.Hex | keyof typeof this.ROLES, account: TEth.Address) {
+         const role = roleOrName === '0x' || $is.Hex(roleOrName)
+            ? roleOrName
+            : this.ROLES[roleOrName];
         $require.Hex(role, 'Role is undefined');
         $require.AddressNotEmpty(account, 'Account is empty');
         let acm = await this.ensureACM();
+        let acmAdmin = await this.getAccountByRole('0x');
         let has = await acm.hasRole(role, account);
         if (has === false) {
-            await acm.$receipt().grantRole(this.owner, role, account);
+            await acm.$receipt().grantRole(acmAdmin, role, account);
         }
     }
     async ensureRoles(roles: Record<string, Record<TEth.Address, boolean>>) {
@@ -728,7 +743,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         if (this.owner.type === 'safe') {
             throw new Error(`Mainnet deployment not ready`);
         }
-        const AMOUNT = $bigint.toWei(20, await erc20.decimals());
+        const AMOUNT = $bigint.toWei(this.getDepositAmount(), await erc20.decimals());
         let balance = await erc20.balanceOf(this.owner.address);
         if (balance < AMOUNT) {
             if (this.client.network === 'hardhat' || this.client.network === 'hoodi') {
@@ -757,8 +772,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         let erc20 = await this.getDepositToken();
         let { jrtVault, srtVault, cdo } = tranches;
 
-
-        const AMOUNT = $bigint.toWei(40, await erc20.decimals());
+        const AMOUNT = $bigint.toWei(this.getDepositAmount(), await erc20.decimals());
         let balance = await erc20.balanceOf(this.owner.address);
         if (balance < AMOUNT) {
             throw new Error(`Not enough balance for initial deposit.`);
@@ -795,10 +809,12 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         let acm = await this.ensureACM();
         let { base } = await this.ensureUnderlying();
         let { cdo, jrtVault } = await this.ensureCDO();
+
+        let v = this.cdoInfo.ContractVersions?.depositor ?? 'V3';
         let { contract: depositor } = await this.common.ensureWithProxy(TrancheDepositor, {
             id: this.isTestnet()
                 ? `${this.pfx}TrancheDepositor`
-                : `TrancheDepositorV3`,
+                : `TrancheDepositor${v}`,
             initialize: [
                 this.owner.address,
                 acm.address
@@ -807,13 +823,64 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         });
 
         await this.ensureRole($contract.keccak256('DEPOSITOR_CONFIG_ROLE'), this.owner.address);
-        let status = await depositor.tranches(jrtVault.address, base.address);
+        let depositToken = await this.getDepositToken();
+        let status = await depositor.tranches(jrtVault.address, depositToken.address);
         if (status == false) {
             await depositor.$receipt().addCdo(this.owner, cdo.address);
         }
 
         await this.configureDepositor(depositor);
         return depositor;
+    }
+
+    async ensureValuationOracles() {
+        const { valuationKeeper, valuationKeeperOptions } = this.cdoInfo.ContractVersions;
+        if (valuationKeeper == null) {
+            return;
+        }
+
+        let { cdo, accounting } = await this.ensureCDO();
+        let gracePeriod = $date.parseTimespan(valuationKeeperOptions?.gracePeriod ?? '0s', { get: 's' });
+        $require.True(this.client.platform === 'hardhat' || gracePeriod > 0, `GracePeriod MUST be set on Live`);
+
+        await this.ds.configure(accounting, {
+            title: `Update GracePeriod`,
+            value: gracePeriod,
+            current: async () => {
+                const { result, error } = await $promise.caught(accounting.valuationGracePeriod());
+                return error == null ? result : 0;
+            },
+            updater: async (accounting, value) => {
+                await accounting.$receipt().setValuationGracePeriod(this.owner, value)
+            }
+        });
+
+        let observer = await this.getAccount('observer');
+        let { contract: accountable } = await this.common.ensure(AccountablePushOracle, {
+            arguments: [
+                this.owner.address,
+                observer.address,
+            ]
+        });
+        await this.ensureRole('PAUSER_ROLE', accountable.address);
+
+        if (valuationKeeper === 'Accountable') {
+            await this.ds.configure(cdo, {
+                title: `Update the ValuationKeeper`,
+                value: accountable.address,
+                current: async () => {
+                    const { result, error } = await $promise.caught(cdo.valuationKeeper());
+                    return error == null ? result : $address.ZERO;
+                },
+                updater: async (cdo, value) => {
+                    await cdo.$receipt().setValuationKeeper(this.owner, value);
+                },
+            });
+        }
+
+        return {
+            accountable
+        };
     }
 
 
@@ -831,6 +898,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         });
         return { lens: cdoLens }
     }
+    async configureLenses(): Promise<{ lens: CDOLens } | void> {}
 
     protected getContractId(name: keyof ICDO['Contracts'][''] | string) {
         if (this.pfx) {
@@ -872,6 +940,30 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             return null;
         }
         const { accounting } = contracts;
+        if (risk.model?.type === 'sigmoid') {
+            const {min, max, k, sOptimal } = risk.model;
+            const id = [min, max, k, sOptimal].join('-')
+            const model = await this.common.ensureContract(RiskPremiumSigmoid, {
+                id: `RiskPremiumSigmoid-${id}`,
+                arguments: [
+                    $bigint.toWei(min),
+                    $bigint.toWei(max),
+                    $bigint.toWei(k),
+                    $bigint.toWei(sOptimal)
+                ]
+            });
+            await this.ds.configure(accounting, {
+                title: `Update Accounting Risk Premium Model`,
+                value: model.address,
+                current: accounting.riskPremiumModel(),
+                updater: async (accounting, value) => {
+                    const acc = await this.getAccountByRole('UPDATER_STRAT_CONFIG_ROLE');
+                    await accounting.$receipt().setRiskModel(acc, model.address);
+                }
+            });
+            return;
+        }
+
         const x = $bigint.toWei(risk.x ?? 0.2, 18);
         const y = $bigint.toWei(risk.y ?? 0.2, 18);
         const k = $bigint.toWei(risk.k ?? 0.3, 18);
@@ -1012,6 +1104,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             configManager,
         };
 
+        await this.ensureValuationOracles();
         await this.configure(contractsAll);
         return contractsAll;
     }
@@ -1029,5 +1122,50 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
     public async ensureKyberSwapAdapter () {
         let { contract: swapper } = await this.common.ensure(KyberSwapAdapter);
         return swapper;
+    }
+
+    public async getAccount(mix: TEth.Address | string): Promise<TEth.IAccount> {
+        let arr = [
+            this.accounts.deployer,
+            this.accounts.observer,
+            ...Object.values(this.accounts.safe),
+            ...Object.values(this.accounts.timelock),
+        ];
+        let account = arr.find(x => $address.eq(x?.address, mix) || x?.name === mix);
+        if (account) {
+            if (this.client.platform === 'hardhat' && /(safe|timelock)/.test(account.name)) {
+                // Add the :hh suffix to prevent dequanto from detecting the accounts as Safe or Timelock agents.
+                return {
+                    ...account,
+                    name: account.name.replace(/(safe|timelock)/, '$1:hh')
+                };
+            }
+            return account;
+        }
+        return $require.notNull(await ChainAccountService.get(mix), `Account ${mix} not found`);
+    }
+    public async getAccountOwner(contract: TEth.Address): Promise<TEth.IAccount> {
+        let ownabled = new Ownable(contract, this.client);
+        let owner = await ownabled.owner();
+        return this.getAccount(owner);
+    }
+
+    public async getAccountByRole(roleOrName: TEth.Hex | keyof typeof this.ROLES): Promise<TEth.IAccount> {
+        if (this.client.network === 'hardhat') {
+            // In the raw Hardhat network (not forked) the acm admin is the deployer
+            return this.owner;
+        }
+        const role = roleOrName === '0x' || $is.Hex(roleOrName)
+            ? roleOrName
+            : $contract.keccak256(roleOrName, 'hex');
+        const arr = [
+            this.accounts.timelock.config,
+            this.accounts.timelock.admin,
+            this.accounts.safe.admin,
+            this.accounts.safe.operator,
+            this.accounts.deployer,
+        ] as TEth.IAccount[];
+        const acm = await this.get(AccessControlManager);
+        return alot(arr).findAsync(account => acm.hasRole(role, account.address));
     }
 }

@@ -1,10 +1,35 @@
 import { $bigint } from 'dequanto/utils/$bigint';
 import { $date } from 'dequanto/utils/$date';
 import { $number } from 'dequanto/utils/$number';
+import { $require } from 'dequanto/utils/$require';
 
 const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
 export namespace $apr {
     const DECIMALS = 12;
+    const SECONDS_PER_YEAR = BigInt(365 * 24 * 60 * 60);
+    const ONE_APR = BigInt(1e12);
+
+    export function calcAprFromExchangeRates (
+        p0: number | bigint,
+        p1: number | bigint,
+        t0: number | bigint,
+        t1: number | bigint
+    ) {
+        $require.lte(t0, t1, `TimeArrow`);
+        const dt = BigInt(t1) - BigInt(t0);
+        if (dt == 0n || p1 == p0 || p0 == 0) {
+            return 0;
+        }
+        const p0_ = typeof p0 === 'number'
+            ? $bigint.toWei(p0, 6)
+            : p0;
+        const p1_ = typeof p1 === 'number'
+            ? $bigint.toWei(p1, 6)
+            : p1;
+
+        const apr = (p1_ - p0_) * SECONDS_PER_YEAR * ONE_APR / p0_ / dt;
+        return $bigint.toEther(apr, 12);
+    }
 
     export function toApy (apr: number | bigint) {
         if (typeof apr === 'bigint') {

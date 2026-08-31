@@ -11,11 +11,17 @@ import { $ethena } from '../utils/$ethena';
 import { DYSAccounting } from '@0xc/hardhat/DYSAccounting/DYSAccounting';
 import { TEth } from 'dequanto/models/TEth';
 import { $accounting } from '../utils/$accounting';
+import { $sig } from 'dequanto/utils/$sig';
+import { $abiCoder } from 'dequanto/abi/$abiCoder';
+import { $buffer } from 'dequanto/utils/$buffer';
 
 
 const test = await $hh.deploy('ethena', {
     cdoInfo: {
-        ContractVersions: { accounting: 'continuous' }
+        ContractVersions: {
+            accounting: 'dys',
+            valuationKeeper: 'Accountable',
+        }
     },
 });
 
@@ -23,6 +29,7 @@ const accounting = test.tranches.accounting as any as DYSAccounting;
 const { deployer, client } = test;
 const { cdo, jrtVault, srtVault, sUSDe } = test.tranches;
 const alice = await test.createAccount('alice');
+const bob = await test.createAccount('bob');
 
 UTest.create({
 
@@ -217,6 +224,175 @@ UTest.create({
             0
         );
     },
+    async 'does not exempt Senior deposits from later valuation losses' () {
+        await t.deposit(alice, 800_000, 10_000_000);
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.99e18));
+        await cdo.$receipt().setActionStates(deployer, srtVault.address, true, true);
+
+        // Loss: 10M * 0.01 / 0.99 = 101010.101
+        // SRT price: (10M + Loss) / 10M = 1.0101
+        // JRT price: (800k - Loss) / 800k = 0.8737
+        await t.comparePrices(.8737, 1.0101);
+        await t.deposit(bob, 0, 990_000);
+        $test.compare(
+            await accounting.srtFundNav(),
+            10_000,
+            18,
+            `Senior deposit should only fund the existing 1% valuation loss`
+        );
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.95e18));
+        $test.compare(
+            await accounting.srtFundNav(),
+            10_000,
+            18,
+            `Later valuation loss should not increase Senior-funded exemption`
+        );
+
+        // Bob mints 990k / 1.0101 = 980_100 Senior shares.
+        // Senior base NAV: 10M + 990k = 10_990_000
+        // Additional valuation loss: 10_990_000 * 0.05 / 0.95 - 10_000 = 568_421.052
+        // JRT price: (800k - 568_421.052) / 800k = 0.28947
+        // SRT price: (10_990_000 + 568_421.052) / 10_980_100 = 1.05266
+        await t.comparePrices(0.28947, 1.05266);
+
+        const { srt: bobAssets } = await t.redeem(bob, 0, '100%');
+        await t.comparePrices(0.28947, 1.05266, 'Expected no price impact');
+
+        // Junior intentionally covers about $540_000 of later valuation loss.
+        // Additionally, aggregate accounting over-credits Senior by about $400 versus exact bucketed accounting.
+        // That $400 is socialized across Senior holders: Bob gets about $36, Alice gets about $364.
+
+        // Aggregate accounting over-credits Senior by about $400:
+        // (10_990_000 + 568_421.052) * 0.95 - (10_000_000 + 990_000 * 0.99) = 400
+        // Bob owns 980_100 / 10_980_100 of Senior shares, so his share is ~400 * 8.93% = 36.
+        $test.compare(
+            bobAssets * 0.95,
+            990_000 * 0.99 + 36,
+            18,
+            `Expected Bob exit value to match his entry value`
+        );
+    },
+    async 'recoveres losses' () {
+        await t.deposit(alice, 1_000_000, 1_000_000);
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.99e18));
+        await cdo.$receipt().setActionStates(deployer, srtVault.address, true, true);
+
+        await t.deposit(bob, 0, 990_000);
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.95e18));
+        // ensure accounting
+        await t.deposit(alice, 0, 20);
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.99e18));
+
+        const { srt: bobAssets } = await t.redeem(bob, 0, '100%');
+        $test.compare(
+            990_000,
+            bobAssets,
+            18,
+            `Bob should receive the same amount as deposited`
+        );
+    },
+    async 'tracks Senior-funded NAV separately for each valuation-loss deposit' () {
+        await t.deposit(alice, 500_000, 500_000);
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.99e18));
+        await cdo.$receipt().setActionStates(deployer, srtVault.address, true, true);
+
+        await t.deposit(bob, 0, 10_000);
+        $test.compare(
+            await accounting.srtFundNav(),
+            10_000 * 0.01 / 0.99,
+            18,
+            `Senior deposit should only fund the existing 1% valuation loss`
+        );
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.98e18));
+        await t.deposit(bob, 0, 10_000);
+        $test.compare(
+            await accounting.srtFundNav(),
+            10_000 * 0.01 / 0.99
+            + 10_000 * 0.02 / 0.98,
+            18,
+            `Senior deposit fund should increase after the 2. valuation loss`
+        );
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.97e18));
+        await t.deposit(bob, 0, 10_000);
+        $test.compare(
+            await accounting.srtFundNav(),
+            10_000 * 0.01 / 0.99
+            + 10_000 * 0.02 / 0.98
+            + 10_000 * 0.03 / 0.97,
+            18,
+            `Senior deposit fund should increase after the 3. valuation loss`
+        );
+
+        // 1. deposit 10_000 ->
+        //      Bobs NAV = 10_000
+        //      Bobs Shares = 10_000 / 1.010101 = 9_900
+        // 2. Valuation drop: 0.98 ->
+        //      Bobs NAV = (Shares 9_900 * NewPrice 1.020410) = 10_102.060828
+        // 3. deposit 10_000 ->
+        //      Bobs NAV = 10_102.060828 + 10_000 = 20_102.060828
+        //      Bobs Shares = 10_000 / 1.020410 + 9_900
+        // 4. Valuation drop: 0.97 ->
+        //      Bobs NAV = (Shares 19_699.980586 * NewPrice 1.030936) = 20_309.417795
+        // 5. deposit 10_000 ->
+        //      Bobs NAV 20_309.417795 + 10_000 = 30_309.417795
+        const { srt: bobAssets } = await t.redeem(bob, 0, '100%');
+        $test.compare(
+            bobAssets,
+            30_309.417795,
+            18,
+            `Expected no PnL for Bob`
+        );
+    },
+    async 'partial recovery after multiple drops with deposits' () {
+        await t.deposit(alice, 1_000_000, 50_000);
+
+        const felix = await test.createAccount('felix');
+        const carol = await test.createAccount('carol');
+
+        await t.deposit(felix, 0, 10_000);
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.99e18));
+        await cdo.$receipt().setActionStates(deployer, srtVault.address, true, true);
+
+        await t.deposit(bob, 0, 10_000);
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.95e18));
+        await t.deposit(carol, 0, 10_000);
+
+        await cdo.$receipt().setValuationPrice(deployer, BigInt(.97e18));
+
+        $test.compare(
+            await t.maxSrtWithdraw$(carol),
+            10_000 * .95,
+            18,
+            `Expected no PnL for Carol`
+        );
+        $test.compare(
+            await t.maxSrtWithdraw$(bob),
+            10_000 * .99,
+            18,
+            `Expected no PnL for Bob`
+        );
+        $test.compare(
+            await t.maxSrtWithdraw$(felix),
+            10_000 * 1,
+            18,
+            `Expected no PnL for Felix`
+        );
+        $test.compare(
+            await t.maxSrtWithdraw$(alice),
+            50_000 * 1,
+            18,
+            `Expected no PnL for Alice`
+        );
+    },
     async 'keeps the minimum Junior/Senior ratio stable after new Senior deposits' () {
         await t.deposit(alice, 200, 100);
         $test.compare(
@@ -276,7 +452,38 @@ UTest.create({
         await t.deposit(alice, 0, 1000);
         await t.compareNavs(100, 1200);
         await t.withdraw(alice, 0, 1150);
-    }
+    },
+
+    async 'uses AccountablePushOracle' () {
+        await t.deposit(alice, 200, 100);
+
+        const { accountable } = await test.factory.ensureValuationOracles();
+
+        const totalSupply = BigInt(1000e18);
+        const totalReserveUsd = BigInt(500e18);
+        const observer = await test.factory.getAccount('observer') as TEth.EoAccount;
+
+        const payload = $abiCoder.encode(
+            ['uint256', 'address', 'uint256', 'uint256'],
+            [await accountable.nonce(), cdo.address, totalSupply, totalReserveUsd]
+        );
+        const sig = await $sig.signMessage($buffer.fromHex(payload), observer);
+
+        await accountable.$receipt().pushProofOfReserve(
+            test.factory.owner,
+            cdo.address,
+            totalSupply,
+            totalReserveUsd,
+            sig.signature
+        );
+
+        await $test.compare(.5, await accounting.valuationPrice());
+
+        await cdo.$receipt().setActionStates(deployer, srtVault.address, true, true);
+        await t.deposit(alice, 0, 1000);
+        await t.compareNavs(100, 1200);
+        await t.withdraw(alice, 0, 1150);
+    },
 })
 
 namespace t {
@@ -287,6 +494,31 @@ namespace t {
     export async function withdraw(depositor: TEth.IAccount, jrtAssets: number, srtAssets: number) {
         jrtAssets > 0 && await $erc4626.withdraw(jrtVault, depositor, jrtAssets);
         srtAssets > 0 && await $erc4626.withdraw(srtVault, depositor, srtAssets);
+    }
+    export async function redeem(depositor: TEth.IAccount, jrtAssets: number | `${number}%`, srtAssets: number | `${number}%`) {
+        const jrtOut = jrtAssets === 0
+            ? 0n
+            : await $erc4626.redeem(jrtVault, depositor, jrtAssets);
+        const srtOut = srtAssets === 0
+            ? 0n
+            : await $erc4626.redeem(srtVault, depositor, srtAssets);
+
+        const decimals = 18;
+        return {
+            jrt: $bigint.toEther(jrtOut, decimals),
+            srt: $bigint.toEther(srtOut, decimals),
+        };
+    }
+    export async function maxSrtWithdraw$(depositor: TEth.IAccount) {
+        const [
+            srtOut,
+            price,
+        ] = await Promise.all([
+            srtVault.maxWithdraw(depositor.address),
+            accounting.valuationPrice()
+        ]);
+        const decimals = 18;
+        return $bigint.toEther(srtOut * price / BigInt(1e18), decimals);
     }
     export async function comparePrices(jrtPrice: number, srtPrice: number, msg?: string) {
         const [jrtPriceFact, srtPriceFact] = await Promise.all([

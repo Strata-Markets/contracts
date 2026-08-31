@@ -1,0 +1,549 @@
+[
+  {
+    "id": "NestOpalAccessControlManager",
+    "name": "AccessControlManager",
+    "main": "./0xc/hardhat/AccessControlManager/AccessControlManager.ts",
+    "bytecodeHash": "0x9935676dbc7cf56085b8a1b270cdb8bba2dfb96baa53ab246553541c66481bc4",
+    "address": "0x1442fECD042D8D42D43a6f21bb844f1CDA000294",
+    "block": 25497563,
+    "tx": "0xe8f2c86c46b98216c00a57682ae00c975856294249de332b8893e6f670976016",
+    "gas": "459732",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630682,
+    "verified": "2026-07-09T21:01:43.729Z"
+  },
+  {
+    "id": "NestOpalCDO",
+    "name": "StrataCDO",
+    "main": "./0xc/hardhat/StrataCDO/StrataCDO.ts",
+    "bytecodeHash": "0x00039be042552da69117192b5946d9290347bff0ecaefa836bc8a99cc2e96702",
+    "address": "0xaE212D8515BA65C719f23dBad6bF73B74d4e4edE",
+    "block": 25627202,
+    "tx": "0xb95c7f846dcb96762d8763aae15f7758a4580f49b3f44f41b1a19948b78808d1",
+    "gas": "3130606",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785192097,
+    "implementation": "0x8A8146f31854aA4440919938D0DBC20d807cfb34",
+    "verified": "2026-07-28T07:42:53.345Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/StrataCDO/StrataCDO.ts",
+        "address": "0x49Ed77e6198e03c7C4800daceDb894EF8Fe45444",
+        "block": 25497564,
+        "tx": "0x4abe45efa731321230f2ea01042db46af6cb861a117b943d5cc89ecd161cb76d",
+        "gas": "2731396",
+        "verified": "2026-07-09T21:01:57.035Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalCDOProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0xaE212D8515BA65C719f23dBad6bF73B74d4e4edE",
+    "block": 25497565,
+    "tx": "0xd504c72379b4ebb1b922fb3e0e16d52d537fd13d0603173cc7dd3e1636317625",
+    "gas": "678824",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630705,
+    "verified": "2026-07-09T21:02:08.195Z",
+    "proxyFor": "0x8A8146f31854aA4440919938D0DBC20d807cfb34"
+  },
+  {
+    "id": "NestOpalCDOProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0x80b48BbE6Afe2cB4b72dB2147119de8415b5fF2B",
+    "block": 25497565,
+    "tx": "0xd504c72379b4ebb1b922fb3e0e16d52d537fd13d0603173cc7dd3e1636317625",
+    "gas": "678824",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630711
+  },
+  {
+    "id": "NestOpalERC20Cooldown",
+    "name": "ERC20Cooldown",
+    "main": "./0xc/hardhat/ERC20Cooldown/ERC20Cooldown.ts",
+    "bytecodeHash": "0x09c03b0b3b10316c13a3f6a66486ddad57e41d127f9f0bab9948d2032708193a",
+    "address": "0xFbEd608dB47B14482653728B8c286dfFA5226efC",
+    "block": 25629895,
+    "tx": "0xf56d63aba750f2a52e4bdd5cc52be783cbcbb07d07aded6363b95dc04c278a76",
+    "gas": "1296124",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785224594,
+    "implementation": "0xC1dE730Dce0618D82cF16168fE575FF3d5ab2FD7",
+    "verified": "2026-07-28T07:44:47.025Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/ERC20Cooldown/ERC20Cooldown.ts",
+        "address": "0x1e81b1fe76E3aE040CC5422aF58D5Fe17e83C848",
+        "block": 25497567,
+        "tx": "0xdcfc16b732280c30ba191ef3e5470f28dcc10851cf6aae9131d6e5c50b717cdc",
+        "gas": "1259132",
+        "verified": "2026-07-09T21:02:19.198Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalERC20CooldownProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0xFbEd608dB47B14482653728B8c286dfFA5226efC",
+    "block": 25497568,
+    "tx": "0x4d4e4004195db1c42c7620dedaf870c1009d1a2cdd354d41896bfe3539a2506c",
+    "gas": "656827",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630741,
+    "verified": "2026-07-09T21:02:35.438Z",
+    "proxyFor": "0xC1dE730Dce0618D82cF16168fE575FF3d5ab2FD7"
+  },
+  {
+    "id": "NestOpalERC20CooldownProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0xb7333C9386D9A8B701Daea394Cb150B5d8399916",
+    "block": 25497568,
+    "tx": "0x4d4e4004195db1c42c7620dedaf870c1009d1a2cdd354d41896bfe3539a2506c",
+    "gas": "656827",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630747
+  },
+  {
+    "id": "NestOpalUnstakeCooldown",
+    "name": "UnstakeCooldown",
+    "main": "./0xc/hardhat/UnstakeCooldown/UnstakeCooldown.ts",
+    "bytecodeHash": "0x29e37cf5bc3c792a1b06b53ee3b627634b8640003a9481e4a9843af9b6795afa",
+    "address": "0x03B444D7ed10dCb31C37B6E78F4b1475ddCac309",
+    "block": 25629904,
+    "tx": "0x91dd3088cf0549ca3c232dd5df0d9ff076db748b6526f6b521490acf48f60805",
+    "gas": "1676943",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785224701,
+    "implementation": "0xAE7A6db98365f5177A83030A897fB3fEeE2F220B",
+    "verified": "2026-07-28T07:45:12.375Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/UnstakeCooldown/UnstakeCooldown.ts",
+        "address": "0xF457076eDa979437243ed2d1A53D5c777aadc4c7",
+        "block": 25497569,
+        "tx": "0xdfd6eb1c23afe1178428735781e354c556362c9e6a78ce4332533d8522295393",
+        "gas": "1636920",
+        "verified": "2026-07-09T20:59:26.028Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalUnstakeCooldownProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0x03B444D7ed10dCb31C37B6E78F4b1475ddCac309",
+    "block": 25497571,
+    "tx": "0xf87dc51884d19e5a98d1973c1b018fb2a2e2fd1bb55dee6cad925d1472b81cfe",
+    "gas": "656937",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630777,
+    "verified": "2026-07-09T21:02:51.718Z",
+    "proxyFor": "0xAE7A6db98365f5177A83030A897fB3fEeE2F220B"
+  },
+  {
+    "id": "NestOpalUnstakeCooldownProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0xfb208c14fB1fA84Cd811AaB4c1F60F2220922c14",
+    "block": 25497571,
+    "tx": "0xf87dc51884d19e5a98d1973c1b018fb2a2e2fd1bb55dee6cad925d1472b81cfe",
+    "gas": "656937",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630784
+  },
+  {
+    "id": "NestOpalSharesCooldown",
+    "name": "SharesCooldown",
+    "main": "./0xc/hardhat/SharesCooldown/SharesCooldown.ts",
+    "bytecodeHash": "0x601281240fec48834c5d2e2e14f95216d8c9025cf0299ea2719ca5b89995b910",
+    "address": "0x2bca3e309a851472a2b8fF80F50e8CD581044B47",
+    "block": 25629908,
+    "tx": "0xf89c0e39fdba8ddc014434f0376c259df39019d9c8fdaa0c0ca349cb25f8d95d",
+    "gas": "3398934",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785224750,
+    "implementation": "0x1940f0d9E627C7741152A044c93c9708767Dd35F",
+    "verified": "2026-07-28T08:01:12.191Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/SharesCooldown/SharesCooldown.ts",
+        "address": "0xCc931fac3Aa45Ad35D3403B2bA2A8fe53C6d39eb",
+        "block": 25497572,
+        "tx": "0x8c0b280104dc8695c13fe6511509c7e10319314d342dc715ef174fba474ca0f4",
+        "gas": "2510844",
+        "verified": "2026-07-09T20:59:55.060Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalSharesCooldownProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0x2bca3e309a851472a2b8fF80F50e8CD581044B47",
+    "block": 25497573,
+    "tx": "0xbe78b837b94db1ab0833b3188ec49d40e52a0beceffa00b328d90b82159631fd",
+    "gas": "656901",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630801,
+    "verified": "2026-07-09T21:03:12.141Z",
+    "proxyFor": "0x1940f0d9E627C7741152A044c93c9708767Dd35F"
+  },
+  {
+    "id": "NestOpalSharesCooldownProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0x0f1Fb9CC42d8C13C8C638c6D16990a4bf6eBbef7",
+    "block": 25497573,
+    "tx": "0xbe78b837b94db1ab0833b3188ec49d40e52a0beceffa00b328d90b82159631fd",
+    "gas": "656901",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630808
+  },
+  {
+    "id": "NestOpalNestOpalStrategy",
+    "name": "NestOpalStrategy",
+    "main": "./0xc/hardhat/NestOpalStrategy/NestOpalStrategy.ts",
+    "bytecodeHash": "0x19ca37521156686681c313726348fc2a0bc28815dc916e72a4438216275a748b",
+    "address": "0x5aeCBb5719a9468CdCfa6673d1DDC1Cf72a5a4aA",
+    "block": 25629911,
+    "tx": "0x91736afea9fc4004fda458cb85bf849855e48400f80bf616d9f24ba04e5e7741",
+    "gas": "2269530",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785224784,
+    "implementation": "0x134192ad769Fd3cddd65fB9FaEfdF708c4538eB0",
+    "verified": "2026-07-28T07:47:04.998Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/NestOpalStrategy/NestOpalStrategy.ts",
+        "address": "0xBd01fd1d6233Ad447B397ABE12dA3FC2567826C4",
+        "block": 25497575,
+        "tx": "0x0bf099382cd143fd6b494d5d856206588e457884f34c04c3e253483ad56af37d",
+        "gas": "1884099",
+        "verified": "2026-07-09T21:03:24.697Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalNestOpalStrategyProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0x5aeCBb5719a9468CdCfa6673d1DDC1Cf72a5a4aA",
+    "block": 25497576,
+    "tx": "0xf98e627dae3feceff6e541ae95ba21d9704a444887eaab2fffc79ddb0d33ba4b",
+    "gas": "730018",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630836,
+    "verified": "2026-07-09T21:03:40.664Z",
+    "proxyFor": "0x134192ad769Fd3cddd65fB9FaEfdF708c4538eB0"
+  },
+  {
+    "id": "NestOpalNestOpalStrategyProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0x331285770e9337c6c8cb832928265dBCeB7a941E",
+    "block": 25497576,
+    "tx": "0xf98e627dae3feceff6e541ae95ba21d9704a444887eaab2fffc79ddb0d33ba4b",
+    "gas": "730018",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783630842
+  },
+  {
+    "id": "NestAccountantAprProvider",
+    "name": "NestAccountantAprProvider",
+    "main": "./0xc/hardhat/NestAccountantAprProvider/NestAccountantAprProvider.ts",
+    "bytecodeHash": "0x929ec5ec0ac0cf08693299d8aa1c9929b1bd552d19d3380372d9f88df6819b2f",
+    "address": "0x1FE39BE01BA0AF9f8D61A8a581eb7Df29c0BCe97",
+    "block": 25629918,
+    "tx": "0x5d0d8b4607b2efc640a0756e00d2a4715a563ab39ccb049dfc52220dfc0bb796",
+    "gas": "905362",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785224869,
+    "verified": "2026-07-28T07:49:57.525Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/NestAccountantAprProvider/NestAccountantAprProvider.ts",
+        "address": "0x0c3bDB3922F8baccaDE41376bD8504854BF563a7",
+        "block": 25497592,
+        "tx": "0x4e1f22e52ce93bd10537129e0ae467e6c0d56379a06ffc311e63a1225b425b1a",
+        "gas": "868106",
+        "verified": "2026-07-09T21:04:53.878Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalAprFeeds",
+    "name": "AprPairFeed",
+    "main": "./0xc/hardhat/AprPairFeed/AprPairFeed.ts",
+    "bytecodeHash": "0x5fc56d76bcf725e383df8e4aabdd3b13223b54a7327dc7c5d47c45b5cba55b4e",
+    "address": "0x2DA8acD5f4789F290ea1A1A9818fB3E3677BfaCd",
+    "block": 25629919,
+    "tx": "0x6f01f27286f7fb8b48fdb3204962a1534f4f3e26458fc1006d6442fae18e5584",
+    "gas": "1484781",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785224881,
+    "implementation": "0xDF2f1dD79B803685bb9D76748bE82fbf72BBFF98",
+    "verified": "2026-07-28T07:50:12.724Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/AprPairFeed/AprPairFeed.ts",
+        "address": "0xCdC0D1d2af024E65a08C2d75a53AfF0C80bCE0Ed",
+        "block": 25497593,
+        "tx": "0xc6f07d2c88ca99cae71b19431a87fe45a780292a14d936f865df5fb2b102097b",
+        "gas": "1447912",
+        "verified": "2026-07-09T21:05:04.690Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalAprFeedsProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0x2DA8acD5f4789F290ea1A1A9818fB3E3677BfaCd",
+    "block": 25497594,
+    "tx": "0xe1b1b9f26903e94e7db064d05972e41bcbf25dc2f2def5ee68aff6fcf52cc346",
+    "gas": "725596",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631053,
+    "verified": "2026-07-09T21:05:20.609Z",
+    "proxyFor": "0xDF2f1dD79B803685bb9D76748bE82fbf72BBFF98"
+  },
+  {
+    "id": "NestOpalAprFeedsProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0xb69DC7F1cFC5a904009797dfE9b88e34c89e9a70",
+    "block": 25497594,
+    "tx": "0xe1b1b9f26903e94e7db064d05972e41bcbf25dc2f2def5ee68aff6fcf52cc346",
+    "gas": "725596",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631059
+  },
+  {
+    "id": "NestOpalAccounting",
+    "name": "DYSAccounting",
+    "main": "./0xc/hardhat/DYSAccounting/DYSAccounting.ts",
+    "bytecodeHash": "0xde316ab0633102aa74758096683d1d9d8ea5b0af2844f3b16320812b4dc5d62f",
+    "address": "0xB6F3d2deF3058d4Faf07E7104DE2f69c638f2BF7",
+    "block": 25629922,
+    "tx": "0x9092c7fbeb88f2ccc1743afcb74b9aebc7a7ef3b82ad51df64db5914dc385900",
+    "gas": "4584962",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785224918,
+    "implementation": "0xe6Ee3a71Dd8F6B81C8cd3FB8c098E87fC6E9cdE6",
+    "verified": "2026-07-28T07:49:30.138Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/DiscreteAccounting/DiscreteAccounting.ts",
+        "address": "0xf6615F82df805B1d0e45C0442132D46415727277",
+        "block": 25497595,
+        "tx": "0xbda1f44635b8308ff31616095f0195dfe3513e065420f038258fffbb793a4c09",
+        "gas": "2785749",
+        "verified": "2026-07-09T21:12:47.788Z"
+      },
+      {
+        "main": "./0xc/hardhat/DiscreteAccounting/DiscreteAccounting.ts",
+        "address": "0x24e3afdd25692F613c2feff51e26216399CB6F86",
+        "block": 25498241,
+        "tx": "0x4e0805445c90680cb14da38943c1646377ce0d231323117ed5aac63991b16945",
+        "gas": "2785749",
+        "verified": "2026-07-09T23:15:47.968Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalAccountingProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0xB6F3d2deF3058d4Faf07E7104DE2f69c638f2BF7",
+    "block": 25497596,
+    "tx": "0xa81bc1abea82e1d3611bfbe404b780153262cc7d36c4c28f4feaa5a4f991a6f5",
+    "gas": "879754",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631076,
+    "verified": "2026-07-09T21:13:04.277Z",
+    "proxyFor": "0xe6Ee3a71Dd8F6B81C8cd3FB8c098E87fC6E9cdE6"
+  },
+  {
+    "id": "NestOpalAccountingProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0x5212C0e6DdaD83aefe9379aA3d746b96C1014655",
+    "block": 25497596,
+    "tx": "0xa81bc1abea82e1d3611bfbe404b780153262cc7d36c4c28f4feaa5a4f991a6f5",
+    "gas": "879754",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631083
+  },
+  {
+    "id": "NestOpalJrt",
+    "name": "Tranche",
+    "main": "./0xc/hardhat/Tranche/Tranche.ts",
+    "bytecodeHash": "0xff697dc08ea0dca49db4124f1dea157ae3b375fd56e4bc5873bb33ddc7f01a27",
+    "address": "0x1b2b8cFEF0b7B1Fad216b55fefeEb0c3349Da141",
+    "block": 25629931,
+    "tx": "0xbbcec0b502d19cd4bd0b1f314d77ea38872d9df77e7d80cee8e459bf469172d2",
+    "gas": "4859369",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785225025,
+    "implementation": "0xE3308cE85e5E43354bB4F77a79c919203f0a6de4",
+    "verified": "2026-07-28T08:01:37.201Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/Tranche/Tranche.ts",
+        "address": "0x70c4b2eF6cc3A91eFF8B890E4bf02c1dE7b4f79e",
+        "block": 25497600,
+        "tx": "0x7a5a3ce7a5a91282861ea9d80c44f9f9fb07e0a137424de5faea440992ec2c72",
+        "gas": "4405844",
+        "verified": "2026-07-09T21:05:31.057Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalJrtProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0x1b2b8cFEF0b7B1Fad216b55fefeEb0c3349Da141",
+    "block": 25497601,
+    "tx": "0x86fe12d1f968ab022c5476ae7b1c132e385410cd09b34325693dd04e822a814a",
+    "gas": "812435",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631137,
+    "verified": "2026-07-09T21:05:52.453Z",
+    "proxyFor": "0xE3308cE85e5E43354bB4F77a79c919203f0a6de4"
+  },
+  {
+    "id": "NestOpalJrtProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0x338bF37e87EcC28BD76698E5DcB0683Eb866F9b7",
+    "block": 25497601,
+    "tx": "0x86fe12d1f968ab022c5476ae7b1c132e385410cd09b34325693dd04e822a814a",
+    "gas": "812435",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631152
+  },
+  {
+    "id": "NestOpalSrt",
+    "name": "Tranche",
+    "main": "./0xc/hardhat/Tranche/Tranche.ts",
+    "bytecodeHash": "0xff697dc08ea0dca49db4124f1dea157ae3b375fd56e4bc5873bb33ddc7f01a27",
+    "address": "0x8a646Edc4633ADBA5Ec87DedaF3Af958e268FE96",
+    "block": 25629933,
+    "tx": "0xac5c63b5aa86f4930491c44b1599a419e279a92291959667054eda0bee1a97f2",
+    "gas": "4859369",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785225049,
+    "implementation": "0x0861A8cc5F863E953fB51Ba0695B2E4B271D9477",
+    "verified": "2026-07-28T08:01:53.113Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/Tranche/Tranche.ts",
+        "address": "0xbFe7Ca24417D5aa5F7e583281F5C6cac88889CF1",
+        "block": 25497603,
+        "tx": "0x94f6ba8be8604845b5b840a9fd99de2612d1e816f0674d1bffd5c001bdecc631",
+        "gas": "4405844",
+        "verified": "2026-07-09T21:13:34.382Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalSrtProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0x8a646Edc4633ADBA5Ec87DedaF3Af958e268FE96",
+    "block": 25497604,
+    "tx": "0x1fb53c4c24b84dda4bff3a1b092387bc6555cca456748950e0fd48c89ca367c7",
+    "gas": "812435",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631172,
+    "verified": "2026-07-09T21:13:50.763Z",
+    "proxyFor": "0x0861A8cc5F863E953fB51Ba0695B2E4B271D9477"
+  },
+  {
+    "id": "NestOpalSrtProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0xa3E9D30Fe6153D930c0a99332430122003224A1f",
+    "block": 25497604,
+    "tx": "0x1fb53c4c24b84dda4bff3a1b092387bc6555cca456748950e0fd48c89ca367c7",
+    "gas": "812435",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631178
+  },
+  {
+    "id": "NestOpalDepositAdapter",
+    "name": "NestOpalDepositAdapter",
+    "main": "./0xc/hardhat/NestOpalDepositAdapter/NestOpalDepositAdapter.ts",
+    "bytecodeHash": "0x66407bca00500e6b48d582c670619d824410c184fcd134a56d870ca34dee300a",
+    "address": "0x959514B34Be9f67fb5593FF52C44d137AE95aC1b",
+    "block": 25497650,
+    "tx": "0x00f5dc8ff9454010f22a2a0edeacfa9a8e9ace3873dbaa20ba0bdd56a32dcf25",
+    "gas": "557159",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631724,
+    "verified": "2026-07-09T21:21:37.654Z"
+  },
+  {
+    "id": "NestOpalConfigManager",
+    "name": "TwoStepConfigManager",
+    "main": "./0xc/hardhat/TwoStepConfigManager/TwoStepConfigManager.ts",
+    "bytecodeHash": "0x9381a69ed286c4f71f4f928a46fdae7b47c5403db9ec592bb7186feaf295d1fa",
+    "address": "0xbe865C6481f806b26045a855395001bd7a98c518",
+    "block": 25629937,
+    "tx": "0x5ad0135ff5ab509032cd723fae36ae80418e0fb4f3851ab7b9599d023096bcd3",
+    "gas": "1972633",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1785225098,
+    "implementation": "0x8c5A432bFd2CF63850A9Fe60978E0C0D95F5afF9",
+    "verified": "2026-07-28T08:02:24.751Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/TwoStepConfigManager/TwoStepConfigManager.ts",
+        "address": "0x8A0A32F3f39a25572Ca581564887b655e39CEa7F",
+        "block": 25497652,
+        "tx": "0xb1f6534ec012cd5e3c02ce2c8a0d5670e0c037151320f5ca324928b40358b18d",
+        "gas": "1935027",
+        "verified": "2026-07-09T21:22:02.283Z"
+      }
+    ]
+  },
+  {
+    "id": "NestOpalConfigManagerProxy",
+    "name": "TransparentUpgradeableProxy",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json",
+    "bytecodeHash": "0xf28eb2a2c5463ee40d33f9140010a6efee14f7e18a27beac9a06acbeb00f60b2",
+    "address": "0xbe865C6481f806b26045a855395001bd7a98c518",
+    "block": 25497653,
+    "tx": "0x6b8c74cd98e1a2068cde26dbbb2a0a36c8c832a9889cd8d09b9bf449783ce32d",
+    "gas": "670303",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631762,
+    "verified": "2026-07-09T21:22:08.770Z",
+    "proxyFor": "0x8c5A432bFd2CF63850A9Fe60978E0C0D95F5afF9"
+  },
+  {
+    "id": "NestOpalConfigManagerProxyAdmin",
+    "name": "ProxyAdmin",
+    "main": "artifacts/@openzeppelin/contracts/proxy/transparent/ProxyAdmin.sol/ProxyAdmin.json",
+    "address": "0x90C3A25f75B672D04C4145e35632CbFfF31796E4",
+    "block": 25497653,
+    "tx": "0x6b8c74cd98e1a2068cde26dbbb2a0a36c8c832a9889cd8d09b9bf449783ce32d",
+    "gas": "670303",
+    "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
+    "timestamp": 1783631768
+  }
+]

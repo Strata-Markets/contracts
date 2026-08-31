@@ -60,10 +60,18 @@ export interface IPlatform {
         stakingVault: TEth.Address;
         primeFeed: TEth.Address;
     };
+    nestopal?: {
+        nOPAL: TEth.Address;
+        accountant: TEth.Address;
+        predicateProxy: TEth.Address;
+        teller: TEth.Address;
+        nestVault: TEth.Address;
+    };
 }
 
 export interface IPlatformAccounts {
-    deployer: TEth.IAccount;
+    deployer: TEth.EoAccount;
+    observer: TEth.EoAccount;
     safe: {
         admin: TEth.IAccount;
         operator: TEth.IAccount;

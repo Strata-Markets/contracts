@@ -10,6 +10,7 @@ import { StrataMasterChef } from '@0xc/hardhat/StrataMasterChef/StrataMasterChef
 import { $date } from 'dequanto/utils/$date';
 import { $contract } from 'dequanto/utils/$contract';
 import { TEth } from 'dequanto/models/TEth';
+import { $address } from 'dequanto/utils/$address';
 
 
 
@@ -59,15 +60,17 @@ UTest.create({
 
         await accounting.$receipt().setAccessControlManager(deployer, acm.address);
 
+        const seconds = BigInt($date.parseTimespan('24hours', { get: 's' }));
         const { contract: timelock } = await hh.deployClass(StrataMasterChef, {
             client,
             arguments: [
+                seconds,
                 [ deployer.address ],
-                []
+                [ $address.ZERO ]
              ]
         });
 
-        $require.eq(await timelock.getMinDelay(), BigInt($date.parseTimespan('24hours', { get: 's' })));
+        $require.eq(await timelock.getMinDelay(), seconds);
     },
     async 'should check call permission' () {
         let acm = await $hh.test.factory.ensureACM();

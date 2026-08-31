@@ -21,6 +21,8 @@ import { IStrategy } from '@0xc/hardhat/IStrategy/IStrategy';
 import { SUSDeAprPairProvider } from '@0xc/hardhat/sUSDeAprPairProvider/sUSDeAprPairProvider';
 import { IBeaconProxy } from 'dequanto/contracts/deploy/proxy/ProxyDeployment';
 import { MockERC20 } from '@0xc/hardhat/MockERC20/MockERC20';
+import { LensPriceFeed } from '@0xc/hardhat/LensPriceFeed/LensPriceFeed';
+import { CDOLens } from '@0xc/hardhat/CDOLens/CDOLens';
 
 
 type TUnderlyingTokens = {
@@ -181,5 +183,27 @@ export class SaturnDeployments extends DeploymentsBase<{
         }
 
         return depositor;
+    }
+
+
+    async configureLenses() {
+        const lens = await this.get(CDOLens);
+        const { base } = await this.ensureUnderlying();
+
+        const { contract: USDatPriceFeed } = await this.ds.ensure(LensPriceFeed, {
+            id: this.getContractId(`LensPriceFeed`),
+            arguments: [this.owner.address],
+        });
+
+        await this.ds.configure(lens, {
+            title: 'Price Feed for USDat',
+            shouldUpdate: async () => false === $address.eq(USDatPriceFeed.address, await lens.priceFeeds(base.address)),
+            updater: async () => {
+                const owner = await this.getAccountOwner(lens.address);
+                await lens.$receipt().setPriceFeed(owner, base.address, USDatPriceFeed.address);
+            }
+        });
+
+        return { lens };
     }
 }

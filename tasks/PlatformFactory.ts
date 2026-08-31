@@ -1,6 +1,5 @@
 import memd from 'memd';
-import { Directory } from 'atma-io';
-import { EthenaDeployments } from '@s/deployments/EthenaDeployments';
+import alot from 'alot';
 import { IPlatformAccounts } from '@s/platforms/IPlatform';
 import { ChainAccountService } from 'dequanto/ChainAccountService';
 import { Web3Client } from 'dequanto/clients/Web3Client';
@@ -12,22 +11,18 @@ import { TEth } from 'dequanto/models/TEth';
 import { InMemoryServiceTransport } from 'dequanto/safe/transport/InMemoryServiceTransport';
 import { TxWriter } from 'dequanto/txs/TxWriter';
 import { ICDO, TCDOKey, Tranches } from '@s/platforms/Tranches';
-import { V0NeutrlDeployments } from '@s/deployments/V0NeutrlDeployments';
-import { NeutrlDeployments } from '@s/deployments/NeutrlDeployments';
 import { DeploymentsTypes } from '@s/deployments/DeploymentsTypes';
-import alot from 'alot';
-import { $require } from 'dequanto/utils/$require';
-
-
+import { DeploymentsBase } from '@s/deployments/DeploymentsBase';
+import { AccessControlManager } from '@0xc/hardhat/AccessControlManager/AccessControlManager';
 
 
 export namespace PlatformFactory {
 
     export class ConfigLoader {
         @memd.deco.memoize()
-        static async fetch () {
+        static async fetch() {
             return await Config.fetch({
-                configGlobal: './config/*.yml',
+                configGlobal: './config/*.yml'
             });
         }
     }
@@ -38,7 +33,7 @@ export namespace PlatformFactory {
         deployments?: 'throw' | 'redeploy',
         whenUpgradeRequired?: 'ignore'
         cdo: TKey
-        accounts?: TKey | 'operator' | 'deployer'
+        accounts?: TKey | 'operator' | 'deployer' | Partial<ICDO['accounts']>
         cdoInfo?: Partial<ICDO>
         initialDeposit?: boolean
         isTest?: boolean
@@ -50,14 +45,13 @@ export namespace PlatformFactory {
         const client = params?.client ?? await Web3ClientFactory.getAsync(platform);
 
         const accounts = await getAccounts(client, params.accounts ?? params.cdo);
+        // if (accounts.safe?.admin?.type === 'safe' || client.platform === 'hardhat') {
+        //     TxWriter.defaultOptions({
+        //         safeTransport: new InMemoryServiceTransport(client, accounts.deployer as EoAccount)
+        //     });
+        // }
 
-        if (accounts.safe?.admin.type === 'safe') {
-            TxWriter.defaultOptions({
-                safeTransport: new InMemoryServiceTransport(client, accounts.deployer as EoAccount)
-            });
-        }
-
-        const CtorDeployments =  DeploymentsTypes.Tranches[params.cdo];
+        const CtorDeployments = DeploymentsTypes.Tranches[params.cdo];
 
         const depl = new CtorDeployments({
             client,
@@ -73,23 +67,32 @@ export namespace PlatformFactory {
         return {
             tranches: depl as any as DeploymentsTypes.CDOs[TKey],
             client,
-            owner:  params.accounts === 'operator' ? accounts.safe.operator : accounts.timelock.admin,
+            owner: params.accounts === 'operator' ? accounts.safe.operator : accounts.timelock.admin,
             deployer: accounts.deployer,
         }
     }
 
-    async function getAccounts(client: Web3Client, group: TCDOKey | 'operator' | 'deployer') {
+    async function getAccounts(client: Web3Client, group: TCDOKey | 'operator' | 'deployer' | Partial<ICDO['accounts']>) {
         const { platform, network } = client;
         const hh = new HardhatProvider();
 
-        const accounts = Tranches[group]?.accounts?.[network] ?? {
+        let accounts = {
             deployer: `${network}/deployer`,
             timelockAdmin: `timelock/${network}/strata`,
             timelockConfig: `timelock/${network}/config`,
-            safeAdmin: `safe/${network}/strata`,
-            safeOperator: `safe/${network}/owner`,
+            safeAdmin: `safe/${network}/admin`,
+            safeOperator: `safe/${network}/operator`,
             safeWorker: `safe/${network}/worker`,
+            observer: `observer`,
         };
+        if (typeof group === 'string') {
+            accounts = Tranches[group]?.accounts?.[network] ?? accounts;
+        } else if (group != null) {
+            accounts = {
+                ...accounts,
+                ...group,
+            };
+        }
 
         let deployer = await ChainAccountService.get(accounts.deployer);
         let timelockAdmin = await ChainAccountService.get(accounts.timelockAdmin);
@@ -97,42 +100,63 @@ export namespace PlatformFactory {
         let safeAdmin = await ChainAccountService.get(accounts.safeAdmin);
         let safeOperator = await ChainAccountService.get(accounts.safeOperator);
         let safeWorker = await ChainAccountService.get(accounts.safeWorker);
+        let observer = await ChainAccountService.get('observer');
 
         if (network === 'hardhat' || (platform === 'hardhat' && group === 'deployer')) {
-            deployer = hh.deployer(0);
-            timelockAdmin = deployer;
-            timelockConfig = deployer;
-            safeAdmin = deployer;
-            safeOperator = deployer;
+            deployer = {
+                ...hh.deployer(0),
+                type: 'eoa',
+                name: accounts.deployer,
+            };
+            observer = {
+                ...deployer,
+                name: accounts.observer
+            };
+            timelockAdmin = {
+                ...deployer,
+                name: accounts.timelockAdmin
+            };
+            timelockConfig = {
+                ...deployer,
+                name: accounts.timelockConfig
+            };
+            safeAdmin = {
+                ...deployer,
+                name: accounts.safeAdmin
+            };
+            safeOperator = {
+                ...deployer,
+                name: accounts.safeOperator
+            };
         } else if (platform === 'hardhat' && client.forked?.platform) {
             // Impersonate safe and timelock accounts in forked networks
             deployer = {
-                name: 'impersonated',
+                name: deployer.name,
                 type: 'impersonated',
                 address: deployer.address,
             };
             safeAdmin = {
-                name: 'impersonated',
+                name: safeAdmin.name,
                 type: 'impersonated',
                 address: safeAdmin.address,
             };
             safeOperator = {
-                name: 'impersonated',
+                name: safeOperator.name,
                 type: 'impersonated',
                 address: safeOperator.address,
             };
             safeWorker = {
-                name: 'impersonated',
+                name: safeWorker.name,
                 type: 'impersonated',
                 address: safeWorker.address,
             };
             timelockAdmin = {
-                name: 'impersonated',
+                name: timelockAdmin.name,
                 type: 'impersonated',
                 address: timelockAdmin.address,
             };
             timelockConfig = {
-                name: 'impersonated',
+                name: timelockConfig.name,
                 type: 'impersonated',
                 address: timelockConfig.address,
             };
@@ -161,6 +185,7 @@ export namespace PlatformFactory {
 
         return {
             deployer,
+            observer,
             safe: {
                 admin: safeAdmin,
                 operator: safeOperator,
@@ -171,5 +196,30 @@ export namespace PlatformFactory {
                 config: timelockConfig,
             },
         } as IPlatformAccounts
+    }
+
+
+    export async function getTranches() {
+        const config = await ConfigLoader.fetch();
+        const cdoArr = config.$get('cdo')?.split(',') ?? null;
+        const platform = config.$get('chain') ?? 'eth';
+        const ignore = ['spkMhyperIso', 'mkralpha', 'mrox'];
+        return await alot
+            .fromObject(Tranches)
+            .filter(x => ignore.includes(x.key) === false)
+            .filter(x => cdoArr == null ? true : cdoArr.includes(x.key))
+            .mapAsync(async x => {
+                const factory = await PlatformFactory.init({
+                    platform,
+                    cdo: x.key as 'ethena',
+                    deployments: 'throw',
+                });
+                return factory;
+            })
+            .toArrayAsync()
+    }
+
+    export async function getAccountByRole(ds: DeploymentsBase, roleOrName: TEth.Hex | keyof typeof ds.ROLES) {
+        return ds.getAccountByRole(roleOrName);
     }
 }

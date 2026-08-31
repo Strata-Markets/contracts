@@ -9,6 +9,7 @@ import {IAprPairFeed} from "./interfaces/IAprPairFeed.sol";
 import {CDOComponent} from "./base/CDOComponent.sol";
 import {UD60x18Ext} from "./utils/UD60x18Ext.sol";
 import {AccountingLib} from "./utils/AccountingLib.sol";
+import {IRiskPremiumModel} from "./accounting/premium/IRiskPremiumModel.sol";
 import {IInsurancePool} from "./symbiotic/interfaces/IInsurancePool.sol";
 
 /**
@@ -144,6 +145,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
     uint256 public srtFundedGrossNav;
 
     /// @notice Portion of funded Senior NAV that covers its own valuation loss.
+    /// @dev Per-entry valuation recovery is not bucketed; small mismatches are socialized through the Senior share price.
     uint256 public srtFundNav;
 
     /// @notice High-water mark used to charge performance fees only on new NAV gains.
@@ -203,6 +205,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
     ///      0 means rate tracking is not enabled; the proportional nav-time formula is used instead.
     uint256 public strategyRate;
 
+    /// @notice Optional external risk premium model.
+    /// @dev When unset, accounting falls back to the legacy `x + y * TVL_ratio_sr^k`
+    ///      model configured by `riskX`, `riskY`, and `riskK`.
+    IRiskPremiumModel public riskPremiumModel;
 
     /// Coverage Premium (Symbiotic) Parameters. Appended for storage-layout compatibility.
 
@@ -241,6 +247,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
     event NetworkMiddlewareSet(address networkMiddleware);
     event TrueUpApplied(uint256 amount, uint256 insuranceAmount);
     event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
+    event RiskModelChanged(address riskPremiumModel);
     event MinimumJrtSrtRatioChanged(uint256 ratio);
     event MinimumJrtSrtRatioBufferChanged(uint256 ratio);
     event FeeAccrued(
@@ -350,18 +357,51 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Accrues asset-time for all tranches. MUST be called before any state change.
     function _accrueAssetTime() internal {
-        uint256 dt = block.timestamp - lastAccrual;
-        if (dt == 0) return;
+        if (block.timestamp == lastAccrual) return;
 
-        uint256 srAssets = srtBaseNav;
-        uint256 jrAssets = jrtNavProjected;
-        uint256 systemAssets = srAssets + jrAssets + reserveNav;
-
-        srtNavTime += srAssets * dt;
-        navTime += systemAssets * dt;
-        navTimeNet += nav * dt;
-        srtProjectedPnLTime += Math.saturatingSub(srtPnLProjected, srtPaidProjected) * dt;
+        (
+            srtNavTime,
+            navTime,
+            navTimeNet,
+            srtProjectedPnLTime
+        ) = _accruedAssetTimeView(
+            nav,
+            jrtNavProjected,
+            srtBaseNav,
+            reserveNav
+        );
         lastAccrual = block.timestamp;
+    }
+
+    function _accruedAssetTimeView(
+        uint256 navT0,
+        uint256 jrtNavT0Projected,
+        uint256 srtNavT0,
+        uint256 reserveNavT0
+    )
+        internal
+        view
+        returns (
+            uint256 srtNavTime_,
+            uint256 navTime_,
+            uint256 navTimeNet_,
+            uint256 srtProjectedPnLTime_
+        )
+    {
+        srtNavTime_ = srtNavTime;
+        navTime_ = navTime;
+        navTimeNet_ = navTimeNet;
+        srtProjectedPnLTime_ = srtProjectedPnLTime;
+
+        uint256 dt = block.timestamp - lastAccrual;
+        if (dt == 0) return (srtNavTime_, navTime_, navTimeNet_, srtProjectedPnLTime_);
+
+        uint256 systemAssets = srtNavT0 + jrtNavT0Projected + reserveNavT0;
+
+        srtNavTime_ += srtNavT0 * dt;
+        navTime_ += systemAssets * dt;
+        navTimeNet_ += navT0 * dt;
+        srtProjectedPnLTime_ += Math.saturatingSub(srtPnLProjected, srtPaidProjected) * dt;
     }
 
     function _navAnchor() private view returns (uint256) {
@@ -821,6 +861,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         return
             calculateNAVSplitReconciliation(
                 navT0,
+                jrtNavT0Projected,
                 jrtNavT0Real,
                 srtNavT0,
                 reserveNavT0,
@@ -952,6 +993,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
     /// @dev Uses asset-time weighting to allocate realized PnL between tranches
     function calculateNAVSplitReconciliation(
         uint256 navT0,
+        uint256 jrtNavT0Projected,
         uint256 jrtNavT0Real,
         uint256 srtNavT0,
         uint256 reserveNavT0,
@@ -999,6 +1041,19 @@ contract DYSAccounting is IAccounting, CDOComponent {
         }
         premiumNavT1 = premiumNavT0 + premium_dT;
 
+        // Accrue the unpersisted interval before unwinding projected Senior NAV.
+        (
+            uint256 srtNavTimeAccrued,
+            uint256 navTimeAccrued,
+            uint256 navTimeNetAccrued,
+            uint256 srtProjectedPnLTimeAccrued
+        ) = _accruedAssetTimeView(
+            navT0,
+            jrtNavT0Projected,
+            srtNavT0,
+            reserveNavT0
+        );
+
         // srtNavT0 includes srtPnLProjected added during the epoch
         // unwind it and rollback to real T0 assets for SRT and JRT
         // Guard: large Senior withdrawals during the epoch can make srtNavT0 < srtPnLProjected
@@ -1020,10 +1075,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // 2.   when possitive, add to Juniors NAV
         // 3.   when negative, apply the loss waterfall: Juniors Loss, Reserve Loss, then Senior Loss
 
-        // Calculate Senior PnL allocation using asset-time weighting
-        // Use accumulated asset-time if available (navTime > 0), otherwise use snapshot NAVs
-        uint256 srtNavTime_ = navTime > 0 ? srtNavTime : srtNavT0;
-        uint256 navTime_ = navTime > 0 ? navTime : navT0;
+        // Calculate Senior PnL allocation using asset-time weighting.
+        // Use accumulated asset-time if available, otherwise use snapshot NAVs.
+        uint256 srtNavTime_ = navTimeAccrued > 0 ? srtNavTimeAccrued : srtNavT0;
+        uint256 navTime_ = navTimeAccrued > 0 ? navTimeAccrued : navT0;
 
         // Note: riskPremium is capped at 1e18 (100%) via setRiskParameters validation
         UD60x18 riskPremium = calculateRiskPremium();
@@ -1042,7 +1097,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 ? srtRateT1 - strategyRate
                 : strategyRate - srtRateT1;
             if (epochDt > 0) {
-                uint256 srtNavTimeReal = Math.saturatingSub(srtNavTime_, srtProjectedPnLTime);
+                uint256 srtNavTimeReal = Math.saturatingSub(srtNavTime_, srtProjectedPnLTimeAccrued);
                 uint256 navTimeXGrowth = Math.mulDiv(srtNavTimeReal, rateDeltaAbs, strategyRate);
                 uint256 pnlAbs = Math.mulDiv(navTimeXGrowth, srtFactor, 1e18 * epochDt);
                 srtPnLRealized = isPositive
@@ -1053,8 +1108,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
         } else {
             // Proportional nav-time formula (single strategy / no rate tracking).
             // srtPnL = totalUnderlyingProfit * srtFactor * srtNavTime / navTime
-            uint256 srtNavTimeNet_ = Math.saturatingSub(srtNavTime_, srtProjectedPnLTime);
-            uint256 navTimeNet_ = navTimeNet > 0 ? navTimeNet : navT0;
+            uint256 srtNavTimeNet_ = Math.saturatingSub(srtNavTime_, srtProjectedPnLTimeAccrued);
+            uint256 navTimeNet_ = navTimeNetAccrued > 0 ? navTimeNetAccrued : navT0;
 
             srtPnLRealized = navTime_ == 0
                 ? int256(0)
@@ -1324,6 +1379,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
         UD60x18 tvlRatio = UD60x18.wrap(
             srtEffective == 0 ? 0 : ((srtEffective * 1e18) / (srtEffective + jrtEffective))
         );
+
+        if (address(riskPremiumModel) != address(0)) {
+            return riskPremiumModel.riskPremium(tvlRatio);
+        }
+
         UD60x18 riskPremium = calculateRiskPremiumInner(
             riskX,
             riskY,
@@ -1438,6 +1498,19 @@ contract DYSAccounting is IAccounting, CDOComponent {
         require(risk.unwrap() < PERCENTAGE_100, ">=100%");
         emit RiskParametersChanged(riskX_, riskY_, riskK_);
         updateAprSrt(aprTarget, aprBase);
+    }
+
+    /// @notice Sets the optional external risk premium model.
+    /// @dev Set to the zero address to use the legacy `x + y * TVL_ratio_sr^k` model.
+    /// @param riskPremiumModel_ External model contract, or zero address for the legacy model.
+    function setRiskModel(IRiskPremiumModel riskPremiumModel_) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        if (address(riskPremiumModel_) != address(0)) {
+            UD60x18 risk = riskPremiumModel_.riskPremium(UD60x18.wrap(1e18));
+            require(risk.unwrap() < PERCENTAGE_100, ">=100%");
+        }
+        riskPremiumModel = riskPremiumModel_;
+        emit RiskModelChanged(address(riskPremiumModel_));
     }
 
     /// @notice Sets the APR feed contract for fetching APR target and APR base.
@@ -1559,7 +1632,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
             srtFundNav = 0;
             return;
         }
-        srtFundNav = Math.mulDiv(fundedGrossNav, 1e18 - price, price);
+        // Senior deposits self-fund only the valuation loss that existed at deposit time.
+        // On further de-peg, Junior still covers the additional Senior loss.
+        srtFundNav = Math.min(srtFundNav, Math.mulDiv(fundedGrossNav, 1e18 - price, price));
     }
 
     /// @notice Adjusts Junior and Senior NAVs when the base asset is trading below par (valuation loss)

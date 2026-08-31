@@ -99,7 +99,11 @@ UTest.create({
 
     async '!v1.1.0: upgrade + enable fee' () {
         // https://github.com/Strata-Money/contracts-tranches-release-reports/tree/master/v1.1.0
-        const timelockConfig = forked.accounts.timelock.config;
+        const timelockConfig = {
+            name: 'impersonated',
+            type: 'impersonated',
+            address: '0x4f2682b78F37910704fB1AFF29358A1da07E022d'
+        };
         const timelockAdmin = forked.accounts.timelock.admin;
         const safeAdmin = forked.accounts.safe.admin;
         const deployer = forked.accounts.deployer;

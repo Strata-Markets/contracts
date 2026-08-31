@@ -7,8 +7,9 @@ import { TEth } from 'dequanto/models/TEth';
 import { MKRAlphaTranche } from './strats/MKRAlphaTranche';
 import { SaturnTranche } from './strats/SaturnTranche';
 import { FigureTranche } from './strats/FigureTranche';
+import { NestOpalTranche } from './strats/NestOpalTranche';
 
-export type TCDOKey = 'ethena' | 'neutrl' | 'mhyper' | 'mkralpha' | 'mm1usd' | 'mrox' | 'saturn' | 'figure' | 'spkMhyperIso';
+export type TCDOKey = 'ethena' | 'neutrl' | 'mhyper' | 'mkralpha' | 'mm1usd' | 'mrox' | 'saturn' | 'figure' | 'spkMhyperIso' | 'nestopal';
 export interface ICDO {
     // token symbol
     base: string;
@@ -52,9 +53,20 @@ export interface ICDO {
         performanceFee: number;
     };
     riskPremium?: {
-        x: number;
-        y: number;
-        k: number;
+        x?: number;
+        y?: number;
+        k?: number;
+        model?: {
+            type: 'sigmoid'
+            // 0.05 (5%)
+            min: number
+            // 0.22 (22%)
+            max: number
+            // 30
+            k: number
+            // 0.85 (85%)
+            sOptimal: number
+        }
     };
     minimumJrtSrtRatioBuffer?: number;
     minimumJrtSrtRatio?: number;
@@ -99,6 +111,16 @@ export interface ICDO {
             useConservativeRedemptionPrice?: boolean
         }
         unstakeImpl?: 'MockInstant'
+
+        // TrancheDepositor Version
+        depositor?: 'V3' | 'V4'
+
+        valuationKeeper?: 'Accountable'
+        valuationKeeperOptions?: {
+            // timespan, e.g.: 24h
+            gracePeriod?: string
+            [key: string]: any
+        }
     };
 
     // Contracts prefixes (can be overridden for testing)
@@ -228,6 +250,11 @@ export const Tranches: Record<TCDOKey, ICDO> = {
         },
         ContractVersions: {
             accounting: 'continuous',
+            depositor: 'V3',
+            valuationKeeper: 'Accountable',
+            valuationKeeperOptions: {
+                gracePeriod: '24h'
+            },
         },
         TestHelper: NeutrlTestHelper,
     },
@@ -366,6 +393,7 @@ export const Tranches: Record<TCDOKey, ICDO> = {
     },
     saturn: SaturnTranche,
     figure: FigureTranche,
+    nestopal: NestOpalTranche,
 };
 
 export const ContractsIDMapping = {
@@ -384,4 +412,5 @@ export const ContractsPrefixMapping = {
     mm1usd: 'MM1USD',
     mrox: 'MROX',
     saturn: 'Saturn',
+    nestopal: 'NestOpal',
 } as Record<TCDOKey, string>;

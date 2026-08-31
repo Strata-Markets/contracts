@@ -104,7 +104,7 @@ UTest.create({
         async function updateAccounting() {
             await accounting.$receipt().updateAccounting(cdoAccount);
         }
-        async function distribute(time: string, aprTVL: number) {
+        async function distribute(time: string, aprTVL: number, opts?: { reconcile?: boolean}) {
             const nav = await cdo._nav();
             const rate = await cdo._rate();
 
@@ -115,14 +115,18 @@ UTest.create({
             let navT1 = nav + nav * apr * BigInt(dt) / BigInt(SECONDS_PER_YEAR) / 10n ** 12n;
 
             await cdo.$receipt().setTotalAssets(deployer, navT1);
-            await updateAccounting();
+            if (opts?.reconcile !== false) {
+                await updateAccounting();
+            }
         }
-        async function distributeAbs(rewardsTVL: bigint | number) {
+        async function distributeAbs(rewardsTVL: bigint | number, opts?: { reconcile?: boolean}) {
             const nav = await cdo._nav();
             const navT1 = nav + toWei(rewardsTVL);
 
             await cdo.$receipt().setTotalAssets(deployer, navT1);
-            await updateAccounting();
+            if (opts?.reconcile !== false) {
+                await updateAccounting();
+            }
         }
         async function forceReconciliation() {
             await distributeAbs(1001n);
@@ -134,8 +138,8 @@ UTest.create({
 
             const jrtFactDiff = Math.abs(jrt - jrtFact);
             const srtFactDiff = Math.abs(srt - srtFact);
-            $require.lte(jrtFactDiff, .5, `JRT should be approximately equal | ${jrt}, ${srt} != ${jrtFact}, ${srtFact}`);
-            $require.lte(srtFactDiff, .5, `SRT should be approximately equal | ${jrt}, ${srt} != ${jrtFact}, ${srtFact}`);
+            jrt != null && $require.lte(jrtFactDiff, .5, `JRT should be approximately equal | ${jrt}, ${srt} != ${jrtFact}, ${srtFact}`);
+            srt != null && $require.lte(srtFactDiff, .5, `SRT should be approximately equal | ${jrt}, ${srt} != ${jrtFact}, ${srtFact}`);
         }
         async function mine(time: string) {
             await client.debug.mine(time);
@@ -335,6 +339,20 @@ UTest.create({
                 // SRT = 500 * 1.0625^4 = 637.71533203125
                 // JRT = 964.09130859375
                 await expectApprox(964.09, 637.7);
+            },
+
+            async 'calculate accrueAssetTime in view function'() {
+                await deposit(50, 50);
+                await mine('5days');
+                // Deposit Junior only
+                await deposit(200_000, 0);
+                await mine('5days');
+
+                // Without view-accrued asset-time, totalAssets() prices the reconciliation using stale
+                // exposure weights and gives Senior too much yield. The view path must simulate
+                // _accrueAssetTime() so tranche NAVs reflect the latest time-weighted exposure.
+                await distributeAbs(100, { reconcile: false });
+                await expectApprox(200_149.975, 50.024975);
             },
 
         })

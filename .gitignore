@@ -43,3 +43,4 @@ config/*
 /deployments/deployments-hardhat*
 /deployments/test/
 /deployments/*/deployments-hardhat*
+/tasks/local/

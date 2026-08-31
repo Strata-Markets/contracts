@@ -7,6 +7,7 @@ import { MM1UsdDeployments } from './MM1UsdDeployments';
 import { MROXDeployments } from './MROXDeployments';
 import { NeutrlDeployments } from './NeutrlDeployments';
 import { SaturnDeployments } from './SaturnDeployments';
+import { NestOpalDeployments } from './NestOpalDeployments';
 
 export namespace DeploymentsTypes {
     export type CDOs = {
@@ -19,6 +20,7 @@ export namespace DeploymentsTypes {
         mm1usd: MM1UsdDeployments;
         mrox: MROXDeployments;
         saturn: SaturnDeployments;
+        nestopal: NestOpalDeployments;
     };
 
     export const Tranches = {
@@ -31,5 +33,6 @@ export namespace DeploymentsTypes {
         mm1usd: MM1UsdDeployments,
         mrox: MROXDeployments,
         saturn: SaturnDeployments,
+        nestopal: NestOpalDeployments,
     };
 }

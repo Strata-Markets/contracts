@@ -55,6 +55,9 @@ interface IStrataCDO {
     function exitFeeSrt () external view returns (uint256);
 
     function calculateExitMode (address tranche, address owner) external view returns (TExitMode mode, uint256 feeBps, uint32 coverage);
+
+    function setActionStates (address tranche, bool isDepositEnabled, bool isWithdrawEnabled) external;
+    function setValuationPrice (uint128 valuationPrice) external;
 }
 
 interface IStrataCDOSetters {

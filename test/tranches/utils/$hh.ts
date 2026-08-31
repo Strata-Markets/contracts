@@ -86,7 +86,7 @@ export namespace $hh {
         factory: TDeployments;
         tranches: Awaited<ReturnType<TDeployments['ensureCDO']>>;
         underlying: Awaited<ReturnType<TDeployments['ensureUnderlying']>>;
-        deployer: TEth.IAccount
+        deployer: TEth.EoAccount
         depositor: TrancheDepositor
         configManager: TwoStepConfigManager;
 

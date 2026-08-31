@@ -5,9 +5,11 @@ import { TimelockController as TimelockBase } from "@openzeppelin/contracts/gove
 
 contract StrataMasterChef is TimelockBase {
 
-    constructor(address[] memory proposers, address[] memory executors) TimelockBase(
-        24 hours, proposers, executors, address(0)
+    constructor(uint256 minDelay, address[] memory proposers, address[] memory executors) TimelockBase(
+        minDelay, proposers, executors, address(0)
     ) {
-
+        // Only the initial delay is bounded; later changes use TimelockController.updateDelay
+        require(minDelay >= 1 * 24 hours, "InitialDelayTooShort");
+        require(minDelay <= 7 * 24 hours, "InitialDelayTooLong");
     }
 }
