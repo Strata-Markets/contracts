@@ -330,7 +330,7 @@ UTest.create({
         await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
 
         // maxPPS should be set
-        const maxPPS = await saturnStrategy.maxJrtPricePerShare();
+        const maxPPS = await saturnStrategy.effectiveMaxPPS();
         $require.True(maxPPS > 0n, 'maxPPS should be set after keeper update');
 
         // Current PPS should be at or near maxPPS -> no premium
@@ -356,7 +356,7 @@ UTest.create({
 
         // Record pre-drop state
         const ppsBefore = await cdo.pricePerShare(jrtVault.address);
-        const maxPPS = await saturnStrategy.maxJrtPricePerShare();
+        const maxPPS = await saturnStrategy.effectiveMaxPPS();
         $require.True(maxPPS > 0n, 'maxPPS should be set');
 
         // Simulate NAV drop: reduce sUSDat share balance by 15%
@@ -450,7 +450,7 @@ UTest.create({
             'Junior should receive fewer sUSDat shares than Senior due to premium');
     },
 
-    async 'SaturnStrategy::junior premium - window expiry'() {
+    async 'SaturnStrategy::junior premium - quarter window decay'() {
         const { client } = test;
         const { deployer } = test.factory;
         const { base, sUSDat } = await test.factory.ensureUnderlying();
@@ -464,32 +464,56 @@ UTest.create({
         await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
         await $tranche.deposit(srtVault, deployer, base, AMOUNT);
 
-        // Keeper sets maxPPS
+        // Q1: Keeper sets maxPPS at peak
         await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+        const maxPPS_Q1 = await saturnStrategy.effectiveMaxPPS();
+        $require.True(maxPPS_Q1 > 0n, 'maxPPS should be set');
 
-        // Drop NAV 15%
-        const currentBalance = await strategy.totalAssets();
-        const droppedBalance = currentBalance * 85n / 100n;
-        const sharesToSet = await mockSUSDat.convertToShares(droppedBalance);
-        await $erc20.setBalanceAny(sUSDat as any, strategy.address, sharesToSet);
+        // Advance to Q2 (7 days) and set a slightly lower max
+        await client.debug.mine('8days');
+        // Drop NAV slightly (5%)
+        const balance1 = await strategy.totalAssets();
+        await $erc20.setBalanceAny(sUSDat as any, strategy.address,
+            await mockSUSDat.convertToShares(balance1 * 95n / 100n));
         await accounting.$receipt().onAprChanged(deployer);
-
-        // Verify maxPPS is set
-        const maxPPSBefore = await saturnStrategy.maxJrtPricePerShare();
-        $require.True(maxPPSBefore > 0n, 'maxPPS should be set');
-
-        // Advance past 30-day window
-        await client.debug.mine('31days');
-
-        // Deposit to add more assets (deposit itself no longer calls updateMaxJrtPricePerShare)
-        await $tranche.deposit(jrtVault, deployer, base, AMOUNT);
-
-        // Keeper calls update - expired window resets maxPPS to 0, then sets current PPS
         await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
 
-        // maxPPS should have been reset and set to current (lower) PPS
-        const maxPPSAfter = await saturnStrategy.maxJrtPricePerShare();
-        $require.True(maxPPSAfter < maxPPSBefore, 'maxPPS should reset to current lower PPS after window expiry');
+        // Advance to Q3 (14 days) and drop more (10% total)
+        await client.debug.mine('8days');
+        const balance2 = await strategy.totalAssets();
+        await $erc20.setBalanceAny(sUSDat as any, strategy.address,
+            await mockSUSDat.convertToShares(balance2 * 95n / 100n));
+        await accounting.$receipt().onAprChanged(deployer);
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // Advance to Q4 (21 days) and drop more (15% total)
+        await client.debug.mine('8days');
+        const balance3 = await strategy.totalAssets();
+        await $erc20.setBalanceAny(sUSDat as any, strategy.address,
+            await mockSUSDat.convertToShares(balance3 * 95n / 100n));
+        await accounting.$receipt().onAprChanged(deployer);
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // effectiveMaxPPS should still be Q1's max (the highest)
+        const maxBefore = await saturnStrategy.effectiveMaxPPS();
+        $require.eq(maxBefore, maxPPS_Q1, 'Effective max should still be Q1 peak');
+
+        // Advance past Q1 expiry (28+ days total) - Q1 is excluded by epoch check
+        await client.debug.mine('8days');
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // effectiveMaxPPS should now fall back to Q2's max (stepped decay, not cliff)
+        const maxAfter = await saturnStrategy.effectiveMaxPPS();
+        $require.True(maxAfter > 0n, 'Should have fallback max from later quarters');
+        $require.True(maxAfter < maxPPS_Q1, 'Effective max should drop after Q1 expires');
+
+        // Advance past all quarters (28+ more days)
+        await client.debug.mine('30days');
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(deployer);
+
+        // All old quarters expired, only current PPS remains
+        const maxFinal = await saturnStrategy.effectiveMaxPPS();
+        $require.True(maxFinal < maxAfter, 'Effective max should keep decaying');
     },
 
     async 'SaturnStrategy::junior premium - admin reset'() {
@@ -516,14 +540,18 @@ UTest.create({
         await accounting.$receipt().onAprChanged(deployer);
 
         // Verify maxPPS is set (from keeper call above, before the drop)
-        $require.True(await saturnStrategy.maxJrtPricePerShare() > 0n, 'maxPPS should be set');
+        $require.True(await saturnStrategy.effectiveMaxPPS() > 0n, 'maxPPS should be set');
 
         // Admin reset
         await saturnStrategy.$receipt().resetMaxJrtPricePerShare(deployer);
 
-        // Verify reset
-        $require.eq(await saturnStrategy.maxJrtPricePerShare(), 0n, 'maxPPS should be 0 after reset');
-        $require.eq(await saturnStrategy.maxJrtPricePerShareTimestamp(), 0n, 'timestamp should be 0 after reset');
+        // Verify all quarters are cleared
+        $require.eq(await saturnStrategy.effectiveMaxPPS(), 0n, 'effectiveMaxPPS should be 0 after reset');
+        for (let i = 0; i < 4; i++) {
+            const q = await saturnStrategy.quarters(i);
+            $require.eq(q.maxPPS, 0n, `quarter[${i}].maxPPS should be 0`);
+            $require.eq(q.epoch, 0n, `quarter[${i}].epoch should be 0`);
+        }
     },
 
     // ============================================================

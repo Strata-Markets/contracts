@@ -58,21 +58,32 @@ contract SaturnStrategy is Strategy {
      *
      * When STRC drops, Junior PPS drops (Juniors cover Seniors). New depositors could buy
      * Juniors cheaply, diluting existing holders. The premium fee charges new Junior depositors
-     * the difference between the 30-day max PPS and the current PPS, keeping the value with
+     * the difference between the rolling max PPS and the current PPS, keeping the value with
      * existing Junior holders.
+     *
+     * The max PPS is tracked across 4 quarter-window slots (7 days each). When the oldest
+     * quarter expires, the effective max falls back to the next highest quarter instead of
+     * dropping to zero. This prevents cliff-edge premium decay and makes timing attacks harder.
      */
 
     /// @notice Junior tranche vault address (set via setJrtVault)
     address public jrtVault;
 
-    /// @notice Rolling 30-day max Junior PPS (18 decimals, matching CDO.pricePerShare format)
-    uint256 public maxJrtPricePerShare;
+    /// @notice Quarter-window max PPS tracking for graduated premium decay
+    struct QuarterData {
+        uint128 maxPPS;   // Max PPS observed during this quarter (18 decimals)
+        uint128 epoch;    // Absolute epoch number = timestamp / QUARTER_DURATION
+    }
+    QuarterData[4] public quarters;
 
-    /// @notice Timestamp when maxJrtPricePerShare was last set
-    uint256 public maxJrtPricePerShareTimestamp;
+    /// @notice Quarter duration for the rolling max window
+    uint256 private constant QUARTER_DURATION = 7 days;
 
-    /// @notice Protection window duration for the Junior premium
-    uint256 public constant JRT_PREMIUM_WINDOW = 30 days;
+    /// @notice Number of quarter slots tracked
+    uint256 private constant NUM_QUARTERS = 4;
+
+    /// @notice Total protection window = QUARTER_DURATION * NUM_QUARTERS = 28 days
+    uint256 public constant JRT_PREMIUM_WINDOW = QUARTER_DURATION * NUM_QUARTERS;
 
     /// @notice Safety cap to prevent underflow in Tranche.quoteDeposit (saturnFee + premiumBps must be < 10000)
     uint256 private constant MAX_PREMIUM_BPS = 9500;
@@ -416,7 +427,7 @@ contract SaturnStrategy is Strategy {
      * @notice Returns the deposit fee percentage for the underlying protocol + Junior premium
      * @dev V2: sUSDat.depositFeeBps() returns market-mode-dependent value.
      *      When the caller is the Junior tranche (msg.sender == jrtVault), an additional
-     *      premium fee is applied based on the 30-day max PPS vs current PPS.
+     *      premium fee is applied based on the rolling quarter-window max PPS vs current PPS.
      *      This prevents new Junior depositors from diluting existing holders after NAV drops.
      *
      *      Fee matrix:
@@ -470,29 +481,44 @@ contract SaturnStrategy is Strategy {
     }
 
     /**
+     * @notice Computes the effective max PPS across all non-expired quarter slots
+     * @dev Iterates all 4 quarter slots, includes only those within the last NUM_QUARTERS epochs.
+     *      Returns 0 if no valid quarters exist (all expired or never set).
+     * @return maxPPS The highest PPS from all valid quarter slots
+     */
+    function effectiveMaxPPS() public view returns (uint256 maxPPS) {
+        uint128 currentEpoch = uint128(block.timestamp / QUARTER_DURATION);
+        for (uint256 i = 0; i < NUM_QUARTERS; i++) {
+            QuarterData storage q = quarters[i];
+            if (q.epoch > 0 && currentEpoch - q.epoch < NUM_QUARTERS) {
+                if (q.maxPPS > maxPPS) {
+                    maxPPS = q.maxPPS;
+                }
+            }
+        }
+    }
+
+    /**
      * @notice Calculates the Junior premium fee in basis points
-     * @dev Premium = (maxPPS - currentPPS) / maxPPS * 10000
-     *      Capped at MAX_PREMIUM_BPS to prevent quoteDeposit underflow.
+     * @dev Premium = (effectiveMaxPPS - currentPPS) / effectiveMaxPPS * 10000
+     *      Uses quarter-window max for graduated decay instead of cliff expiry.
      *      Returns 0 if:
      *        - jrtVault is not set
-     *        - maxJrtPricePerShare is 0 (not yet tracked)
-     *        - 30-day window has expired
-     *        - currentPPS >= maxPPS (no drop)
+     *        - effectiveMaxPPS is 0 (no valid quarters)
+     *        - currentPPS >= effectiveMaxPPS (no drop)
      * @return premiumBps The premium fee in basis points
      */
     function _juniorPremiumBps() internal view returns (uint256) {
-        if (jrtVault == address(0) || maxJrtPricePerShare == 0) return 0;
+        if (jrtVault == address(0)) return 0;
 
-        // Check if window has expired
-        if (block.timestamp > maxJrtPricePerShareTimestamp + JRT_PREMIUM_WINDOW) {
-            return 0;
-        }
+        uint256 maxPPS = effectiveMaxPPS();
+        if (maxPPS == 0) return 0;
 
         uint256 currentPPS = _jrtPricePerShare();
-        if (currentPPS >= maxJrtPricePerShare) return 0;
+        if (currentPPS >= maxPPS) return 0;
 
         // premiumBps = (maxPPS - currentPPS) / maxPPS * 10000
-        uint256 premiumBps = (maxJrtPricePerShare - currentPPS) * 10000 / maxJrtPricePerShare;
+        uint256 premiumBps = (maxPPS - currentPPS) * 10000 / maxPPS;
 
         // Safety cap: ensure saturnFee + premiumBps < 10000 bps
         if (premiumBps > MAX_PREMIUM_BPS) {
@@ -502,38 +528,43 @@ contract SaturnStrategy is Strategy {
     }
 
     /**
-     * @notice Updates the 30-day rolling max Junior PPS
+     * @notice Updates the current quarter's max Junior PPS
      * @dev Must be called by a keeper (or admin) when accounting is synced.
      *      Do NOT call from within strategy.deposit() - at that point accounting.nav
      *      has not been updated yet, and cdo.totalAssets(jrtVault) would be inflated.
-     *      If the 30-day window has expired, resets maxPPS to 0 before checking current PPS.
-     *      Only updates if currentPPS > maxPPS (new high).
+     *      Each quarter slot self-expires via epoch comparison. When a new epoch starts,
+     *      the old slot is cleared automatically.
      */
     function updateMaxJrtPricePerShare() public {
         if (jrtVault == address(0)) return;
 
-        // Expire old max if beyond 30-day window
-        if (block.timestamp > maxJrtPricePerShareTimestamp + JRT_PREMIUM_WINDOW) {
-            maxJrtPricePerShare = 0;
+        uint128 currentEpoch = uint128(block.timestamp / QUARTER_DURATION);
+        uint256 slotIndex = currentEpoch % NUM_QUARTERS;
+        QuarterData storage q = quarters[slotIndex];
+
+        // If this slot belongs to an older epoch, clear it for the new epoch
+        if (q.epoch != currentEpoch) {
+            q.epoch = currentEpoch;
+            q.maxPPS = 0;
         }
 
-        uint256 currentPPS = _jrtPricePerShare();
-        if (currentPPS > maxJrtPricePerShare) {
-            maxJrtPricePerShare = currentPPS;
-            maxJrtPricePerShareTimestamp = block.timestamp;
+        uint128 currentPPS = uint128(_jrtPricePerShare());
+        if (currentPPS > q.maxPPS) {
+            q.maxPPS = currentPPS;
             emit MaxJrtPricePerShareUpdated(currentPPS, block.timestamp);
         }
     }
 
     /**
      * @notice Admin override to reset the Junior premium immediately
-     * @dev Use in case of market dislocation or when the premium should be manually cleared.
-     *      Sets both maxPPS and timestamp to 0, effectively disabling the premium until
+     * @dev Clears all quarter slots, effectively disabling the premium until
      *      the next updateMaxJrtPricePerShare() call sets a new baseline.
      */
     function resetMaxJrtPricePerShare() external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
-        maxJrtPricePerShare = 0;
-        maxJrtPricePerShareTimestamp = 0;
+        for (uint256 i = 0; i < NUM_QUARTERS; i++) {
+            quarters[i].maxPPS = 0;
+            quarters[i].epoch = 0;
+        }
         emit MaxJrtPricePerShareReset();
     }
 
