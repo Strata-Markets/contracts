@@ -212,7 +212,7 @@ contract SaturnStrategy is Strategy {
      *      No smoothing applied — Junior tranche absorbs STRC price volatility.
      * @return baseAssets The total amount of USDat managed by this strategy
      */
-    function totalAssets () public view returns (uint256 baseAssets) {
+    function totalAssets () public view override(Strategy) returns (uint256 baseAssets) {
         uint256 shares = sUSDat.balanceOf(address(this));
         baseAssets = sUSDat.convertToAssets(shares);
         return baseAssets;
@@ -224,7 +224,7 @@ contract SaturnStrategy is Strategy {
      *      reports the current total assets regardless of parameters.
      * @return baseAssets The total amount of USDat managed by this strategy
      */
-    function totalAssets (uint256, uint256) public view returns (uint256 baseAssets) {
+    function totalAssets (uint256, uint256) public view override(Strategy) returns (uint256 baseAssets) {
         return totalAssets();
     }
 

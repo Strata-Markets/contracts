@@ -22,8 +22,8 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     /// @notice Basis points denominator
     uint256 public constant BPS_DENOMINATOR = 10000;
 
-    /// @notice When true, redemptions exclude unreconciled projected gains.
-    bool public immutable useConservativeRedemptionPrice;
+    /// @notice When true, deposits use depositable NAV and redemptions use redeemable NAV.
+    bool public immutable useConservativePrice;
 
     event OnMetaDeposit(address indexed owner, address indexed token, uint256 tokenAssets, uint256 shares);
     event OnMetaWithdraw(address indexed receiver, address indexed token, uint256 tokenAssets, uint256 shares);
@@ -37,8 +37,8 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
         uint32 cooldownSeconds
     );
 
-    constructor(bool useConservativeRedemptionPrice_) {
-        useConservativeRedemptionPrice = useConservativeRedemptionPrice_;
+    constructor(bool useConservativePrice_) {
+        useConservativePrice = useConservativePrice_;
     }
 
     function initialize(
@@ -64,8 +64,24 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     }
 
     /// @return uint256 The total assets for this tranche, excluding projection when available
-    function totalAssetsUnprojected() public view returns (uint256) {
-        return cdo.totalAssetsUnprojected(address(this));
+    function totalAssetsSettled() public view returns (uint256) {
+        return cdo.totalAssetsSettled(address(this));
+    }
+
+    /// @return uint256 The depositable NAV for this tranche:
+    ///         live NAV, or max(live NAV, epoch NAV) if useConservativePrice is enabled
+    function totalAssetsDepositable() public view returns (uint256) {
+        return useConservativePrice
+            ? cdo.totalAssetsDepositable(address(this))
+            : cdo.totalAssets(address(this));
+    }
+
+    /// @return uint256 The redeemable NAV for this tranche:
+    ///         live NAV, or min(live NAV, epoch NAV) if useConservativePrice is enabled
+    function totalAssetsRedeemable() public view returns (uint256) {
+        return useConservativePrice
+            ? cdo.totalAssetsRedeemable(address(this))
+            : cdo.totalAssets(address(this));
     }
 
     function decimals() public view override(ERC20Upgradeable, ERC4626Upgradeable, IERC20Metadata) returns (uint8) {
@@ -90,7 +106,7 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
             // No mint-cap
             return type(uint256).max;
         }
-        return convertToShares(assets);
+        return previewDeposit(assets);
     }
 
     /**
@@ -105,7 +121,11 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     /** @dev Extends {IERC4626-maxRedeem} to handle the paused state and the TVL ratio */
     function maxRedeem(address owner) public view override(ERC4626Upgradeable, IERC4626) returns (uint256 sharesGross) {
         uint256 assetsProtocolMax = cdo.maxWithdraw(address(this), owner);
-        uint256 sharesProtocolMax = convertToSharesRedeemable(assetsProtocolMax, Math.Rounding.Floor);
+        uint256 sharesProtocolMax = _convertToShares(
+            totalAssetsRedeemable(),
+            assetsProtocolMax,
+            Math.Rounding.Floor
+        );
         sharesGross = Math.min(super.maxRedeem(owner), sharesProtocolMax);
     }
 
@@ -119,7 +139,11 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     }
     function quoteDeposit(uint256 assetsGross, uint256 feeBps) public view returns (uint256 sharesNet) {
         uint256 fee = Math.mulDiv(assetsGross, feeBps, BPS_DENOMINATOR, Math.Rounding.Ceil);
-        sharesNet = super.previewDeposit(assetsGross - fee);
+        sharesNet = _convertToShares(
+            totalAssetsDepositable(),
+            assetsGross - fee,
+            Math.Rounding.Floor
+        );
     }
 
     /// @inheritdoc IERC4626
@@ -130,12 +154,20 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
         uint256 feeBps = cdo.strategy().depositFeeBps(
             address(this),
             asset(),
-            super.previewMint(sharesNet)
+            _convertToAssets(
+                totalAssetsDepositable(),
+                sharesNet,
+                Math.Rounding.Ceil
+            )
         );
         assetsGross = quoteMint(sharesNet, feeBps);
     }
     function quoteMint(uint256 sharesNet, uint256 feeBps) public view returns (uint256 assetsGross) {
-        uint256 assetsNet = super.previewMint(sharesNet);
+        uint256 assetsNet = _convertToAssets(
+            totalAssetsDepositable(),
+            sharesNet,
+            Math.Rounding.Ceil
+        );
         assetsGross = Math.mulDiv(assetsNet, BPS_DENOMINATOR, BPS_DENOMINATOR - feeBps, Math.Rounding.Ceil);
     }
 
@@ -148,7 +180,11 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     }
     function quoteRedeem(uint256 sharesGross, uint256 fee) public view returns (uint256 assetsNet) {
         uint256 sharesFee = fee > 0 ? calculateExitFee(sharesGross, fee, /*isGross*/true) : 0;
-        assetsNet = convertToAssetsRedeemable(sharesGross - sharesFee, Math.Rounding.Floor);
+        assetsNet = _convertToAssets(
+            totalAssetsRedeemable(),
+            sharesGross - sharesFee,
+            Math.Rounding.Floor
+        );
     }
 
     /** @dev Extends {IERC4626-previewWithdraw} to handle fee calculation */
@@ -158,7 +194,11 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     }
 
     function quoteWithdraw(uint256 assetsNet, uint256 fee) public view returns (uint256 sharesGross) {
-        uint256 sharesNet = convertToSharesRedeemable(assetsNet, Math.Rounding.Ceil);
+        uint256 sharesNet = _convertToShares(
+            totalAssetsRedeemable(),
+            assetsNet,
+            Math.Rounding.Ceil
+        );
         uint256 sharesFee = fee > 0 ? calculateExitFee(sharesNet, fee, /*isGross*/false) : 0;
         sharesGross = sharesNet + sharesFee;
     }
@@ -410,7 +450,11 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
             return;
         }
 
-        uint256 baseAssetsGross = convertToAssetsRedeemable(sharesGross, Math.Rounding.Floor);
+        uint256 baseAssetsGross = _convertToAssets(
+            totalAssetsRedeemable(),
+            sharesGross,
+            Math.Rounding.Floor
+        );
         uint256 fee = Math.saturatingSub(baseAssetsGross, baseAssets);
 
         _burn(owner, sharesGross);
@@ -445,7 +489,11 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
             revert ERC4626ExceededMaxRedeem(owner, shares, maxShares);
         }
 
-        assets = convertToAssetsRedeemable(shares, Math.Rounding.Floor);
+        assets = _convertToAssets(
+            totalAssetsRedeemable(),
+            shares,
+            Math.Rounding.Floor
+        );
         _burn(owner, shares);
         cdo.accrueFee(address(this), assets);
         cdo.updateBalanceFlow();
@@ -481,13 +529,13 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
         }
     }
 
-    function convertToAssetsRedeemable(uint256 shares, Math.Rounding rounding) internal view returns (uint256) {
-        uint256 assets = useConservativeRedemptionPrice ? totalAssetsUnprojected() : totalAssets();
-        return Math.mulDiv(shares, assets + 1, totalSupply() + 10 ** _decimalsOffset(), rounding);
+    /// @dev Converts shares using the supplied NAV instead of reading totalAssets()
+    function _convertToAssets(uint256 totalAssets_, uint256 shares, Math.Rounding rounding) internal view returns (uint256) {
+        return Math.mulDiv(shares, totalAssets_ + 1, totalSupply() + 10 ** _decimalsOffset(), rounding);
     }
 
-    function convertToSharesRedeemable(uint256 assets, Math.Rounding rounding) internal view returns (uint256) {
-        uint256 totalAssets_ = useConservativeRedemptionPrice ? totalAssetsUnprojected() : totalAssets();
+    /// @dev Converts assets using the supplied NAV instead of reading totalAssets()
+    function _convertToShares(uint256 totalAssets_, uint256 assets, Math.Rounding rounding) internal view returns (uint256) {
         return Math.mulDiv(assets, totalSupply() + 10 ** _decimalsOffset(), totalAssets_ + 1, rounding);
     }
 

@@ -132,7 +132,7 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     }
 
     /// @notice Returns total assets across all sub-strategies and pending rebalances.
-    function totalAssets() public view returns (uint256 total) {
+    function totalAssets() public view override(IStrategy, Strategy) returns (uint256 total) {
         for (uint256 i; i < strats.length; i++) {
             total += strats[i].totalAssets();
         }
@@ -148,7 +148,7 @@ abstract contract MultiStrategy is Strategy, IMultiStrategy, IRebalanceable {
     /// @dev Returns navT0 if any strategy reports no new rewards (nav == type(uint256).max), signaling the accounting
     ///      contract to continue NAV projection. When all strategies report new rewards, returns the
     ///      updated total, triggering full reconciliation in the accounting contract.
-    function totalAssets(uint256 navT0, uint256 timestamp) public view returns (uint256 total) {
+    function totalAssets(uint256 navT0, uint256 timestamp) public view override(IStrategy, Strategy) returns (uint256 total) {
         for (uint256 i; i < strats.length; i++) {
             uint256 nav = strats[i].totalAssets(type(uint256).max, timestamp);
             if (nav == type(uint256).max) {

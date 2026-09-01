@@ -109,6 +109,9 @@ namespace $t {
                     }
                     function totalStrategyAssets() public view returns (uint256) { return _nav; }
                     function totalStrategyAssets(uint256, uint256) public view returns (uint256) { return _nav; }
+                    function totalStrategyAssetsSnapshot (uint256, uint256) public view returns (uint256, uint256, uint256, uint256) {
+                        return (_nav, block.timestamp, _nav, block.timestamp);
+                    }
 
                     function strategy() public view returns (address) { return address(this); }
 

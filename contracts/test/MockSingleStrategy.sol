@@ -64,12 +64,32 @@ contract MockSingleStrategy is IStrategy {
         return tokenAmount;
     }
 
-    function totalAssets() external view returns (uint256) {
+    function totalAssets() external view override returns (uint256) {
         return totalAssetsValue;
     }
 
-    function totalAssets(uint256, uint256) external view returns (uint256) {
+    function totalAssets(uint256, uint256) public view override returns (uint256) {
         return totalAssetsValue;
+    }
+
+    function totalAssetsSnapshot(
+        uint256 latestNav,
+        uint256 timestamp
+    )
+        external
+        view
+        override
+        returns (
+            uint256 navT1,
+            uint256 navT1Time,
+            uint256 navMTM,
+            uint256 navMTMTime
+        )
+    {
+        navT1 = totalAssets(latestNav, timestamp);
+        navMTM = totalAssetsValue;
+        navT1Time = block.timestamp;
+        navMTMTime = block.timestamp;
     }
 
     function reduceReserve(address token_, uint256 tokenAmount, address receiver) external {

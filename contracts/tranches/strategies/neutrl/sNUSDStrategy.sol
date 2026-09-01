@@ -163,7 +163,7 @@ contract sNUSDStrategy is Strategy {
      * @dev This function returns the current value of the strategy's assets in NUSD.
      * @return baseAssets The total amount of NUSD managed by this strategy
      */
-    function totalAssets() public view returns (uint256 baseAssets) {
+    function totalAssets() public view override(Strategy) returns (uint256 baseAssets) {
         uint256 shares = sNUSD.balanceOf(address(this));
         baseAssets = sNUSD.previewRedeem(shares);
         return baseAssets;
@@ -174,7 +174,7 @@ contract sNUSDStrategy is Strategy {
      * @dev The strategy vests rewards continuously, so it reports the current total assets.
      * @return baseAssets The total amount of NUSD managed by this strategy
      */
-    function totalAssets(uint256, uint256) external view returns (uint256 baseAssets) {
+    function totalAssets(uint256, uint256) public view override(Strategy) returns (uint256 baseAssets) {
         return totalAssets();
     }
 

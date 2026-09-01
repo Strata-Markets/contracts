@@ -21,9 +21,24 @@ interface IStrataCDO {
     function sharesCooldown() external view returns (ISharesCooldown);
 
     function totalAssets (address tranche) external view returns (uint256);
-    function totalAssetsUnprojected (address tranche) external view returns (uint256);
+    function totalAssetsSettled (address tranche) external view returns (uint256);
+    function totalAssetsDepositable (address tranche) external view returns (uint256);
+    function totalAssetsRedeemable (address tranche) external view returns (uint256);
     function totalStrategyAssets () external view returns (uint256);
     function totalStrategyAssets (uint256 latestNav, uint256 timestamp) external view returns (uint256);
+    function totalStrategyAssetsSnapshot(
+        uint256 latestNav,
+        uint256 timestamp
+    )
+        external
+        view
+        returns (
+            uint256 navT1,
+            uint256 navT1Time,
+            uint256 navMTM,
+            uint256 navMTMTime
+        );
+
     function updateAccounting () external;
     function updateBalanceFlow () external;
 

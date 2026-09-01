@@ -249,7 +249,7 @@ contract FigureStrategy is Strategy {
      * @dev Returns the current value of the strategy's Prime holdings in base asset terms.
      * @return baseAssets The total USDC value managed by this strategy
      */
-    function totalAssets() public view returns (uint256 baseAssets) {
+    function totalAssets() public view override(Strategy) returns (uint256 baseAssets) {
         uint256 primeShares = stakingVault.balanceOf(address(this));
 
         baseAssets = stakingVault.previewRedeem(primeShares);
@@ -262,7 +262,7 @@ contract FigureStrategy is Strategy {
      * @param timestamp The timestamp of the previous NAV update
      * @return baseAssets The total USDC value managed by this strategy
      */
-    function totalAssets(uint256 latestNav, uint256 timestamp) public view returns (uint256 baseAssets) {
+    function totalAssets(uint256 latestNav, uint256 timestamp) public view override(Strategy) returns (uint256 baseAssets) {
         if (stakingVault.lastRewardDistributedAt() >= timestamp) {
             return totalAssets();
         }

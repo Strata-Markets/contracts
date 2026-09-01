@@ -31,7 +31,7 @@ const test = await $hh.deploy('mhyper', {
         ContractVersions: {
             accounting: 'dys',
             accountingOptions: {
-                useConservativeRedemptionPrice: true
+                useConservativePrice: true
             },
             unstakeImpl: 'MockInstant'
         }

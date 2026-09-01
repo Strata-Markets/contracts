@@ -48,6 +48,7 @@ import { $promise } from 'dequanto/utils/$promise';
 import { $account } from 'dequanto/utils/$account';
 import { Ownable } from 'dequanto/prebuilt/openzeppelin/Ownable';
 import { RiskPremiumSigmoid } from '@0xc/hardhat/RiskPremiumSigmoid/RiskPremiumSigmoid';
+import { MTMAccounting } from '@0xc/hardhat/MTMAccounting/MTMAccounting';
 
 
 export interface ICdoDeploymentsBase {
@@ -351,10 +352,10 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
 
         const acm = await this.ensureACM();
         const info = this.cdoInfo;
-        const useConservativeRedemptionPrice = info.ContractVersions?.accountingOptions?.useConservativeRedemptionPrice ?? false;
+        const useConservativePrice = info.ContractVersions?.accountingOptions?.useConservativePrice ?? false;
         let { contract: jrtVault } = await this.ds.ensureWithProxy(Tranche, {
             id: `${this.pfx}Jrt`,
-            arguments: [useConservativeRedemptionPrice],
+            arguments: [useConservativePrice],
             initialize: [
                 this.owner.address,
                 acm.address,
@@ -366,7 +367,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         });
         let { contract: srtVault } = await this.ds.ensureWithProxy(Tranche, {
             id: `${this.pfx}Srt`,
-            arguments: [useConservativeRedemptionPrice],
+            arguments: [useConservativePrice],
             initialize: [
                 this.owner.address,
                 acm.address,
@@ -597,13 +598,6 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             : accountingType === 'dys'
                 ? DYSAccounting
                 : DiscreteAccounting;
-        const args = accountingType === 'continuous'
-            ? [ decimals ] as [ bigint ]
-            : accountingType === 'dys'
-                ? [ decimals, false, false ] as [ bigint, boolean, boolean ]
-                : accountingType === 'isolated'
-                    ? [ decimals, true ] as [ bigint, boolean ]
-                    : [ decimals, false ] as [ bigint, boolean ];
 
         const accountingOptions = this.cdoInfo.ContractVersions?.accountingOptions;
 
@@ -611,23 +605,42 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         const useRatesForReconciliation = accountingOptions?.useRatesForReconciliation ?? false;
         const useNavAtReconciliation = accountingOptions?.useNavAtReconciliation ?? false;
         const useJuniorCoversPaidSrtProjection = accountingOptions?.useJuniorCoversPaidSrtProjection ?? true;
-        const useConservativeRedemptionPrice = accountingOptions?.useConservativeRedemptionPrice ?? false;
+        const useConservativePrice = accountingOptions?.useConservativePrice ?? false;
+        const useMTMProjection = accountingOptions?.useMTMProjection ?? false;
 
+        const continuousAccounting = [
+            decimals
+        ] as ParametersFromSecond<Accounting['$constructor']>;
+        const discreteAccounting = [
+            decimals,
+            useNavAtReconciliation,
+        ] as ParametersFromSecond<DiscreteAccounting['$constructor']>;
         const dysAccounting = [
             decimals,
             useBenchmark,
             useNavAtReconciliation,
             useRatesForReconciliation,
             useJuniorCoversPaidSrtProjection,
-            useConservativeRedemptionPrice
+            useConservativePrice
         ] as ParametersFromSecond<DYSAccounting['$constructor']>
+
+        const mtmAccounting = [
+            ...dysAccounting,
+            useMTMProjection
+        ] as ParametersFromSecond<MTMAccounting['$constructor']>;
+
+        const args = {
+            continuous: continuousAccounting,
+            discrete: discreteAccounting,
+            isolated: [ decimals, true],
+            dys: dysAccounting,
+            mtm: mtmAccounting,
+        }[accountingType];
 
         const { contract: accounting } = await this.ds.ensureWithProxy(Contract as typeof Accounting, {
             id: `${this.pfx}Accounting`,
             initialize: [ this.owner.address, acm.address, cdo, feed.address ],
-            arguments: (accountingType === 'dys'
-                ? dysAccounting
-                : args) as [ bigint ],
+            arguments: args as [bigint],
         });
         return accounting;
     }

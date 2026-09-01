@@ -46,6 +46,9 @@ export class AccountingExecutor {
                 function totalStrategyAssets (uint256, uint256) public view returns (uint256) {
                     return _totalStrategyAssets;
                 }
+                function totalStrategyAssetsSnapshot (uint256, uint256) public view returns (uint256, uint256, uint256, uint256) {
+                    return (_totalStrategyAssets, block.timestamp, _totalStrategyAssets, block.timestamp);
+                }
             }
         `, { client });
 

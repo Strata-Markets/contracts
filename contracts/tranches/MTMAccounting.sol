@@ -9,7 +9,6 @@ import {IAprPairFeed} from "./interfaces/IAprPairFeed.sol";
 import {CDOComponent} from "./base/CDOComponent.sol";
 import {UD60x18Ext} from "./utils/UD60x18Ext.sol";
 import {AccountingLib} from "./utils/AccountingLib.sol";
-import {IRiskPremiumModel} from "./accounting/premium/IRiskPremiumModel.sol";
 
 /**
  * @title CDO::DYSAccounting
@@ -31,7 +30,7 @@ import {IRiskPremiumModel} from "./accounting/premium/IRiskPremiumModel.sol";
  *   - srtNav = srtNav - srtPnLProjected + srtPnLRealized
  *   - Asset-time counters are reset
  */
-contract DYSAccounting is IAccounting, CDOComponent {
+contract MTMAccounting is IAccounting, CDOComponent {
     uint256 private constant MIGRATION_V2 = 1 << 0;
     uint256 private constant MIGRATION_V3 = 1 << 1;
 
@@ -66,6 +65,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice When true, deposits use depositable NAV and redemptions use redeemable NAV.
     bool public immutable useConservativePrice;
+
+    /// @notice When true, projection uses current strategy MTM NAV instead of APR-indexed NAV.
+    bool public immutable useMTMProjection;
 
     /// @dev The oracle to fetch the latest APR floor and APR base.
     IAprPairFeed public aprPairFeed;
@@ -203,10 +205,6 @@ contract DYSAccounting is IAccounting, CDOComponent {
     ///      0 means rate tracking is not enabled; the proportional nav-time formula is used instead.
     uint256 public strategyRate;
 
-    /// @notice Optional external risk premium model.
-    /// @dev When unset, accounting falls back to the legacy `x + y * TVL_ratio_sr^k`
-    ///      model configured by `riskX`, `riskY`, and `riskK`.
-    IRiskPremiumModel public riskPremiumModel;
 
     error InvalidNavSplit(
         uint256 navT1,
@@ -214,13 +212,33 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 srtAssets,
         uint256 reserveAssets
     );
+    error InvalidAssetsSnapshot(
+        uint256 lastAccrual,
+        uint256 navT1,
+        uint256 navT1Time,
+        uint256 navMTM,
+        uint256 navMTMTime
+    );
+
+    struct TNavSplitState {
+        uint256 srtNavTime;
+        uint256 navTime;
+        uint256 navTimeNet;
+        uint256 srtProjectedPnLTime;
+        uint256 lastAccrual;
+        uint256 srtPnLProjected;
+        uint256 srtPaidProjected;
+        uint256 srtPnLBenchmark;
+        uint256 epochStart;
+        uint256 strategyRate;
+        uint256 feeWatermarkNav;
+    }
     error ReserveTooLow(uint256 reserveNav, uint256 requestedNav);
 
     event AprPairFeedChanged(address aprPairFeed);
     event AprDataChangedViaPush(UD60x18 aprTarget, UD60x18 aprBase);
     event ReservePercentageChanged(uint256 reserveBps);
     event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
-    event RiskModelChanged(address riskPremiumModel);
     event MinimumJrtSrtRatioChanged(uint256 ratio);
     event MinimumJrtSrtRatioBufferChanged(uint256 ratio);
     event FeeAccrued(
@@ -237,7 +255,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
         bool useNavAtReconciliation_,
         bool useRatesForReconciliation_,
         bool useJuniorCoversPaidSrtProjection_,
-        bool useConservativePrice_
+        bool useConservativePrice_,
+        bool useMTMProjection_
     ) {
         ONE_ASSET = 10 ** navDecimals;
         useBenchmarkProjection = useBenchmarkProjection_;
@@ -245,6 +264,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         useRatesForReconciliation = useRatesForReconciliation_;
         useJuniorCoversPaidSrtProjection = useJuniorCoversPaidSrtProjection_;
         useConservativePrice = useConservativePrice_;
+        useMTMProjection = useMTMProjection_;
     }
 
     function initialize(
@@ -321,31 +341,58 @@ contract DYSAccounting is IAccounting, CDOComponent {
      *****************************************************************************/
 
     /// @notice Accrues asset-time for all tranches. MUST be called before any state change.
-    function _accrueAssetTime() internal {
-        if (block.timestamp == lastAccrual) return;
-
+    function _accrueAssetTime(uint256 accrualTime, TNavSplitState memory state) internal {
+        if (accrualTime <= state.lastAccrual) {
+            return;
+        }
         (
-            srtNavTime,
-            navTime,
-            navTimeNet,
-            srtProjectedPnLTime
+            state.srtNavTime,
+            state.navTime,
+            state.navTimeNet,
+            state.srtProjectedPnLTime
         ) = _accruedAssetTimeView(
             nav,
             jrtNavProjected,
             srtBaseNav,
-            reserveNav
+            reserveNav,
+            accrualTime,
+            state
         );
-        lastAccrual = block.timestamp;
+
+        srtNavTime = state.srtNavTime;
+        navTime = state.navTime;
+        navTimeNet = state.navTimeNet;
+        srtProjectedPnLTime = state.srtProjectedPnLTime;
+        state.lastAccrual = accrualTime;
+        lastAccrual = accrualTime;
+    }
+
+    function _currentNavSplitState() internal view returns (TNavSplitState memory state) {
+        state.srtNavTime = srtNavTime;
+        state.navTime = navTime;
+        state.navTimeNet = navTimeNet;
+        state.srtProjectedPnLTime = srtProjectedPnLTime;
+        state.lastAccrual = lastAccrual;
+        state.srtPnLProjected = srtPnLProjected;
+        state.srtPaidProjected = srtPaidProjected;
+        state.srtPnLBenchmark = srtPnLBenchmark;
+        state.feeWatermarkNav = feeWatermarkNav;
+        if (useRatesForReconciliation) {
+            state.epochStart = epochStart;
+            state.strategyRate = strategyRate;
+        }
     }
 
     function _accruedAssetTimeView(
         uint256 navT0,
         uint256 jrtNavT0Projected,
         uint256 srtNavT0,
-        uint256 reserveNavT0
+        uint256 reserveNavT0,
+        uint256 accrualTime,
+        TNavSplitState memory state
     )
         internal
-        view
+        pure
         returns (
             uint256 srtNavTime_,
             uint256 navTime_,
@@ -353,58 +400,41 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 srtProjectedPnLTime_
         )
     {
-        srtNavTime_ = srtNavTime;
-        navTime_ = navTime;
-        navTimeNet_ = navTimeNet;
-        srtProjectedPnLTime_ = srtProjectedPnLTime;
+        srtNavTime_ = state.srtNavTime;
+        navTime_ = state.navTime;
+        navTimeNet_ = state.navTimeNet;
+        srtProjectedPnLTime_ = state.srtProjectedPnLTime;
 
-        uint256 dt = block.timestamp - lastAccrual;
-        if (dt == 0) return (srtNavTime_, navTime_, navTimeNet_, srtProjectedPnLTime_);
+        uint256 dt = accrualTime - state.lastAccrual;
 
         uint256 systemAssets = srtNavT0 + jrtNavT0Projected + reserveNavT0;
 
         srtNavTime_ += srtNavT0 * dt;
         navTime_ += systemAssets * dt;
         navTimeNet_ += navT0 * dt;
-        srtProjectedPnLTime_ += Math.saturatingSub(srtPnLProjected, srtPaidProjected) * dt;
+        srtProjectedPnLTime_ += Math.saturatingSub(state.srtPnLProjected, state.srtPaidProjected) * dt;
     }
 
     function _navAnchor() private view returns (uint256) {
         return useNavAtReconciliation ? lastReconciliation : navTimestamp;
     }
 
+    function _currentNavs()
+        private
+        view
+        returns (
+            uint256 navT1,
+            uint256 navT1Time,
+            uint256 navMTM,
+            uint256 navMTMTime
+        )
+    {
+        (navT1, navT1Time, navMTM, navMTMTime) = cdo.totalStrategyAssetsSnapshot(nav, _navAnchor());
+    }
+
     /*****************************************************************************
      *                  View Methods                                              *
      *****************************************************************************/
-
-    /// @notice Returns the updated total assets for each tranche and the reserve
-    function totalAssets(
-        uint256 navT1
-    )
-        public
-        view
-        returns (
-            uint256 jrtNavT1Projected,
-            uint256 srtNavT1,
-            uint256 reserveNavT1
-        )
-    {
-        (
-            jrtNavT1Projected,
-            ,
-            /*jrtNavT1Real*/ srtNavT1,
-            reserveNavT1
-        ) = calculateNAVSplit(
-                nav,
-                jrtNavProjected,
-                jrtBaseNav,
-                srtBaseNav,
-                reserveNav,
-                navT1
-            );
-        (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
-        return (jrtNavT1Projected, srtNavT1, reserveNavT1);
-    }
 
     /// @notice Returns the updated total assets, reading NAV from the strategy
     function totalAssets()
@@ -416,7 +446,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 reserveNavT1
         )
     {
-        uint256 navT1 = cdo.totalStrategyAssets(nav, _navAnchor());
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+
+        bool isReconciliation = _shouldReconcile(nav, navT1);
+        bool hasMTMAfterReconciliation = isReconciliation && navMTMTime > navT1Time;
+        uint256 timestamp = hasMTMAfterReconciliation ? navT1Time : block.timestamp;
+        TNavSplitState memory state = _currentNavSplitState();
         (
             jrtNavT1Projected,
             ,
@@ -428,8 +463,44 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                navT1Time,
+                navMTM,
+                navMTMTime,
+                timestamp,
+                state
             );
+
+        if (hasMTMAfterReconciliation) {
+            // Reconciliation resets the asset-time and projection fields
+            state.srtNavTime = 0;
+            state.navTime = 0;
+            state.navTimeNet = 0;
+            state.srtProjectedPnLTime = 0;
+            state.srtPnLProjected = 0;
+            state.srtPaidProjected = 0;
+            state.srtPnLBenchmark = 0;
+            state.lastAccrual = navT1Time;
+            state.feeWatermarkNav = navT1 > state.feeWatermarkNav ? navT1 : state.feeWatermarkNav;
+            if (useRatesForReconciliation) {
+                state.epochStart = navT1Time;
+            }
+            (
+                jrtNavT1Projected,
+                ,
+                /*jrtNavT1Real*/ srtNavT1,
+                reserveNavT1
+            ) = calculateNAVSplitProjectedMTM(
+                    navT1,
+                    jrtNavT1Projected,
+                    jrtNavT1Projected,
+                    srtNavT1,
+                    reserveNavT1,
+                    navMTM,
+                    navMTMTime,
+                    state
+                );
+        }
         (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
         return (jrtNavT1Projected, srtNavT1, reserveNavT1);
     }
@@ -444,10 +515,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 reserveNavT1
         )
     {
-        uint256 navT1 = cdo.totalStrategyAssets(nav, _navAnchor());
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
         bool isReconciliation = _shouldReconcile(nav, navT1);
+        TNavSplitState memory state = _currentNavSplitState();
+        uint256 jrtNavT1Projected;
         (
-            ,
+            jrtNavT1Projected,
             jrtNavT1Real,
             srtNavT1,
             reserveNavT1
@@ -457,7 +530,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                navT1Time,
+                navMTM,
+                navMTMTime,
+                block.timestamp,
+                state
             );
 
         if (isReconciliation) {
@@ -489,13 +567,20 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 srtNavSettled
         )
     {
-        uint256 navT1 = cdo.totalStrategyAssets(nav, _navAnchor());
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+
         bool isReconciliation = _shouldReconcile(nav, navT1);
+        bool hasMTMAfterReconciliation = isReconciliation && navMTMTime > navT1Time;
+        uint256 timestamp = hasMTMAfterReconciliation ? navT1Time : block.timestamp;
+
         uint256 reserveNavT1;
+        uint256 jrtNavT1Real;
         uint256 srtNavT1;
+
+        TNavSplitState memory state = _currentNavSplitState();
         (
             jrtNavLive,
-            jrtNavSettled,
+            jrtNavT1Real,
             srtNavT1,
             reserveNavT1
         ) = calculateNAVSplit(
@@ -504,7 +589,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                navT1Time,
+                navMTM,
+                navMTMTime,
+                timestamp,
+                state
             );
 
         if (isReconciliation) {
@@ -516,11 +606,43 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 srtBaseNav,
                 srtPnLProjected,
                 srtPaidProjected,
-                jrtNavSettled
+                jrtNavT1Real
             );
             (jrtNavSettled, srtNavSettled) = calcEffectiveNav(jrtNet, srtNet);
         }
 
+        if (hasMTMAfterReconciliation) {
+            // Reconciliation resets the asset-time and projection fields
+            state.srtNavTime = 0;
+            state.navTime = 0;
+            state.navTimeNet = 0;
+            state.srtProjectedPnLTime = 0;
+            state.srtPnLProjected = 0;
+            state.srtPaidProjected = 0;
+            state.srtPnLBenchmark = 0;
+            state.lastAccrual = navT1Time;
+            state.feeWatermarkNav = navT1 > state.feeWatermarkNav
+                ? navT1
+                : state.feeWatermarkNav;
+            if (useRatesForReconciliation) {
+                state.epochStart = navT1Time;
+            }
+            (
+                jrtNavLive,
+                ,
+                /*jrtNavT1Real*/ srtNavT1,
+                reserveNavT1
+            ) = calculateNAVSplitProjectedMTM(
+                    navT1,
+                    jrtNavLive,
+                    jrtNavLive,
+                    srtNavT1,
+                    reserveNavT1,
+                    navMTM,
+                    navMTMTime,
+                    state
+                );
+        }
         (jrtNavLive, srtNavLive) = calcEffectiveNav(jrtNavLive, srtNavT1);
         return (
             jrtNavLive,
@@ -550,9 +672,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Returns current reserve value
     function totalReserve() external view returns (uint256) {
-        (, , uint256 reserveNavT1) = totalAssets(
-            cdo.totalStrategyAssets(nav, _navAnchor())
-        );
+        (, , uint256 reserveNavT1) = totalAssets();
         return reserveNavT1;
     }
 
@@ -566,7 +686,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 jrtAmountIn,
         uint256 srtAmountIn
     ) external onlyCDO {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         if (amount > reserveNav) {
             revert ReserveTooLow(reserveNav, amount);
         }
@@ -631,7 +752,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Updates the accounting by fetching the current total assets from the strategy
     function updateAccounting() external onlyCDO {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
     }
 
     /// @notice Updates the Net Asset Values after deposits or withdrawals
@@ -641,7 +763,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 srtAssetsIn,
         uint256 srtAssetsOut
     ) external onlyCDO {
-        _accrueAssetTime();
+
+        TNavSplitState memory state = _currentNavSplitState();
+        _accrueAssetTime(block.timestamp, state);
         srtFundNav += _trackSrtFundNavIn(srtAssetsIn);
 
 
@@ -735,7 +859,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Called by the CDO to account for a fee
     function accrueFee(bool isJrt, uint256 amount) external onlyCDO {
-        _accrueAssetTime();
+        TNavSplitState memory state = _currentNavSplitState();
+        _accrueAssetTime(block.timestamp, state);
         uint256 retentionBps = isJrt ? feeJrtRetentionBps : feeSrtRetentionBps;
         uint256 amountToReserve = (amount * (1e18 - retentionBps)) / 1e18;
         reserveNav += amountToReserve;
@@ -768,9 +893,14 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 jrtNavT0Real,
         uint256 srtNavT0,
         uint256 reserveNavT0,
-        uint256 navT1
+        uint256 navT1,
+        uint256 navT1Time,
+        uint256 navMTM,
+        uint256 navMTMTime,
+        uint256 timestamp,
+        TNavSplitState memory state
     )
-        public
+        internal
         view
         returns (
             uint256 jrtNavT1Projected,
@@ -779,42 +909,109 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 reserveNavT1
         )
     {
-        if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 > 0) {
-            return (0, 0, 0, navT1);
+        if (jrtNavT0Projected == 0 && srtNavT0 == 0) {
+            return (0, 0, 0, Math.max(navT1, navMTM));
         }
 
-        if (!_shouldReconcile(navT0, navT1)) {
-            // No realized gain yet; process using the projection
+        if (_shouldReconcile(navT0, navT1)) {
+            // Reconciliation: realized PnL detected (navT0 != navT1)
             return
-                calculateNAVSplitProjected(
+                calculateNAVSplitReconciliation(
                     navT0,
                     jrtNavT0Projected,
                     jrtNavT0Real,
                     srtNavT0,
-                    reserveNavT0
+                    reserveNavT0,
+                    navT1,
+                    timestamp,
+                    state
                 );
         }
-
-        // Reconciliation: realized PnL detected (navT0 != navT1)
+        if (useMTMProjection) {
+            return
+                calculateNAVSplitProjectedMTM(
+                    navT0,
+                    jrtNavT0Projected,
+                    jrtNavT0Real,
+                    srtNavT0,
+                    reserveNavT0,
+                    navMTM,
+                    timestamp,
+                    state
+                );
+        }
+        // No realized gain yet; process using the APR projection
         return
-            calculateNAVSplitReconciliation(
+            calculateNAVSplitProjected(
                 navT0,
                 jrtNavT0Projected,
                 jrtNavT0Real,
                 srtNavT0,
                 reserveNavT0,
-                navT1
+                timestamp
             );
     }
 
-    /// @notice Projection during the epoch — uses index-based aprSrt for smooth NAV evolution
+    /// @notice Projection during the epoch using current strategy MTM NAV.
+    /// @dev Reuses reconciliation allocation against navMTM, but keeps reserve and real NAV at T0.
+    function calculateNAVSplitProjectedMTM(
+        uint256 navT0,
+        uint256 jrtNavT0Projected,
+        uint256 jrtNavT0Real,
+        uint256 srtNavT0,
+        uint256 reserveNavT0,
+        uint256 navMTM,
+        uint256 timestamp,
+        TNavSplitState memory state
+    )
+        internal
+        view
+        returns (
+            uint256 jrtNavT1Projected,
+            uint256 jrtNavT1Real,
+            uint256 srtNavT1,
+            uint256 reserveNavT1
+        )
+    {
+        (
+            jrtNavT1Projected,
+            jrtNavT1Real,
+            srtNavT1,
+        ) = calculateNAVSplitReconciliation(
+                navT0,
+                jrtNavT0Projected,
+                jrtNavT0Real,
+                srtNavT0,
+                reserveNavT0,
+                navMTM,
+                timestamp,
+                state
+            );
+
+        // No changes to reserve on MTM Projection
+        reserveNavT1 = reserveNavT0;
+
+        // Reflect Senior MTM projected movement in Junior real NAV.
+        if (srtNavT1 >= srtNavT0) {
+            uint256 srtProjection = srtNavT1 - srtNavT0;
+            jrtNavT1Real = jrtNavT0Real - Math.min(
+                srtProjection,
+                Math.saturatingSub(jrtNavT0Real, ONE_ASSET)
+            );
+        } else {
+            jrtNavT1Real = jrtNavT0Real + (srtNavT0 - srtNavT1);
+        }
+    }
+
+    /// @notice Projection during the epoch - uses index-based aprSrt for smooth NAV evolution
     /// @dev Same approach as DiscreteAccounting, but also conceptually accumulates srtPnLProjected
     function calculateNAVSplitProjected(
         uint256 navT0,
         uint256 jrtNavT0Projected,
         uint256 jrtNavT0Real,
         uint256 srtNavT0,
-        uint256 reserveNavT0
+        uint256 reserveNavT0,
+        uint256 timestamp
     )
         internal
         view
@@ -829,7 +1026,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             return (0, 0, 0, 0);
         }
 
-        uint256 navTargetIndexT1 = getNavTargetIndexT1();
+        uint256 navTargetIndexT1 = getNavTargetIndexT1(timestamp);
         // Gain = Assets * (TargetIndex1 / TargetIndex0 - 1);
         // Calculate gain based on real NAV, not projected
         int256 gain_dT = calculateGain(navT0, navTargetIndexT1, navTargetIndex);
@@ -876,7 +1073,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         jrtNavT1Projected = jrtNavT0Projected + gain_dTAbs;
 
         // Calculate Srt projected gain
-        uint256 srtTargetIndexT1 = getSrtTargetIndexT1();
+        uint256 srtTargetIndexT1 = getSrtTargetIndexT1(timestamp);
         // Gain = Assets * (TargetIndex1 / TargetIndex0 - 1);
         int256 srtGainTarget = calculateGain(
             srtNavT0,
@@ -918,7 +1115,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 jrtNavT0Real,
         uint256 srtNavT0,
         uint256 reserveNavT0,
-        uint256 navT1
+        uint256 navT1,
+        uint256 timestamp,
+        TNavSplitState memory state
     )
         internal
         view
@@ -933,8 +1132,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
         // Reserve allocation
         uint256 reserve_dT = 0;
-        if (pnl > 0 && navT1 > feeWatermarkNav && reserveBps > 0) {
-            uint256 feeableGain = navT1 - feeWatermarkNav;
+        if (pnl > 0 && navT1 > state.feeWatermarkNav && reserveBps > 0) {
+            uint256 feeableGain = navT1 - state.feeWatermarkNav;
             reserve_dT = feeableGain * reserveBps / PERCENTAGE_100;
             pnl -= int256(reserve_dT);
         }
@@ -950,13 +1149,15 @@ contract DYSAccounting is IAccounting, CDOComponent {
             navT0,
             jrtNavT0Projected,
             srtNavT0,
-            reserveNavT0
+            reserveNavT0,
+            timestamp,
+            state
         );
 
         // srtNavT0 includes srtPnLProjected added during the epoch
         // unwind it and rollback to real T0 assets for SRT and JRT
         // Guard: large Senior withdrawals during the epoch can make srtNavT0 < srtPnLProjected
-        uint256 projUndo = Math.min(srtPnLProjected, srtNavT0);
+        uint256 projUndo = Math.min(state.srtPnLProjected, srtNavT0);
         srtNavT0 = srtNavT0 - projUndo;
         jrtNavT0Real = jrtNavT0Real + projUndo;
 
@@ -990,14 +1191,14 @@ contract DYSAccounting is IAccounting, CDOComponent {
             // Used when the senior sub-strategy has a queryable exchange rate (e.g. IsolatedStrategy);
             // isolates senior returns regardless of junior sub-strategy performance.
             uint256 srtRateT1 = cdo.strategy().getRate();
-            uint256 epochDt = block.timestamp > epochStart ? block.timestamp - epochStart : 0;
-            bool isPositive = srtRateT1 > strategyRate;
+            uint256 epochDt = timestamp > state.epochStart ? timestamp - state.epochStart : 0;
+            bool isPositive = srtRateT1 > state.strategyRate;
             uint256 rateDeltaAbs = isPositive
-                ? srtRateT1 - strategyRate
-                : strategyRate - srtRateT1;
+                ? srtRateT1 - state.strategyRate
+                : state.strategyRate - srtRateT1;
             if (epochDt > 0) {
                 uint256 srtNavTimeReal = Math.saturatingSub(srtNavTime_, srtProjectedPnLTimeAccrued);
-                uint256 navTimeXGrowth = Math.mulDiv(srtNavTimeReal, rateDeltaAbs, strategyRate);
+                uint256 navTimeXGrowth = Math.mulDiv(srtNavTimeReal, rateDeltaAbs, state.strategyRate);
                 uint256 pnlAbs = Math.mulDiv(navTimeXGrowth, srtFactor, 1e18 * epochDt);
                 srtPnLRealized = isPositive
                     ?  int256(pnlAbs)
@@ -1017,8 +1218,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
         // Benchmark mode: Use max(realized PnL, benchmark gain)
         // Note: Benchmark APR changes during the epoch, so we separately track the benchmark gain during the projection
-        if (useBenchmarkProjection && srtPnLRealized < int256(srtPnLBenchmark)) {
-            srtPnLRealized = int256(srtPnLBenchmark);
+        if (useBenchmarkProjection && srtPnLRealized < int256(state.srtPnLBenchmark)) {
+            srtPnLRealized = int256(state.srtPnLBenchmark);
         }
 
         uint256 floorRate_ = floorRate;
@@ -1031,11 +1232,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // Make Junior cover paid-out projected Senior assets charged to the remaining Senior NAV.
         // Cap srtPaidProjected by the paid projection actually included in `projUndo`.
         if (useJuniorCoversPaidSrtProjection && projUndo > 0) {
-            uint256 paidProjectedUnwound = projUndo == srtPnLProjected
-                ? srtPaidProjected
+            uint256 paidProjectedUnwound = projUndo == state.srtPnLProjected
+                ? state.srtPaidProjected
                 // Here, pre-unwind srtNavT0' < srtPnLProjected.
                 // Recover pre-unwind srtNavT0' as srtNavT0 + projUndo.
-                : Math.saturatingSub(srtNavT0 + projUndo + srtPaidProjected, srtPnLProjected);
+                : Math.saturatingSub(srtNavT0 + projUndo + state.srtPaidProjected, state.srtPnLProjected);
 
             if (srtPnLRealized < int256(paidProjectedUnwound)) {
                 // Only adjust if realized PnL does not already cover it
@@ -1058,7 +1259,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         if (srtPnLRealized < 0 && floorRate_ > 0) {
             // Senior: calculate and apply the rolling 24h Senior NAV floor
             // Note: The floor can only be reached when Senior has a negative return in the current reconciliation
-            uint256 srtNavFloor = _computeSrtNavFloor(floorRate_);
+            uint256 srtNavFloor = _computeSrtNavFloor(floorRate_, timestamp);
             if (srtNavFloor > 0 && srtNavT1 < srtNavFloor) {
                 uint256 floorDelta = srtNavFloor - srtNavT1;
                 srtNavT1 += floorDelta;
@@ -1104,7 +1305,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Computes the Senior NAV floor based on the rolling 24h window
     /// @dev Returns 0 if floor is disabled or not yet initialized
-    function _computeSrtNavFloor(uint256 floorRate_) internal view returns (uint256) {
+    function _computeSrtNavFloor(uint256 floorRate_, uint256 timestamp) internal view returns (uint256) {
         if (floorRate_ == 0) {
             return 0;
         }
@@ -1113,9 +1314,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
             return 0;
         }
 
-        if (block.timestamp > windowEnd) {
+        if (timestamp > windowEnd) {
             // Window has expired — extend allowed loss for inactivity
-            uint256 dT = block.timestamp - windowEnd;
+            uint256 dT = timestamp - windowEnd;
             floorRate_ = floorRate_ * (1 days + dT) / 1 days;
         }
 
@@ -1128,11 +1329,23 @@ contract DYSAccounting is IAccounting, CDOComponent {
      *                  Internal Accounting Logic                                 *
      *****************************************************************************/
 
-    function updateAccountingInner(uint256 navT1) internal {
-        _accrueAssetTime();
+    function updateAccountingInner(
+        uint256 navT1,
+        uint256 navT1Time,
+        uint256 navMTM,
+        uint256 navMTMTime
+    ) internal {
 
         bool isReconciliation = _shouldReconcile(nav, navT1);
+        bool hasMTMAfterReconciliation = isReconciliation && navMTMTime > navT1Time;
+        uint256 timestamp = hasMTMAfterReconciliation ? navT1Time : block.timestamp;
 
+        if (timestamp < lastAccrual || navMTMTime < navT1Time || (navT1Time == navMTMTime && navT1 != navMTM)) {
+            revert InvalidAssetsSnapshot(lastAccrual, navT1, navT1Time, navMTM, navMTMTime);
+        }
+
+        TNavSplitState memory state = _currentNavSplitState();
+        _accrueAssetTime(timestamp, state);
         (
             uint256 jrtNavT1Projected,
             uint256 jrtNavT1Real,
@@ -1144,7 +1357,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                navT1Time,
+                navMTM,
+                navMTMTime,
+                timestamp,
+                state
             );
 
         if (isReconciliation) {
@@ -1158,7 +1376,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             navTime = 0;
             navTimeNet = 0;
             srtProjectedPnLTime = 0;
-            epochStart = block.timestamp;
+            epochStart = navT1Time;
 
             // Snapshot the senior sub-strategy exchange rate as T0 for the next epoch.
             if (useRatesForReconciliation) {
@@ -1166,25 +1384,29 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 if (newRate > 0) strategyRate = newRate;
             }
             if (useNavAtReconciliation) {
-                lastReconciliation = block.timestamp;
+                lastReconciliation = navT1Time;
             }
             if (navT1 > feeWatermarkNav) {
                 feeWatermarkNav = navT1;
             }
 
             // Floor window rollover
-            if (block.timestamp >= windowEnd) {
+            if (navT1Time >= windowEnd) {
                 windowStartSrtNav = srtNavT1;
                 windowNetFlows = 0;
-                windowEnd = block.timestamp + 1 days;
+                windowEnd = navT1Time + 1 days;
             }
         } else if (nav > 0) {
-            // During epoch (projection): track the projected SRT gain
-            uint256 srtGain = srtNavT1 > srtBaseNav ? srtNavT1 - srtBaseNav : 0;
-            srtPnLProjected += srtGain;
+            // During epoch, srtBaseNav already includes live Senior projection.
+            // Keep srtPnLProjected equal to the current embedded projection,
+            // not the sum of all intermediate MTM updates.
+            uint256 liveProjection = Math.saturatingSub(srtPnLProjected, srtPaidProjected);
+            uint256 srtBaseNavReal = srtBaseNav - Math.min(liveProjection, srtBaseNav);
+            uint256 srtGain = srtNavT1 > srtBaseNavReal ? srtNavT1 - srtBaseNavReal : 0;
+            srtPnLProjected = srtPaidProjected + srtGain;
 
             if (useBenchmarkProjection) {
-                uint256 benchmarkIndexT1 = getBenchmarkIndexT1();
+                uint256 benchmarkIndexT1 = getBenchmarkIndexT1(navMTMTime);
                 int256 srtBenchmarkGain = calculateGain(
                     srtBaseNav, benchmarkIndexT1, benchmarkIndex
                 );
@@ -1194,46 +1416,55 @@ contract DYSAccounting is IAccounting, CDOComponent {
             }
         }
 
-        updateIndex();
+        updateIndex(timestamp);
         nav = navT1;
-        navTimestamp = block.timestamp;
-        lastAccrual = block.timestamp;
+        navTimestamp = timestamp;
+        lastAccrual = timestamp;
         srtBaseNav = srtNavT1;
         jrtNavProjected = jrtNavT1Projected;
         jrtBaseNav = jrtNavT1Real;
         reserveNav = reserveNavT1;
+
+        if (hasMTMAfterReconciliation) {
+            updateAccountingInner(
+                navT1,
+                navT1Time,
+                navMTM,
+                navMTMTime
+            );
+        }
     }
 
     /*****************************************************************************
      *                  Index & APR Calculation                                   *
      *****************************************************************************/
 
-    function getSrtTargetIndexT1() internal view returns (uint256) {
+    function getSrtTargetIndexT1(uint256 timestamp) internal view returns (uint256) {
         return
             calculateTargetIndex(
                 srtTargetIndex,
                 indexTimestamp,
-                block.timestamp,
+                timestamp,
                 aprSrt
             );
     }
 
-    function getBenchmarkIndexT1() internal view returns (uint256) {
+    function getBenchmarkIndexT1(uint256 timestamp) internal view returns (uint256) {
         return
             calculateTargetIndex(
                 benchmarkIndex,
                 indexTimestamp,
-                block.timestamp,
+                timestamp,
                 aprTarget
             );
     }
 
-    function getNavTargetIndexT1() internal view returns (uint256) {
+    function getNavTargetIndexT1(uint256 timestamp) internal view returns (uint256) {
         return
             calculateTargetIndex(
                 navTargetIndex,
                 indexTimestamp,
-                block.timestamp,
+                timestamp,
                 aprBase
             );
     }
@@ -1262,11 +1493,6 @@ contract DYSAccounting is IAccounting, CDOComponent {
         UD60x18 tvlRatio = UD60x18.wrap(
             srtEffective == 0 ? 0 : ((srtEffective * 1e18) / (srtEffective + jrtEffective))
         );
-
-        if (address(riskPremiumModel) != address(0)) {
-            return riskPremiumModel.riskPremium(tvlRatio);
-        }
-
         UD60x18 riskPremium = calculateRiskPremiumInner(
             riskX,
             riskY,
@@ -1308,12 +1534,19 @@ contract DYSAccounting is IAccounting, CDOComponent {
     }
 
     function updateIndex() internal {
-        if (useBenchmarkProjection) {
-            benchmarkIndex = getBenchmarkIndexT1();
+        updateIndex(block.timestamp);
+    }
+
+    function updateIndex(uint256 timestamp) internal {
+        if (timestamp == indexTimestamp) {
+            return;
         }
-        srtTargetIndex = getSrtTargetIndexT1();
-        navTargetIndex = getNavTargetIndexT1();
-        indexTimestamp = block.timestamp;
+        if (useBenchmarkProjection) {
+            benchmarkIndex = getBenchmarkIndexT1(timestamp);
+        }
+        srtTargetIndex = getSrtTargetIndexT1(timestamp);
+        navTargetIndex = getNavTargetIndexT1(timestamp);
+        indexTimestamp = timestamp;
     }
     function updateAprSrt(UD60x18 aprTarget_, UD60x18 aprBase_) internal {
         UD60x18 risk = calculateRiskPremium();
@@ -1359,7 +1592,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     // Trigger fetching new APRs to update srtTargetIndex
     function onAprChanged() external onlyRole(UPDATER_FEED_ROLE) {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         syncAprs();
     }
 
@@ -1368,7 +1602,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
         UD60x18 riskY_,
         UD60x18 riskK_
     ) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         riskX = riskX_;
         riskY = riskY_;
         riskK = riskK_;
@@ -1383,25 +1618,13 @@ contract DYSAccounting is IAccounting, CDOComponent {
         updateAprSrt(aprTarget, aprBase);
     }
 
-    /// @notice Sets the optional external risk premium model.
-    /// @dev Set to the zero address to use the legacy `x + y * TVL_ratio_sr^k` model.
-    /// @param riskPremiumModel_ External model contract, or zero address for the legacy model.
-    function setRiskModel(IRiskPremiumModel riskPremiumModel_) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
-        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
-        if (address(riskPremiumModel_) != address(0)) {
-            UD60x18 risk = riskPremiumModel_.riskPremium(UD60x18.wrap(1e18));
-            require(risk.unwrap() < PERCENTAGE_100, ">=100%");
-        }
-        riskPremiumModel = riskPremiumModel_;
-        emit RiskModelChanged(address(riskPremiumModel_));
-    }
-
     /// @notice Sets the APR feed contract for fetching APR target and APR base.
     /// @dev Finalizes accounting with the current feed before switching, then starts the new APR period.
     /// @param aprPairFeed_ The address of the new APR feed contract.
     function setAprPairFeed(IAprPairFeed aprPairFeed_) external onlyOwner {
         require(aprPairFeed_.decimals() == APR_FEED_DECIMALS, "InvalidFeed");
-        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         syncAprs();
         aprPairFeed = aprPairFeed_;
         emit AprPairFeedChanged(address(aprPairFeed_));
@@ -1427,7 +1650,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
     ///                 - If Junior cannot cover the full 5 USDC, it transfers up to its safe assets
     function setFloorRate(uint256 rate) external onlyOwner {
         require(rate <= 0.01e18, "FloorRateTooHigh"); // max 1%/day
-        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         floorRate = rate;
 
         windowStartSrtNav = srtBaseNav;
@@ -1441,7 +1665,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             bps <= RESERVE_BPS_MAX && bps != reserveBps,
             "InvalidNewReserve"
         );
-        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         reserveBps = bps;
         emit ReservePercentageChanged(reserveBps);
     }

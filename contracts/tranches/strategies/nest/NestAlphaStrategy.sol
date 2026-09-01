@@ -157,7 +157,7 @@ contract NestAlphaStrategy is Strategy {
 
     /// @notice Returns the total USDC-equivalent value of nALPHA held by this strategy
     /// @dev NAV = nALPHA.balanceOf(this) * rate / 1e6
-    function totalAssets() public view returns (uint256 baseAssets) {
+    function totalAssets() public view override(Strategy) returns (uint256 baseAssets) {
         uint256 shares = nALPHA.balanceOf(address(this));
         if (shares == 0) return 0;
         uint256 rate = accountant.getRateInQuoteSafe(address(USDC));

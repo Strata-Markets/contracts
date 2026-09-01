@@ -216,8 +216,29 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
 
     /// @notice Returns projected or reconciled amounts without projection unwind.
     /// @dev Unprojected redemption pricing is not supported. Use DYSAccounting if projection unwind is required.
-    function totalAssetsUnprojected () external view returns (uint256 jrtNavUnprojected, uint256 srtNavUnprojected, uint256 reserveNavUnprojected) {
+    function totalAssetsSettled () external view returns (uint256 jrtNavUnprojected, uint256 srtNavUnprojected, uint256 reserveNavUnprojected) {
         return totalAssets();
+    }
+
+    /// @notice Returns projected or reconciled amounts without projection unwind.
+    /// @dev Unprojected redemption pricing is not supported. Use DYS/MTMAccounting if projection unwind is required.
+    function totalAssetsLiveAndSettled()
+        public
+        view
+        returns (
+            uint256 jrtNavLive,
+            uint256 srtNavLive,
+            uint256,
+            uint256
+        )
+    {
+        (jrtNavLive, srtNavLive,) = totalAssets();
+        return (
+            jrtNavLive,
+            srtNavLive,
+            jrtNavLive,
+            srtNavLive
+        );
     }
 
     /// @notice Returns the updated total assets for each tranche and the reserve
@@ -490,7 +511,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         }
         reserveNavT1 = reserveNavT0 + reserve_dT;
 
-        // Allocate the full gain (if any) to Juniors; later, subtract Seniors' target gain from Juniors.
+        // Allocate the full gain to Junior first; later, subtract Senior's target gain from Junior.
         jrtNavT1Real = jrtNavT0Real + gain_dTAbs;
 
 
@@ -591,7 +612,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             gain_dTAbs -= reserve_dT;
         }
 
-        // Allocate the full gain (if any) to Juniors; later, subtract Seniors' target gain from Juniors.
+        // Allocate the full gain to Junior first; later, subtract Senior's target gain from Junior.
         jrtNavT1Projected = jrtNavT0Projected + gain_dTAbs;
 
         // Calculate Srt gain
@@ -599,7 +620,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         // Gain = Assets * (TargetIndex1 / TargetIndex0 - 1);
         int256 srtGainTarget = calculateGain(srtNavT0, srtTargetIndexT1, srtTargetIndex);
         if (srtGainTarget < 0) {
-            // Should never happen, jic: transfer the loss to Juniors as profit
+            // Should never happen; transfer the loss to Junior as profit.
             uint256 loss = uint256(-srtGainTarget);
             uint256 srtLoss = Math.min(srtNavT0, loss);
 
@@ -657,7 +678,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         return calculateTargetIndex(srtTargetIndex, indexTimestamp, block.timestamp, aprSrt);
     }
 
-    /// @notice Calculates the Juniors NET target index for the current block
+    /// @notice Calculates Junior's net target index for the current block
     function getNavTargetIndexT1 () internal view returns (uint256) {
         return calculateTargetIndex(navTargetIndex, indexTimestamp, block.timestamp, aprBase);
     }

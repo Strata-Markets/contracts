@@ -48,6 +48,9 @@ UTest.create({
                     }
                     function totalStrategyAssets() public view returns (uint256) { return _nav; }
                     function totalStrategyAssets(uint256, uint256) public view returns (uint256) { return _nav; }
+                    function totalStrategyAssetsSnapshot (uint256, uint256) public view returns (uint256, uint256, uint256, uint256) {
+                        return (_nav, block.timestamp, _nav, block.timestamp);
+                    }
                     function getRate() public view returns (uint256) { return _rate; }
                     function strategy() public view returns (address) { return address(this); }
 
@@ -73,7 +76,7 @@ UTest.create({
                 true,  // useNavAtReconciliation_
                 true,  // useRatesForReconciliation_
                 false, // useJuniorCoversPaidSrtProjection_
-                false, // useConservativeRedemptionPrice_
+                false, // useConservativePrice_
             ],
             initialize: [
                 deployer.address,

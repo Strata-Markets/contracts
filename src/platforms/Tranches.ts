@@ -95,7 +95,7 @@ export interface ICDO {
     };
     ContractVersions?: {
         // Discrete accounting is the default (backward compatible with previous versions).
-        accounting?: 'continuous' | 'discrete' | 'dys' | 'isolated';
+        accounting?: 'continuous' | 'discrete' | 'dys' | 'mtm' | 'isolated';
         accountingOptions?: {
             // Relevant for DYS accounting
             useBenchmark?: boolean
@@ -108,7 +108,9 @@ export interface ICDO {
             // When true, Junior covers paid-out projected Senior assets if realized PnL is underestimated.
             useJuniorCoversPaidSrtProjection?: boolean
             // When true, redemptions exclude unreconciled projected gains.
-            useConservativeRedemptionPrice?: boolean
+            useConservativePrice?: boolean
+            // When true, DYSAccounting uses current strategy MTM NAV during projection.
+            useMTMProjection?: boolean
         }
         unstakeImpl?: 'MockInstant'
 

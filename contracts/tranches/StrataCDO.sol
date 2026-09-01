@@ -118,12 +118,42 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     /// @dev Uses accounting's unprojected asset split when supported.
     /// @param tranche The address of the tranche (junior or senior) to return unprojected assets for
     /// @return The unprojected total assets allocated to the specified tranche
-    function totalAssetsUnprojected(address tranche) public view returns (uint256) {
-        (uint256 jrtAssets, uint256 srtAssets, ) = accounting.totalAssetsUnprojected();
+    function totalAssetsSettled(address tranche) public view returns (uint256) {
+        (uint256 jrtAssets, uint256 srtAssets, ) = accounting.totalAssetsSettled();
         if (isJrt(tranche)) {
             return jrtAssets;
         }
         return srtAssets;
+    }
+
+    /// @dev Returns the depositable NAV: max(MtM price, epoch price), regardless of the Tranche configuration.
+    ///      The caller chooses whether to use totalAssetsDepositable(), totalAssetsSettled(), or totalAssets().
+    function totalAssetsDepositable(address tranche) public view returns (uint256) {
+        (
+            uint256 jrtNavLive,
+            uint256 srtNavLive,
+            uint256 jrtNavSettled,
+            uint256 srtNavSettled
+        ) = accounting.totalAssetsLiveAndSettled();
+        if (isJrt(tranche)) {
+            return Math.max(jrtNavLive, jrtNavSettled);
+        }
+        return Math.max(srtNavLive, srtNavSettled);
+    }
+
+    /// @dev Returns the redeemable NAV: min(MtM price, epoch price), regardless of the Tranche configuration.
+    ///      The caller chooses whether to use totalAssetsRedeemable(), totalAssetsSettled(), or totalAssets().
+    function totalAssetsRedeemable(address tranche) public view returns (uint256) {
+        (
+            uint256 jrtNavLive,
+            uint256 srtNavLive,
+            uint256 jrtNavSettled,
+            uint256 srtNavSettled
+        ) = accounting.totalAssetsLiveAndSettled();
+        if (isJrt(tranche)) {
+            return Math.min(jrtNavLive, jrtNavSettled);
+        }
+        return Math.min(srtNavLive, srtNavSettled);
     }
 
     /// @notice Returns the current total assets held in the strategy
@@ -137,6 +167,18 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         return strategy.totalAssets(latestNav, timestamp);
     }
 
+    function totalStrategyAssetsSnapshot(
+        uint256 latestNav,
+        uint256 timestamp
+    ) external view returns (
+        uint256 navT1,
+        uint256 navT1Time,
+        uint256 navMTM,
+        uint256 navMTMTime
+    ) {
+        return strategy.totalAssetsSnapshot(latestNav, timestamp);
+    }
+
     function pricePerShare(address tranche) public view returns (uint256) {
         uint256 assets = totalAssets(tranche);
         uint256 supply = ITranche(tranche).totalSupply();
@@ -144,7 +186,7 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     }
 
     function pricePerShareUnprojected(address tranche) public view returns (uint256) {
-        uint256 assets = totalAssetsUnprojected(tranche);
+        uint256 assets = totalAssetsSettled(tranche);
         uint256 supply = ITranche(tranche).totalSupply();
         return calculatePricePerShare(assets, supply, baseAssetDecimals);
     }

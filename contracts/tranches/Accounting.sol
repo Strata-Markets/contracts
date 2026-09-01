@@ -196,8 +196,24 @@ contract Accounting is IAccounting, CDOComponent {
     }
 
     /// @notice Returns current amounts; continuous accounting has no projection.
-    function totalAssetsUnprojected () external view returns (uint256 jrtNavUnprojected, uint256 srtNavUnprojected, uint256 reserveNavUnprojected) {
+    function totalAssetsSettled () external view returns (uint256 jrtNavUnprojected, uint256 srtNavUnprojected, uint256 reserveNavUnprojected) {
         return totalAssets();
+    }
+
+    /// @notice Returns current amounts for both; continuous accounting has no projection.
+    function totalAssetsLiveAndSettled () external view returns (
+        uint256 jrtNavLive,
+        uint256 srtNavLive,
+        uint256,
+        uint256
+    ) {
+        (jrtNavLive, srtNavLive,) = totalAssets();
+        return (
+            jrtNavLive,
+            srtNavLive,
+            jrtNavLive,
+            srtNavLive
+        );
     }
 
     /// @notice Returns the updated total assets for each tranche and the reserve
@@ -459,7 +475,7 @@ contract Accounting is IAccounting, CDOComponent {
         }
         reserveNavT1 = reserveNavT0 + reserve_dT;
 
-        // Give the total gain (if any) to Juniors, later here, we subtract from Juniors the desired Gain of Seniors
+        // Allocate the full gain to Junior first; later, subtract Senior's target gain from Junior.
         jrtNavT1 = jrtNavT0 + gain_dTAbs;
 
         // Calculate Srt gain
