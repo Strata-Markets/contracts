@@ -123,4 +123,22 @@ abstract contract Strategy is IStrategy, CDOComponent {
     function configure () external virtual onlyCDO {
         // No default configuration
     }
+
+    function totalAssets () public view virtual returns (uint256);
+    function totalAssets (uint256 latestNav, uint256 timestamp) public virtual view returns (uint256);
+
+    function totalAssetsSnapshot(
+        uint256 latestNav,
+        uint256 timestamp
+    ) external virtual view returns (
+        uint256 navT1,
+        uint256 navT1Time,
+        uint256 navMTM,
+        uint256 navMTMTime
+    ) {
+        navMTM = totalAssets();
+        navMTMTime = block.timestamp;
+        navT1 = totalAssets(latestNav, timestamp);
+        navT1Time = navMTM != navT1 ? timestamp : navMTMTime;
+    }
 }

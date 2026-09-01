@@ -160,7 +160,7 @@ contract NestOpalStrategy is Strategy {
     /// @notice Returns the total USDC-equivalent value of nOPAL held by this strategy
     /// @dev NAV = nOPAL.balanceOf(this) * rate / 1e6
     ///      Both nOPAL and the Accountant use 6 decimals, verified on-chain.
-    function totalAssets() public view returns (uint256 baseAssets) {
+    function totalAssets() public view override(Strategy) returns (uint256 baseAssets) {
         uint256 shares = nOPAL.balanceOf(address(this));
         if (shares == 0) return 0;
         uint256 rate = accountant.getRateInQuoteSafe(address(USDC));

@@ -2,7 +2,7 @@
 SIP: 04
 Title: Isolated Strategy Vaults
 Author: Strata Protocol Contributors
-Status: Draft
+Status: Final
 Type: Protocol
 Created: 2026-03-21
 ---

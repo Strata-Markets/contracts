@@ -1,8 +1,8 @@
 import { UTest } from 'atma-utest';
-import { $hh } from '../utils/$hh';
-import { $erc4626 } from '../utils/$erc4626';
+import { $hh } from '../../utils/$hh';
+import { $erc4626 } from '../../utils/$erc4626';
 import { $require } from 'dequanto/utils/$require';
-import { $test } from '../utils/$test';
+import { $test } from '../../utils/$test';
 import { $apr } from '@s/utils/$apr';
 import { $bigint } from 'dequanto/utils/$bigint';
 
@@ -31,7 +31,7 @@ const test = await $hh.deploy('mhyper', {
         ContractVersions: {
             accounting: 'dys',
             accountingOptions: {
-                useConservativeRedemptionPrice: true
+                useConservativePrice: true
             },
             unstakeImpl: 'MockInstant'
         }
@@ -60,7 +60,7 @@ UTest.create({
     async $after() {
         await test.wipe();
     },
-    async 'price per share: projected vs unprojected' () {
+    async 'price per share: projected vs settled' () {
         await client.debug.mine('1year');
 
         // BaseAPR = 10%; RiskPremium = 50%;
@@ -69,7 +69,7 @@ UTest.create({
             1.05,
         );
         $require.eq(
-            await cdo.pricePerShareUnprojected(srtVault.address),
+            await cdo.pricePerShareSettled(srtVault.address),
             BigInt(1e18)
         );
         $test.compare(
@@ -77,7 +77,7 @@ UTest.create({
             1.15,
         );
         $require.eq(
-            await cdo.pricePerShareUnprojected(jrtVault.address),
+            await cdo.pricePerShareSettled(jrtVault.address),
             BigInt(1e18)
         );
 
@@ -96,7 +96,7 @@ UTest.create({
             1.05,
         );
         $test.compare(
-            await cdo.pricePerShareUnprojected(srtVault.address),
+            await cdo.pricePerShareSettled(srtVault.address),
             1.05,
         );
         $test.compare(
@@ -104,7 +104,7 @@ UTest.create({
             1.15,
         );
         $test.compare(
-            await cdo.pricePerShareUnprojected(jrtVault.address),
+            await cdo.pricePerShareSettled(jrtVault.address),
             1.15,
         );
     },
@@ -213,7 +213,7 @@ UTest.create({
             `The projected portion should be unwound to Junior.`
         );
         $test.compare(
-            await cdo.pricePerShareUnprojected(srtVault.address),
+            await cdo.pricePerShareSettled(srtVault.address),
             1,
         );
         await client.debug.mine('0.5year');

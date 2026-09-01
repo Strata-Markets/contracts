@@ -61,4 +61,25 @@ library AccountingLib {
         srtAssetsOut = srtAssetsOutEffective - jrtLossCoverage;
         return (jrtAssetsOut, srtAssetsOut);
     }
+
+
+    function undoProjection (
+        uint256 srtNavT1,
+        uint256 srtBaseNav,
+        uint256 srtPnLProjected,
+        uint256 srtPaidProjected,
+        uint256 jrtNavT1Real
+    ) internal pure returns (uint256 jrtNavSettled, uint256 srtNavSettled) {
+
+        uint256 storedLiveProjection = Math.saturatingSub(srtPnLProjected, srtPaidProjected);
+        uint256 srtBaseNavReal = srtBaseNav - Math.min(storedLiveProjection, srtBaseNav);
+        uint256 projUndo = srtNavT1 > srtBaseNavReal
+            ? srtNavT1 - srtBaseNavReal
+            : 0;
+        projUndo = Math.min(projUndo, srtNavT1);
+
+        srtNavSettled = srtNavT1 - projUndo;
+        jrtNavSettled = jrtNavT1Real + projUndo;
+        return (jrtNavSettled, srtNavSettled);
+    }
 }

@@ -163,11 +163,11 @@ contract SparkUSDCStrategy is Strategy {
         }
     }
 
-    function totalAssets() public view returns (uint256) {
+    function totalAssets() public view override(Strategy) returns (uint256) {
         return lastReportedAssets + vestingAmount - getUnvestedAmount();
     }
 
-    function totalAssets(uint256, uint256) public view returns (uint256) {
+    function totalAssets(uint256, uint256) public view override(Strategy) returns (uint256) {
         return totalAssets();
     }
 

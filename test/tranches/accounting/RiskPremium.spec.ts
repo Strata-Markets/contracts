@@ -1,5 +1,5 @@
 import { UTest } from 'atma-utest';
-import { dys } from './dys';
+import { dys } from './common/dys';
 import { $test } from '../utils/$test';
 import { $hh } from '../utils/$hh';
 import { RiskPremiumSigmoid } from '@0xc/hardhat/RiskPremiumSigmoid/RiskPremiumSigmoid';

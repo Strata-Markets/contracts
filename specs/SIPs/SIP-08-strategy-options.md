@@ -2,7 +2,7 @@
 SIP: 08
 Title: Strategy Options for Tranche Operations
 Author: Strata Protocol Contributors
-Status: Draft
+Status: Final
 Type: Protocol
 Created: 2026-03-21
 ---

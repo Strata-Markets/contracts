@@ -1,18 +1,18 @@
 import { UTest } from 'atma-utest'
-import { $hh } from '../utils/$hh';
-import { AccountingExecutor } from './AccountingExecutor';
+import { $hh } from '../../utils/$hh';
+import { AccountingExecutor } from '../AccountingExecutor';
 import { $apr } from '@s/utils/$apr';
 import { DiscreteAccounting as Accounting } from '@0xc/hardhat/DiscreteAccounting/DiscreteAccounting';
 import { $require } from 'dequanto/utils/$require';
-import { DYSAccounting } from '@0xc/hardhat/DYSAccounting/DYSAccounting';
+import { MTMAccounting } from '@0xc/hardhat/MTMAccounting/MTMAccounting';
 
 const test = $hh.create('ethena', {
     cdoInfo: {
         // Distinct pfx so this DYS deployment doesn't share the `USDeAccounting` proxy/layout
         // record with the discrete ethena specs (which would trip the storage-layout upgrade check).
-        pfx: 'USDeDys',
+        pfx: 'USDeMtm',
         ContractVersions: {
-            accounting: 'dys',
+            accounting: 'mtm',
             accountingOptions: {
                 useBenchmark: true,
             }
@@ -24,14 +24,14 @@ const accounting = contracts.accounting as any as Accounting;
 
 UTest.create({
     async $before () {
-        const discrete = new DYSAccounting(accounting.address, accounting.client);
+        const discrete = new MTMAccounting(accounting.address, accounting.client);
         $require.eq(await discrete.navTargetIndex(), BigInt(1e18));
 
         await discrete.$receipt().setFloorRate(test.deployer, 0n);
     },
     async $after () {
         await AccountingExecutor.teardown();
-        await test.reset();
+        await test.wipe();
     },
     'sUSDe APY ⬆️🟢 SSR': {
         '➡️ deposit 50/50': {
