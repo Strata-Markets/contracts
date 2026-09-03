@@ -177,12 +177,14 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     ///      multi-market stress cannot over-commit the shared stake. The available stake is
     ///      de-buffered by the market's bufferBps: covering B base consumes bufferedVault(B) of the
     ///      stake at slash time, so the reported capacity must divide back out that same buffer.
+    /// @dev Sized off stake() (guaranteed slashable next duration), not the current-block slashable(),
+    ///      so a promise booked now stays slashable when slash() runs later.
     function request(address cdo, uint256 lossAmount) external view returns (uint256 covered) {
         TMarket storage market = markets[cdo];
         if (!market.enabled || lossAmount == 0) {
             return 0;
         }
-        uint256 availableVault = Math.saturatingSub(appAdapter.slashable(), _committedVault());
+        uint256 availableVault = Math.saturatingSub(appAdapter.stake(), _committedVault());
         uint256 availableBase = Math.mulDiv(
             _toBaseAsset(market, availableVault),
             BPS,

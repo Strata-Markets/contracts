@@ -17,6 +17,8 @@ import { MockOracleAdapter } from "../../contracts/test/MockOracleAdapter.sol";
 contract MockAppAdapter {
     address public asset;
     uint256 public slashable;
+    /// @dev Guaranteed stake for the next duration. 0 = mirror `slashable` (default).
+    uint256 public stakeOverride;
 
     uint256 public lastSlashAmount;
     uint256 public lastReleaseAmount;
@@ -29,6 +31,10 @@ contract MockAppAdapter {
 
     function setSlashable(uint256 amount) external {
         slashable = amount;
+    }
+
+    function setStake(uint256 amount) external {
+        stakeOverride = amount;
     }
 
     function slash(uint256 amount) external {
@@ -53,8 +59,8 @@ contract MockAppAdapter {
     function duration() external pure returns (uint48) { return 0; }
     function operator() external pure returns (address) { return address(0); }
     function subnetwork() external pure returns (bytes32) { return bytes32(0); }
-    function stake() external view returns (uint256) { return slashable; }
-    function stakeAt(uint48) external view returns (uint256) { return slashable; }
+    function stake() public view returns (uint256) { return stakeOverride == 0 ? slashable : stakeOverride; }
+    function stakeAt(uint48) external view returns (uint256) { return stake(); }
 }
 
 /// @notice Minimal accounting mock exposing a settable coverage deficit.
@@ -170,6 +176,17 @@ contract NetworkMiddlewareTest is Test {
         uint256 capacityBase = expectedBaseAmount(SLASHABLE); // 100 uniBTC -> $6M
         uint256 covered = middleware.request(cdo, capacityBase + 1_000e18);
         assertEq(covered, capacityBase);
+    }
+
+    function test_request_sizesOffStakeNotSlashable() public {
+        // slashable() is volatile (current block); stake() is guaranteed for the next duration.
+        // Coverage must be promised against stake() so a booked claim stays slashable when slash()
+        // runs in a later block. Here stake > slashable: capacity tracks stake.
+        adapter.setSlashable(1e8);   // only 1 uniBTC slashable right now
+        adapter.setStake(100e8);     // 100 uniBTC guaranteed next duration
+
+        uint256 covered = middleware.request(cdo, type(uint128).max);
+        assertEq(covered, expectedBaseAmount(100e8), "capacity should follow stake(), not slashable()");
     }
 
     function test_request_deBuffersByMarketBuffer() public {
