@@ -234,6 +234,8 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     /// @dev Prices both assets in the oracle's common quote currency and adjusts for the
     ///      token decimals on both sides. Rounds down (in favor of the underwriters).
     function _toVaultAsset(TMarket storage market, uint256 baseAssets) internal view returns (uint256) {
+        if (baseAssets == 0) return 0;
+
         address vaultAsset = appAdapter.asset();
         (uint256 basePrice, uint256 basePriceDecimals) = oracle.getPrice(market.baseAsset);
         (uint256 vaultPrice, uint256 vaultPriceDecimals) = oracle.getPrice(vaultAsset);
@@ -247,6 +249,8 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     /// @notice Converts an amount of the Symbiotic vault asset into the market's base asset.
     /// @dev Inverse of {_toVaultAsset}. Rounds down (in favor of the underwriters).
     function _toBaseAsset(TMarket storage market, uint256 vaultAssets) internal view returns (uint256) {
+        if (vaultAssets == 0) return 0;
+
         address vaultAsset = appAdapter.asset();
         (uint256 basePrice, uint256 basePriceDecimals) = oracle.getPrice(market.baseAsset);
         (uint256 vaultPrice, uint256 vaultPriceDecimals) = oracle.getPrice(vaultAsset);
