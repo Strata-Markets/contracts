@@ -122,6 +122,11 @@ contract NetworkMiddlewareTest is Test {
         return baseAssets * 1e18 / UNIBTC_PRICE / 1e10;
     }
 
+    /// @dev Inverse of {expectedVaultAmount}: uniBTC(8 dec) -> USDe(18 dec, $1).
+    function expectedBaseAmount(uint256 vaultAmount) internal pure returns (uint256) {
+        return vaultAmount * UNIBTC_PRICE / 1e18 * 1e10;
+    }
+
     function test_setMarket_storesFieldsAndEmits() public {
         address cdo2 = makeAddr("cdo2");
         vm.expectEmit(true, false, false, true);
@@ -151,6 +156,71 @@ contract NetworkMiddlewareTest is Test {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vm.prank(stranger);
         middleware.setMarketPremiumBps(cdo, 0.1e18);
+    }
+
+    function test_request_coversLossWithinCapacity() public view {
+        // No outstanding claim: capacity is the full slashable stake (~$6M), so a small loss is
+        // fully coverable.
+        uint256 covered = middleware.request(cdo, 1000e18);
+        assertEq(covered, 1000e18);
+    }
+
+    function test_request_cappedByStakeCapacity() public view {
+        // A loss beyond the pool's base-asset capacity is capped to it.
+        uint256 capacityBase = expectedBaseAmount(SLASHABLE); // 100 uniBTC -> $6M
+        uint256 covered = middleware.request(cdo, capacityBase + 1_000e18);
+        assertEq(covered, capacityBase);
+    }
+
+    function test_request_deBuffersByMarketBuffer() public {
+        // A market with a 10% swap buffer reports 1/1.1 of the raw capacity: covering B base pulls
+        // bufferedVault(B) = 1.1 * toVaultAsset(B) from the shared stake when slashed.
+        uint256 bufferBps = 1_000; // 10% (BPS = 10_000)
+        MockStrataAccounting accountingB = new MockStrataAccounting();
+        address cdoB = makeAddr("cdoBuffered");
+        vm.prank(owner);
+        middleware.setMarket(cdoB, accountingB, address(usde), bufferBps, true);
+
+        uint256 rawCapacity = expectedBaseAmount(SLASHABLE);
+        uint256 covered = middleware.request(cdoB, type(uint128).max);
+
+        assertEq(covered, rawCapacity * 10_000 / (10_000 + bufferBps));
+        assertLt(covered, rawCapacity, "buffer must reduce reported capacity");
+    }
+
+    function test_request_committedClaimReservesBufferedStake() public {
+        // An outstanding claim on the buffered market reserves the buffered vault it will pull, so
+        // the remaining capacity offered to a fresh request drops by that buffered amount.
+        uint256 bufferBps = 1_000; // 10%
+        MockStrataAccounting accountingB = new MockStrataAccounting();
+        address cdoB = makeAddr("cdoBuffered");
+        vm.prank(owner);
+        middleware.setMarket(cdoB, accountingB, address(usde), bufferBps, true);
+
+        uint256 claimBase = 60_000e18; // 1 uniBTC raw -> 1.1 uniBTC buffered reserved
+        accountingB.setInsuranceAmount(claimBase);
+
+        uint256 reservedVault = expectedVaultAmount(claimBase) * (10_000 + bufferBps) / 10_000;
+        uint256 expectedCapacity = expectedBaseAmount(SLASHABLE - reservedVault)
+            * 10_000 / (10_000 + bufferBps);
+
+        uint256 covered = middleware.request(cdoB, type(uint128).max);
+        assertEq(covered, expectedCapacity);
+    }
+
+    function test_slash_appliesBuffer() public {
+        // Slash sizes the claim up by the buffer: a 1 uniBTC raw deficit slashes 1.1 uniBTC.
+        uint256 bufferBps = 1_000; // 10%
+        MockStrataAccounting accountingB = new MockStrataAccounting();
+        address cdoB = makeAddr("cdoBuffered");
+        vm.prank(owner);
+        middleware.setMarket(cdoB, accountingB, address(usde), bufferBps, true);
+
+        accountingB.setInsuranceAmount(60_000e18); // 1 uniBTC raw
+        vm.prank(owner);
+        middleware.slash(cdoB);
+
+        assertEq(adapter.lastSlashAmount(), 1e8 * (10_000 + bufferBps) / 10_000); // 1.1 uniBTC
     }
 
     function test_slash_convertsDeficitAndBooks() public {

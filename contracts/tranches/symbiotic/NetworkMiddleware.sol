@@ -174,30 +174,37 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     /// @dev View: returns how much of `lossAmount` (in the market's base asset) the shared pool can
     ///      currently cover. Capacity is the adapter's slashable stake minus the coverage already
     ///      committed to every market (their outstanding claims not yet slashed), so simultaneous
-    ///      multi-market stress cannot over-commit the shared stake.
+    ///      multi-market stress cannot over-commit the shared stake. The available stake is
+    ///      de-buffered by the market's bufferBps: covering B base consumes bufferedVault(B) of the
+    ///      stake at slash time, so the reported capacity must divide back out that same buffer.
     function request(address cdo, uint256 lossAmount) external view returns (uint256 covered) {
         TMarket storage market = markets[cdo];
         if (!market.enabled || lossAmount == 0) {
             return 0;
         }
         uint256 availableVault = Math.saturatingSub(appAdapter.slashable(), _committedVault());
-        uint256 availableBase = _toBaseAsset(market, availableVault);
+        uint256 availableBase = Math.mulDiv(
+            _toBaseAsset(market, availableVault),
+            BPS,
+            BPS + market.bufferBps
+        );
         covered = Math.min(lossAmount, availableBase);
     }
 
     /// @notice Total coverage already committed across all markets, in vault asset.
-    /// @dev Per market: the outstanding claim (accounting.insuranceAmount) converted to vault asset,
+    /// @dev Per market: the outstanding claim (accounting.insuranceAmount) as buffered vault asset,
     ///      less what has already been slashed for it (pendingTrueUp). The remainder is a claim that
-    ///      will still consume the shared slashable stake, so it is reserved out of new requests.
+    ///      will still consume the shared slashable stake, so it is reserved out of new requests. The
+    ///      claim is buffered to match what slashing it will actually pull (see {_bufferedVault}).
     function _committedVault() internal view returns (uint256 total) {
         uint256 len = marketCdos.length;
         for (uint256 i; i < len; ++i) {
-            TMarket storage m = markets[marketCdos[i]];
-            if (!m.enabled) {
+            TMarket storage market = markets[marketCdos[i]];
+            if (!market.enabled) {
                 continue;
             }
-            uint256 claimVault = _toVaultAsset(m, m.accounting.insuranceAmount());
-            total += Math.saturatingSub(claimVault, m.pendingTrueUp);
+            uint256 claimVault = _bufferedVault(market, market.accounting.insuranceAmount());
+            total += Math.saturatingSub(claimVault, market.pendingTrueUp);
         }
     }
 
@@ -209,9 +216,16 @@ contract NetworkMiddleware is Initializable, Ownable2StepUpgradeable, PausableUp
     ///      The adapter additionally caps the executed amount to the currently slashable stake.
     function _getNeededAmount(address cdo) internal view returns (uint256) {
         TMarket storage market = markets[cdo];
-        uint256 deficit = _toVaultAsset(market, market.accounting.insuranceAmount());
-        deficit = Math.mulDiv(deficit, BPS + market.bufferBps, BPS);
+        uint256 deficit = _bufferedVault(market, market.accounting.insuranceAmount());
         return Math.saturatingSub(deficit, market.pendingTrueUp);
+    }
+
+    /// @notice Vault asset required to cover a base-asset claim, including the market's swap buffer.
+    /// @dev bufferBps pre-funds the vault -> base conversion discount at true-up (e.g. a uniBTC
+    ///      depeg), so both the slash sizing and the committed-capacity reservation size the claim
+    ///      as bufferedVault(base) = toVaultAsset(base) * (BPS + bufferBps) / BPS.
+    function _bufferedVault(TMarket storage market, uint256 baseAssets) internal view returns (uint256) {
+        return Math.mulDiv(_toVaultAsset(market, baseAssets), BPS + market.bufferBps, BPS);
     }
 
     /// @notice Converts an amount of the market's base asset into the Symbiotic vault asset.
