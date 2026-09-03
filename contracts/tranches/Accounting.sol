@@ -516,8 +516,11 @@ contract Accounting is IAccounting, CDOComponent {
         insuranceAmountT1 = insuranceAmountT0;
 
         if (jrtNavT0 == 0 && srtNavT0 == 0 && navT1 > 0) {
-            // No deposits yet, however Strategy reports gain, move all to reserve; keep accrued premium.
-            return (0, 0, navT1 - premiumNavT0, premiumNavT0, insuranceAmountT0);
+            // No deposits yet, however Strategy reports gain, move all to reserve; keep accrued
+            // premium. Premium is capped to the remaining assets: after a wipeout that left assets
+            // below the accrued premium, the bucket absorbs the shortfall instead of underflowing.
+            uint256 premiumKept = Math.min(navT1, premiumNavT0);
+            return (0, 0, navT1 - premiumKept, premiumKept, insuranceAmountT0);
         }
         int256 gain_dT = int256(navT1) - int256(navT0);
 

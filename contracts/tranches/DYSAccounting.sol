@@ -840,7 +840,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
         )
     {
         if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 > 0) {
-            return (0, 0, 0, navT1 - premiumNavT0, premiumNavT0, insuranceAmountT0);
+            // Keep premium capped to the remaining assets so a wipeout below the accrued premium
+            // cannot underflow; the bucket absorbs the shortfall.
+            uint256 premiumKept = Math.min(navT1, premiumNavT0);
+            return (0, 0, 0, navT1 - premiumKept, premiumKept, insuranceAmountT0);
         }
 
         if (!_shouldReconcile(navT0, navT1)) {
