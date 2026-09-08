@@ -32,7 +32,8 @@ export namespace $hh {
         cdo: TKey,
         cdoInfo?: Partial<ICDO>,
     }) {
-        const config = await PlatformFactory.ConfigLoader.fetch();
+        // Must run before any client/fork: primes the global config from ./config/*.yml
+        await PlatformFactory.ConfigLoader.fetch();
         const hh = new HardhatProvider();
         const client = await hh.forked({ platform: 'eth', block: opts?.block ?? void 0 });
         client.configureFork('eth');
@@ -45,13 +46,15 @@ export namespace $hh {
         return tranches;
     }
 
-    export function create<T extends TCDOKey>(cdo: T, params?: {
+    export interface ITestParams {
         forked?: number | 'latest'
         cdoInfo?: Partial<ICDO>
         accounts?: TCDOKey | 'operator' | 'deployer'
         // Relevant for forked tests: when true, all contracts being redeployed, otherwise will reuse existing contracts
         fresh?: boolean
-    }) {
+    }
+
+    export function create<T extends TCDOKey>(cdo: T, params?: ITestParams) {
         return new Test<DeploymentsTypes.CDOs[T]>(cdo, params)
     }
 
@@ -90,19 +93,15 @@ export namespace $hh {
         depositor: TrancheDepositor
         configManager: TwoStepConfigManager;
 
-        constructor (private cdoKey: TCDOKey, private params?: {
-            forked?: number | 'latest'
-            cdoInfo?: Partial<ICDO>
-            accounts?: TCDOKey | 'operator' | 'deployer'
-            fresh?: boolean
-        }) {
+        constructor (private cdoKey: TCDOKey, private params?: ITestParams) {
             // Override default CDO infos for tests
             this.params ??= {};
         }
 
         @memd.deco.memoize({ perInstance: true })
         async init (opts?: { initialDeposit?: boolean }) {
-            const config = await PlatformFactory.ConfigLoader.fetch();
+            // Must run before any client/fork: primes the global config from ./config/*.yml
+            await PlatformFactory.ConfigLoader.fetch();
             const hh = new HardhatProvider();
 
             if (this.params?.forked === 'latest') {
