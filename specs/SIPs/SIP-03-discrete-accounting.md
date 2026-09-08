@@ -2,7 +2,7 @@
 SIP: 03
 Title: Discrete Accounting
 Author: Strata Protocol Contributors
-Status: Draft
+Status: Final
 Type: Protocol
 Created: 2026-02-20
 ---

@@ -53,6 +53,19 @@ interface IStrategy is ICDOComponent {
 
     function totalAssets () external view returns (uint256);
     function totalAssets (uint256 latestNav, uint256 timestamp) external view returns (uint256);
+    function totalAssetsSnapshot(
+        uint256 latestNav,
+        uint256 timestamp
+    )
+        external
+        view
+        returns (
+            uint256 navT1,
+            uint256 navT1Time,
+            uint256 navMTM,
+            uint256 navMTMTime
+        );
+
     function reduceReserve (address token, uint256 tokenAmount, address receiver) external;
 
     function convertToAssets (address token, uint256 tokenAmount, Math.Rounding rounding) external view returns (uint256 baseAssets);

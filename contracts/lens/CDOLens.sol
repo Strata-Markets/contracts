@@ -102,8 +102,7 @@ contract CDOLens is OwnableUpgradeable {
             (aprTarget, aprBase, ) = provider.getAprPairProjected();
         }
 
-        uint256 nav = cdo.totalStrategyAssets();
-        (uint256 jrtNav, uint256 srtNav, ) = accounting.totalAssets(nav);
+        (uint256 jrtNav, uint256 srtNav, ) = accounting.totalAssets();
 
         UD60x18 riskX = accounting.riskX();
         UD60x18 riskY = accounting.riskY();

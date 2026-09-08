@@ -25,6 +25,7 @@ import { MidasCooldownRequestImpl } from '@0xc/hardhat/MidasCooldownRequestImpl/
 import { MockUSDe } from '@0xc/hardhat/MockUSDe/MockUSDe';
 import { AprPairFeed } from '@0xc/hardhat/AprPairFeed/AprPairFeed';
 import { MockMidasCooldownInstantImpl } from '@0xc/hardhat/MockMidasCooldownInstantImpl/MockMidasCooldownInstantImpl';
+import { MockMTMStrategy } from '@0xc/hardhat/MockMTMStrategy/MockMTMStrategy';
 
 
 type TUnderlyingContracts = {
@@ -170,7 +171,27 @@ export class MHyperDeployments extends DeploymentsBase<{
         erc20Cooldown: ERC20Cooldown,
         unstakeCooldown: UnstakeCooldown,
     ): Promise<{ strategy: MidasStrategy; }> {
+
         const { USDC, DAI, USDS, mHYPER, depositVault, redemptionVault, oracle } = await this.ensureUnderlying();
+
+
+        if (this.cdoInfo?.ContractVersions?.strategyImpl === 'MockMTMStrategy') {
+            const { contract: strategy } = await this.ds.ensureWithProxy(MockMTMStrategy, {
+                id: `${this.pfx}MTMStrategy`,
+                arguments: [
+                    USDC.address,
+                ],
+                initialize: [
+                    this.owner.address,
+                    acm.address,
+                    cdo.address,
+                    erc20Cooldown.address,
+                    unstakeCooldown.address
+                ]
+            });
+            return { strategy: strategy as any }
+        }
+
         const { contract: strategy } = await this.ds.ensureWithProxy(MidasStrategy, {
             id: `${this.pfx}MidasStrategy`,
             arguments: [

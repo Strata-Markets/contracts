@@ -303,7 +303,7 @@ contract MidasStrategy is Strategy {
      * @dev Returns the current value of the strategy's mToken holdings in base asset terms.
      * @return baseAssets_ The total base asset value managed by this strategy
      */
-    function totalAssets() public view returns (uint256 baseAssets_) {
+    function totalAssets() public view override(Strategy) returns (uint256 baseAssets_) {
         uint256 shares = mToken.balanceOf(address(this));
         baseAssets_ = convertToAssets(
             address(mToken),
@@ -324,7 +324,7 @@ contract MidasStrategy is Strategy {
     function totalAssets(
         uint256 latestNav,
         uint256 timestamp
-    ) public view returns (uint256 baseAssets_) {
+    ) public view override(Strategy) returns (uint256 baseAssets_) {
         (, , , uint256 updatedAt, ) = oracle.latestRoundData();
         if (updatedAt >= timestamp) {
             return totalAssets();

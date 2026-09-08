@@ -164,7 +164,7 @@ contract sUSDeStrategy is Strategy {
      * @dev This function returns the current value of the strategy's assets in USDe.
      * @return baseAssets The total amount of USDe managed by this strategy
      */
-    function totalAssets () public view returns (uint256 baseAssets) {
+    function totalAssets () public view override(Strategy) returns (uint256 baseAssets) {
         uint256 shares = sUSDe.balanceOf(address(this));
         baseAssets = sUSDe.previewRedeem(shares);
         return baseAssets;
@@ -175,7 +175,7 @@ contract sUSDeStrategy is Strategy {
      * @dev The strategy vests rewards continuously, so it reports the current total assets.
      * @return baseAssets The total amount of USDe managed by this strategy
      */
-    function totalAssets (uint256, uint256) public view returns (uint256 baseAssets) {
+    function totalAssets (uint256, uint256) public view override(Strategy) returns (uint256 baseAssets) {
         return totalAssets();
     }
 
