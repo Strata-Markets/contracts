@@ -53,6 +53,11 @@ const Tokens = {
         address: '0x119Dd7dAFf816f29D7eE47596ae5E4bdC4299165',
         decimals: 6,
     },
+
+    uniBTC: {
+        address: '0x004e9c3ef86bc1ca1f0bb5c7662861ee93350568',
+        decimals: 8,
+    }
 } as Record<string, Partial<IToken>>;
 
 export const Eth: IPlatform = {

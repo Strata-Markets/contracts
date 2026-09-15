@@ -32,7 +32,13 @@ echidna*/
 medusa*/
 
 /logs/
-/0xc/
+
+/0xc/*
+!/0xc/eth/
+/0xc/eth/*
+!/0xc/eth/Symbiotic*/
+!/0xc/eth/Symbiotic*/**
+
 /0x/
 0xweb.json
 contracts/backlog/

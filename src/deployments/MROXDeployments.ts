@@ -73,13 +73,13 @@ export class MROXDeployments extends DeploymentsBase<{
                 id: 'MockMROX',
                 arguments: [],
             });
-            const midasDepositVault = await this.ds.ensureContract(MockDepositVault, {
-                id: 'MockMROXDepositVault',
-                arguments: [mROX.address],
-            });
             const oracle = await this.ds.ensureContract(MockOracle, {
                 id: 'MockMROXOracle',
                 arguments: [],
+            });
+            const midasDepositVault = await this.ds.ensureContract(MockDepositVault, {
+                id: 'MockMROXDepositVault',
+                arguments: [mROX.address, oracle.address],
             });
             const midasRedemptionVault = await this.ds.ensureContract(MockRedemptionVault, {
                 id: 'MockMROXRedemptionVault',

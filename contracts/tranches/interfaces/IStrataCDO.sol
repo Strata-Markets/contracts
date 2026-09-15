@@ -73,6 +73,7 @@ interface IStrataCDO {
 
     function setActionStates (address tranche, bool isDepositEnabled, bool isWithdrawEnabled) external;
     function setValuationPrice (uint128 valuationPrice) external;
+    function setUnderwriterFeeBps(uint256 fee) external;
 }
 
 interface IStrataCDOSetters {

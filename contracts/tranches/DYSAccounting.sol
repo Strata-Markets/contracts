@@ -10,6 +10,7 @@ import {CDOComponent} from "./base/CDOComponent.sol";
 import {UD60x18Ext} from "./utils/UD60x18Ext.sol";
 import {AccountingLib} from "./utils/AccountingLib.sol";
 import {IRiskPremiumModel} from "./accounting/premium/IRiskPremiumModel.sol";
+import {IInsurancePool} from "./symbiotic/interfaces/IInsurancePool.sol";
 
 /**
  * @title CDO::DYSAccounting
@@ -42,6 +43,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
     uint256 private constant APR_FEED_DECIMALS = 12;
     uint256 constant PERCENTAGE_100 = 1e18;
     uint256 constant RESERVE_BPS_MAX = 0.2e18;
+    uint256 constant UNDERWRITER_FEE_BPS_MAX = 0.2e18;
 
     uint256 private immutable ONE_ASSET;
 
@@ -208,17 +210,62 @@ contract DYSAccounting is IAccounting, CDOComponent {
     ///      model configured by `riskX`, `riskY`, and `riskK`.
     IRiskPremiumModel public riskPremiumModel;
 
+    /// Underwriter Fee (Symbiotic) Parameters. Appended for storage-layout compatibility.
+
+    /// @notice Share of raw Senior risk premium used to derive the underwriter fee rate (1e18 = 100%)
+    uint256 public underwriterFeeBps;
+
+    /// @notice Accrued underwriter fee owed to underwriters, not yet paid out (part of nav)
+    uint256 public underwriterFeeNav;
+
+    /// @notice Coverage claimed from the insurance pool but not yet settled, in base assets
+    /// @dev Holds Senior whole against assets not yet in the strategy, so the NAV identity carries a
+    ///      `- insuranceAmount` term. Increases on a covered loss, unwinds on a later gain, and is
+    ///      cleared as redeeming Seniors are paid from the InsuranceVault. See base Accounting.
+    uint256 public insuranceAmount;
+
+    /// @notice The Symbiotic insurance pool queried for coverage
+    /// @dev When unset (address(0)) no coverage is requested and losses hit the tranches as usual.
+    IInsurancePool public insurancePool;
+
+    /// @notice Portion of the Senior valuation loss (base-asset de-peg) covered by Symbiotic.
+    /// @dev Tops Senior up in calcEffectiveNav for the de-peg loss Junior could not absorb, so Senior
+    ///      reads whole. It is external capital backed by slashed collateral and tracked in
+    ///      insuranceAmount. Booked in setValuationPrice, unwound on re-peg in _resyncsrtFundNav.
+    uint256 public srtInsuranceFundNav;
+
     error InvalidNavSplit(
         uint256 navT1,
         uint256 jrtAssets,
         uint256 srtAssets,
-        uint256 reserveAssets
+        uint256 reserveAssets,
+        uint256 underwriterFeeAssets
     );
     error ReserveTooLow(uint256 reserveNav, uint256 requestedNav);
+    error UnderwriterFeeTooLow(uint256 underwriterFeeNav, uint256 requestedNav);
+
+    struct TNavSplitState {
+        uint256 srtNavTime;
+        uint256 navTime;
+        uint256 navTimeNet;
+        uint256 srtProjectedPnLTime;
+        uint256 lastAccrual;
+        uint256 srtPnLProjected;
+        uint256 srtPaidProjected;
+        uint256 srtPnLBenchmark;
+        uint256 epochStart;
+        uint256 strategyRate;
+        uint256 feeWatermarkNav;
+        // Underwriter fee and Symbiotic claim at the split boundary.
+        uint256 underwriterFeeNav;
+        uint256 insuranceAmount;
+    }
 
     event AprPairFeedChanged(address aprPairFeed);
     event AprDataChangedViaPush(UD60x18 aprTarget, UD60x18 aprBase);
     event ReservePercentageChanged(uint256 reserveBps);
+    event UnderwriterFeeReduced(uint256 amount);
+    event InsuranceClaimed(uint256 amount, uint256 insuranceAmount);
     event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
     event RiskModelChanged(address riskPremiumModel);
     event MinimumJrtSrtRatioChanged(uint256 ratio);
@@ -322,27 +369,59 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Accrues asset-time for all tranches. MUST be called before any state change.
     function _accrueAssetTime() internal {
-        if (block.timestamp == lastAccrual) return;
+        TNavSplitState memory state = _currentNavSplitState();
+        _accrueAssetTime(state);
+    }
+
+    /// @notice Accrues asset-time for all tranches. MUST be called before any state change.
+    function _accrueAssetTime(TNavSplitState memory state) internal {
+        if (block.timestamp == state.lastAccrual) return;
 
         (
-            srtNavTime,
-            navTime,
-            navTimeNet,
-            srtProjectedPnLTime
+            state.srtNavTime,
+            state.navTime,
+            state.navTimeNet,
+            state.srtProjectedPnLTime
         ) = _accruedAssetTimeView(
             nav,
             jrtNavProjected,
             srtBaseNav,
-            reserveNav
+            reserveNav,
+            state
         );
+
+        srtNavTime = state.srtNavTime;
+        navTime = state.navTime;
+        navTimeNet = state.navTimeNet;
+        srtProjectedPnLTime = state.srtProjectedPnLTime;
+        state.lastAccrual = block.timestamp;
         lastAccrual = block.timestamp;
+    }
+
+    function _currentNavSplitState() internal view returns (TNavSplitState memory state) {
+        state.srtNavTime = srtNavTime;
+        state.navTime = navTime;
+        state.navTimeNet = navTimeNet;
+        state.srtProjectedPnLTime = srtProjectedPnLTime;
+        state.lastAccrual = lastAccrual;
+        state.srtPnLProjected = srtPnLProjected;
+        state.srtPaidProjected = srtPaidProjected;
+        state.srtPnLBenchmark = srtPnLBenchmark;
+        state.feeWatermarkNav = feeWatermarkNav;
+        state.underwriterFeeNav = underwriterFeeNav;
+        state.insuranceAmount = insuranceAmount;
+        if (useRatesForReconciliation) {
+            state.epochStart = epochStart;
+            state.strategyRate = strategyRate;
+        }
     }
 
     function _accruedAssetTimeView(
         uint256 navT0,
         uint256 jrtNavT0Projected,
         uint256 srtNavT0,
-        uint256 reserveNavT0
+        uint256 reserveNavT0,
+        TNavSplitState memory state
     )
         internal
         view
@@ -353,12 +432,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 srtProjectedPnLTime_
         )
     {
-        srtNavTime_ = srtNavTime;
-        navTime_ = navTime;
-        navTimeNet_ = navTimeNet;
-        srtProjectedPnLTime_ = srtProjectedPnLTime;
+        srtNavTime_ = state.srtNavTime;
+        navTime_ = state.navTime;
+        navTimeNet_ = state.navTimeNet;
+        srtProjectedPnLTime_ = state.srtProjectedPnLTime;
 
-        uint256 dt = block.timestamp - lastAccrual;
+        uint256 dt = block.timestamp - state.lastAccrual;
         if (dt == 0) return (srtNavTime_, navTime_, navTimeNet_, srtProjectedPnLTime_);
 
         uint256 systemAssets = srtNavT0 + jrtNavT0Projected + reserveNavT0;
@@ -366,9 +445,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
         srtNavTime_ += srtNavT0 * dt;
         navTime_ += systemAssets * dt;
         navTimeNet_ += navT0 * dt;
-        srtProjectedPnLTime_ += Math.saturatingSub(srtPnLProjected, srtPaidProjected) * dt;
+        srtProjectedPnLTime_ += Math.saturatingSub(state.srtPnLProjected, state.srtPaidProjected) * dt;
     }
-
     function _navAnchor() private view returns (uint256) {
         return useNavAtReconciliation ? lastReconciliation : navTimestamp;
     }
@@ -389,18 +467,21 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 reserveNavT1
         )
     {
+        TNavSplitState memory state = _currentNavSplitState();
         (
             jrtNavT1Projected,
             ,
             /*jrtNavT1Real*/ srtNavT1,
-            reserveNavT1
+            reserveNavT1,
+            ,
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                state
             );
         (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
         return (jrtNavT1Projected, srtNavT1, reserveNavT1);
@@ -417,18 +498,21 @@ contract DYSAccounting is IAccounting, CDOComponent {
         )
     {
         uint256 navT1 = cdo.totalStrategyAssets(nav, _navAnchor());
+        TNavSplitState memory state = _currentNavSplitState();
         (
             jrtNavT1Projected,
             ,
             /*jrtNavT1Real*/ srtNavT1,
-            reserveNavT1
+            reserveNavT1,
+            ,
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                state
             );
         (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
         return (jrtNavT1Projected, srtNavT1, reserveNavT1);
@@ -446,18 +530,21 @@ contract DYSAccounting is IAccounting, CDOComponent {
     {
         uint256 navT1 = cdo.totalStrategyAssets(nav, _navAnchor());
         bool isReconciliation = _shouldReconcile(nav, navT1);
+        TNavSplitState memory state = _currentNavSplitState();
         (
             ,
             jrtNavT1Real,
             srtNavT1,
-            reserveNavT1
+            reserveNavT1,
+            ,
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                state
             );
 
         if (isReconciliation) {
@@ -493,18 +580,21 @@ contract DYSAccounting is IAccounting, CDOComponent {
         bool isReconciliation = _shouldReconcile(nav, navT1);
         uint256 reserveNavT1;
         uint256 srtNavT1;
+        TNavSplitState memory state = _currentNavSplitState();
         (
             jrtNavLive,
             jrtNavSettled,
             srtNavT1,
-            reserveNavT1
+            reserveNavT1,
+            ,
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                state
             );
 
         if (isReconciliation) {
@@ -559,6 +649,62 @@ contract DYSAccounting is IAccounting, CDOComponent {
     /*****************************************************************************
      *                  State-Mutating Methods (called by CDO)                    *
      *****************************************************************************/
+
+    /// @notice Returns the current accrued underwriter fee value
+    function totalUnderwriterFeeNav () external view returns (uint256 underwriterFeeNavT1) {
+        TNavSplitState memory state = _currentNavSplitState();
+        (
+            ,
+            ,
+            ,
+            ,
+            underwriterFeeNavT1,
+        ) = calculateNAVSplit(
+            nav,
+            jrtNavProjected,
+            jrtBaseNav,
+            srtBaseNav,
+            reserveNav,
+            cdo.totalStrategyAssets(nav, _navAnchor()),
+            state
+        );
+    }
+
+    /// @notice Reduces the accrued underwriter fee by the specified amount
+    /// @dev Called by the CDO when paying underwriter fee to the insurance middleware; the CDO withdraws
+    ///      the corresponding tokens, so nav (which includes the underwriter fee bucket) drops too.
+    function reduceUnderwriterFee (uint256 amount) external onlyCDO {
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        if (amount > underwriterFeeNav) {
+            revert UnderwriterFeeTooLow(underwriterFeeNav, amount);
+        }
+        underwriterFeeNav -= amount;
+        nav -= amount;
+        emit UnderwriterFeeReduced(amount);
+    }
+
+
+    /// @notice Sets the share of raw Senior risk premium used for the underwriter fee rate
+    /// @dev Only callable by the CDO, which relays the rate from the Symbiotic insurance middleware
+    function setUnderwriterFeeBps (uint256 bps) external onlyCDO {
+        require(bps <= UNDERWRITER_FEE_BPS_MAX && bps != underwriterFeeBps, "InvalidNewUnderwriterFee");
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        underwriterFeeBps = bps;
+    }
+
+    /// @notice Sets the Symbiotic insurance pool queried for coverage.
+    function setInsurancePool (IInsurancePool pool_) external onlyCDO {
+        updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
+        insurancePool = pool_;
+    }
+
+    /// @dev Queries the insurance pool for how much of `loss` it can cover. View; returns 0 when unset.
+    function _requestInsurance (uint256 loss) internal view returns (uint256) {
+        if (loss == 0 || address(insurancePool) == address(0)) {
+            return 0;
+        }
+        return insurancePool.request(address(cdo), loss);
+    }
 
     /// @notice Reduces the reserve by the specified amount
     function reduceReserve(
@@ -640,7 +786,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 jrtAssetsOut,
         uint256 srtAssetsIn,
         uint256 srtAssetsOut
-    ) external onlyCDO {
+    ) external onlyCDO returns (uint256 insuranceBaseOut) {
         _accrueAssetTime();
         srtFundNav += _trackSrtFundNavIn(srtAssetsIn);
 
@@ -720,11 +866,32 @@ contract DYSAccounting is IAccounting, CDOComponent {
             jrtNavProjected = Math.max(jrtNavProjected, jrtBaseNav);
         }
 
+        // Senior's exit takes its share of the outstanding coverage with it. That slice is paid from
+        // the insurance vault rather than the strategy, so srtBaseNav drops by the full outflow while
+        // nav drops only by what actually leaves the strategy. Both sides of
+        // nav + insuranceAmount == jrt + srt + reserve + underwriter fee then move by srtAssetsOut.
+        uint256 insuranceBaseOut_;
+        if (insuranceAmount > 0 && srtAssetsOut > 0 && srtBaseNav > 0) {
+            insuranceBaseOut_ = Math.min(
+                insuranceAmount,
+                Math.mulDiv(srtAssetsOut, insuranceAmount, srtBaseNav)
+            );
+            insuranceAmount -= insuranceBaseOut_;
+            srtInsuranceFundNav = Math.saturatingSub(srtInsuranceFundNav, insuranceBaseOut_);
+        }
+        insuranceBaseOut = insuranceBaseOut_;
+
         jrtBaseNav = jrtBaseNav + jrtAssetsIn - jrtAssetsOut;
         jrtNavProjected = jrtNavProjected + jrtAssetsIn - jrtAssetsOut;
         srtBaseNav = srtBaseNav + srtAssetsIn - srtAssetsOut;
-        adjustFeeWatermark(jrtAssetsIn + srtAssetsIn, jrtAssetsOut + srtAssetsOut);
-        nav = nav + jrtAssetsIn + srtAssetsIn - jrtAssetsOut - srtAssetsOut;
+        // Net the vault-paid slice out of the Senior outflow first: only this much actually leaves
+        // the strategy, and subtracting the full outflow from nav could underflow on the way.
+        uint256 srtAssetsOutFromStrategy = srtAssetsOut - insuranceBaseOut_;
+        adjustFeeWatermark(
+            jrtAssetsIn + srtAssetsIn,
+            jrtAssetsOut + srtAssetsOutFromStrategy
+        );
+        nav = nav + jrtAssetsIn + srtAssetsIn - jrtAssetsOut - srtAssetsOutFromStrategy;
         windowNetFlows += int256(srtAssetsIn) - int256(srtAssetsOut);
         navTimestamp = block.timestamp;
         (bool modified, UD60x18 aprTarget_, UD60x18 aprBase_) = fetchAprs();
@@ -768,31 +935,44 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 jrtNavT0Real,
         uint256 srtNavT0,
         uint256 reserveNavT0,
-        uint256 navT1
+        uint256 navT1,
+        TNavSplitState memory state
     )
-        public
+        internal
         view
         returns (
             uint256 jrtNavT1Projected,
             uint256 jrtNavT1Real,
             uint256 srtNavT1,
-            uint256 reserveNavT1
+            uint256 reserveNavT1,
+            uint256 underwriterFeeNavT1,
+            uint256 insuranceAmountT1
         )
     {
         if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 > 0) {
-            return (0, 0, 0, navT1);
+            // Keep the underwriter fee capped to the remaining assets so a wipeout below the accrued underwriter fee
+            // cannot underflow; the bucket absorbs the shortfall.
+            underwriterFeeNavT1 = Math.min(navT1, state.underwriterFeeNav);
+            return (0, 0, 0, navT1 - underwriterFeeNavT1, underwriterFeeNavT1, state.insuranceAmount);
         }
 
         if (!_shouldReconcile(navT0, navT1)) {
             // No realized gain yet; process using the projection
-            return
-                calculateNAVSplitProjected(
-                    navT0,
-                    jrtNavT0Projected,
-                    jrtNavT0Real,
-                    srtNavT0,
-                    reserveNavT0
-                );
+            (jrtNavT1Projected, jrtNavT1Real, srtNavT1, reserveNavT1) = calculateNAVSplitProjected(
+                navT0,
+                jrtNavT0Projected,
+                jrtNavT0Real,
+                srtNavT0,
+                reserveNavT0
+            );
+            return (
+                jrtNavT1Projected,
+                jrtNavT1Real,
+                srtNavT1,
+                reserveNavT1,
+                state.underwriterFeeNav,
+                state.insuranceAmount
+            );
         }
 
         // Reconciliation: realized PnL detected (navT0 != navT1)
@@ -803,11 +983,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 jrtNavT0Real,
                 srtNavT0,
                 reserveNavT0,
-                navT1
+                navT1,
+                state
             );
     }
-
-    /// @notice Projection during the epoch — uses index-based aprSrt for smooth NAV evolution
+    /// @notice Projection during the epoch - uses index-based aprSrt for smooth NAV evolution
     /// @dev Same approach as DiscreteAccounting, but also conceptually accumulates srtPnLProjected
     function calculateNAVSplitProjected(
         uint256 navT0,
@@ -825,6 +1005,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 reserveNavT1
         )
     {
+        // Underwriter fee is modeled in projected Senior NAV but is not accrued into underwriterFeeNav.
+        // The insurance claim is likewise untouched on the projection (no realized loss to cover).
         if (jrtNavT0Projected == 0 && srtNavT0 == 0) {
             return (0, 0, 0, 0);
         }
@@ -861,7 +1043,6 @@ contract DYSAccounting is IAccounting, CDOComponent {
         }
 
         uint256 gain_dTAbs = uint256(gain_dT);
-
         // Decrease projected gain by the expected performance fee only above the high-water mark.
         if (reserveBps > 0 && navT0 + gain_dTAbs > feeWatermarkNav) {
             uint256 feeableGain = Math.min(
@@ -897,20 +1078,75 @@ contract DYSAccounting is IAccounting, CDOComponent {
             Math.saturatingSub(jrtNavT0Real, ONE_ASSET)
         );
 
+        uint256 expectedUnderwriterFee = 0;
+        if (srtGainTargetAbs > 0 && underwriterFeeBps > 0) {
+            uint256 underwriterFeePct = calculateRiskPremium().unwrap() * underwriterFeeBps / PERCENTAGE_100;
+            expectedUnderwriterFee = srtGainTargetAbs * underwriterFeePct / PERCENTAGE_100;
+        }
+
         // Final Jrt (after srt funding)
         jrtNavT1Projected = jrtNavT1Projected - srtGainTargetAbs;
-        jrtNavT1Real = Math.saturatingSub(jrtNavT0Real, srtGainTargetAbs);
+        jrtNavT1Real = Math.saturatingSub(jrtNavT0Real, Math.saturatingSub(srtGainTargetAbs, expectedUnderwriterFee));
 
         // Final Srt
-        srtNavT1 = srtNavT0 + srtGainTargetAbs;
+        srtNavT1 = srtNavT0 + srtGainTargetAbs - expectedUnderwriterFee;
 
         // No changes to NAV and reserve on Projection
         reserveNavT1 = reserveNavT0;
 
         return (jrtNavT1Projected, jrtNavT1Real, srtNavT1, reserveNavT1);
     }
+    function _calculateSrtPnLRealized(
+        int256 pnl,
+        uint256 reserveIncrease,
+        uint256 navT0,
+        uint256 srtNavT0,
+        TNavSplitState memory state
+    )
+        internal
+        view
+        returns (int256 srtPnLRealized, uint256 riskPremium_)
+    {
+        uint256 srtNavTime_ = state.navTime > 0 ? state.srtNavTime : srtNavT0;
+        uint256 navTime_ = state.navTime > 0 ? state.navTime : navT0;
 
-    /// @notice Reconciliation at epoch end — DYS-based PnL allocation with true-up
+        // Note: riskPremium is capped at 1e18 (100%) via setRiskParameters validation
+        riskPremium_ = calculateRiskPremium().unwrap();
+        // Risk premium: srtFactor = 1 - riskPremium
+        uint256 srtFactor = 1e18 - riskPremium_;
+
+        if (useRatesForReconciliation) {
+            // Rate-based formula: senior earns (senior sub-strategy rate growth) * srtNavTime * srtFactor.
+            // Used when the senior sub-strategy has a queryable exchange rate (e.g. IsolatedStrategy);
+            // isolates senior returns regardless of junior sub-strategy performance.
+            uint256 srtRateT1 = cdo.strategy().getRate();
+            uint256 epochDt = block.timestamp > state.epochStart ? block.timestamp - state.epochStart : 0;
+            bool isPositive = srtRateT1 > state.strategyRate;
+            uint256 rateDeltaAbs = isPositive
+                ? srtRateT1 - state.strategyRate
+                : state.strategyRate - srtRateT1;
+            if (epochDt > 0) {
+                uint256 srtNavTimeReal = Math.saturatingSub(srtNavTime_, state.srtProjectedPnLTime);
+                uint256 navTimeXGrowth = Math.mulDiv(srtNavTimeReal, rateDeltaAbs, state.strategyRate);
+                uint256 pnlAbs = Math.mulDiv(navTimeXGrowth, srtFactor, 1e18 * epochDt);
+                srtPnLRealized = isPositive
+                    ?  int256(pnlAbs)
+                    : -int256(pnlAbs);
+            }
+            // else: sub-strat had no growth this epoch - senior earns nothing (srtPnLRealized stays 0)
+        } else {
+            // Proportional nav-time formula (single strategy / no rate tracking).
+            // srtPnL = totalUnderlyingProfit * srtFactor * srtNavTime / navTime
+            uint256 srtNavTimeNet_ = Math.saturatingSub(srtNavTime_, state.srtProjectedPnLTime);
+            uint256 navTimeNet_ = state.navTimeNet > 0 ? state.navTimeNet : navT0;
+
+            srtPnLRealized = navTime_ == 0
+                ? int256(0)
+                : (pnl + int256(reserveIncrease)) * int256(srtFactor) * int256(srtNavTimeNet_) / (int256(navTimeNet_) * 1e18);
+        }
+    }
+
+    /// @notice Reconciliation at epoch end - DYS-based PnL allocation with true-up
     /// @dev Uses asset-time weighting to allocate realized PnL between tranches
     function calculateNAVSplitReconciliation(
         uint256 navT0,
@@ -918,7 +1154,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 jrtNavT0Real,
         uint256 srtNavT0,
         uint256 reserveNavT0,
-        uint256 navT1
+        uint256 navT1,
+        TNavSplitState memory state
     )
         internal
         view
@@ -926,37 +1163,50 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 jrtNavT1Projected,
             uint256 jrtNavT1Real,
             uint256 srtNavT1,
-            uint256 reserveNavT1
+            uint256 reserveNavT1,
+            uint256 underwriterFeeNavT1,
+            uint256 insuranceAmountT1
         )
     {
         int256 pnl = int256(navT1) - int256(navT0);
+        insuranceAmountT1 = state.insuranceAmount;
+
+        // A realized gain first unwinds any outstanding insurance claim before it is skimmed/split.
+        if (pnl > 0 && insuranceAmountT1 > 0) {
+            uint256 unwind = Math.min(uint256(pnl), insuranceAmountT1);
+            insuranceAmountT1 -= unwind;
+            pnl -= int256(unwind);
+        }
 
         // Reserve allocation
-        uint256 reserve_dT = 0;
+        reserveNavT1 = reserveNavT0;
         if (pnl > 0 && navT1 > feeWatermarkNav && reserveBps > 0) {
             uint256 feeableGain = navT1 - feeWatermarkNav;
-            reserve_dT = feeableGain * reserveBps / PERCENTAGE_100;
-            pnl -= int256(reserve_dT);
+            uint256 reserveIncrease = feeableGain * reserveBps / PERCENTAGE_100;
+            pnl -= int256(reserveIncrease);
+            reserveNavT1 += reserveIncrease;
         }
-        reserveNavT1 = reserveNavT0 + reserve_dT;
+
+        underwriterFeeNavT1 = state.underwriterFeeNav;
 
         // Accrue the unpersisted interval before unwinding projected Senior NAV.
         (
-            uint256 srtNavTimeAccrued,
-            uint256 navTimeAccrued,
-            uint256 navTimeNetAccrued,
-            uint256 srtProjectedPnLTimeAccrued
+            state.srtNavTime,
+            state.navTime,
+            state.navTimeNet,
+            state.srtProjectedPnLTime
         ) = _accruedAssetTimeView(
             navT0,
             jrtNavT0Projected,
             srtNavT0,
-            reserveNavT0
+            reserveNavT0,
+            state
         );
 
         // srtNavT0 includes srtPnLProjected added during the epoch
         // unwind it and rollback to real T0 assets for SRT and JRT
         // Guard: large Senior withdrawals during the epoch can make srtNavT0 < srtPnLProjected
-        uint256 projUndo = Math.min(srtPnLProjected, srtNavT0);
+        uint256 projUndo = Math.min(state.srtPnLProjected, srtNavT0);
         srtNavT0 = srtNavT0 - projUndo;
         jrtNavT0Real = jrtNavT0Real + projUndo;
 
@@ -974,51 +1224,18 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // 2.   when positive, add to Junior NAV
         // 3.   when negative, apply the loss waterfall: Junior loss, Reserve loss, then Senior loss
 
-        // Calculate Senior PnL allocation using asset-time weighting.
-        // Use accumulated asset-time if available, otherwise use snapshot NAVs.
-        uint256 srtNavTime_ = navTimeAccrued > 0 ? srtNavTimeAccrued : srtNavT0;
-        uint256 navTime_ = navTimeAccrued > 0 ? navTimeAccrued : navT0;
-
-        // Note: riskPremium is capped at 1e18 (100%) via setRiskParameters validation
-        UD60x18 riskPremium = calculateRiskPremium();
-        // Risk premium: srtFactor = 1 - riskPremium
-        uint256 srtFactor = 1e18 - riskPremium.unwrap();
-
-        int256 srtPnLRealized;
-        if (useRatesForReconciliation) {
-            // Rate-based formula: senior earns (senior sub-strategy rate growth) * srtNavTime * srtFactor.
-            // Used when the senior sub-strategy has a queryable exchange rate (e.g. IsolatedStrategy);
-            // isolates senior returns regardless of junior sub-strategy performance.
-            uint256 srtRateT1 = cdo.strategy().getRate();
-            uint256 epochDt = block.timestamp > epochStart ? block.timestamp - epochStart : 0;
-            bool isPositive = srtRateT1 > strategyRate;
-            uint256 rateDeltaAbs = isPositive
-                ? srtRateT1 - strategyRate
-                : strategyRate - srtRateT1;
-            if (epochDt > 0) {
-                uint256 srtNavTimeReal = Math.saturatingSub(srtNavTime_, srtProjectedPnLTimeAccrued);
-                uint256 navTimeXGrowth = Math.mulDiv(srtNavTimeReal, rateDeltaAbs, strategyRate);
-                uint256 pnlAbs = Math.mulDiv(navTimeXGrowth, srtFactor, 1e18 * epochDt);
-                srtPnLRealized = isPositive
-                    ?  int256(pnlAbs)
-                    : -int256(pnlAbs);
-            }
-            // else: sub-strat had no growth this epoch — senior earns nothing (srtPnLRealized stays 0)
-        } else {
-            // Proportional nav-time formula (single strategy / no rate tracking).
-            // srtPnL = totalUnderlyingProfit * srtFactor * srtNavTime / navTime
-            uint256 srtNavTimeNet_ = Math.saturatingSub(srtNavTime_, srtProjectedPnLTimeAccrued);
-            uint256 navTimeNet_ = navTimeNetAccrued > 0 ? navTimeNetAccrued : navT0;
-
-            srtPnLRealized = navTime_ == 0
-                ? int256(0)
-                : (pnl + int256(reserve_dT)) * int256(srtFactor) * int256(srtNavTimeNet_) / (int256(navTimeNet_) * 1e18);
-        }
+        (int256 srtPnLRealized, uint256 riskPremium_) = _calculateSrtPnLRealized(
+            pnl,
+            reserveNavT1 - reserveNavT0,
+            navT0,
+            srtNavT0,
+            state
+        );
 
         // Benchmark mode: Use max(realized PnL, benchmark gain)
         // Note: Benchmark APR changes during the epoch, so we separately track the benchmark gain during the projection
-        if (useBenchmarkProjection && srtPnLRealized < int256(srtPnLBenchmark)) {
-            srtPnLRealized = int256(srtPnLBenchmark);
+        if (useBenchmarkProjection && srtPnLRealized < int256(state.srtPnLBenchmark)) {
+            srtPnLRealized = int256(state.srtPnLBenchmark);
         }
 
         uint256 floorRate_ = floorRate;
@@ -1031,11 +1248,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // Make Junior cover paid-out projected Senior assets charged to the remaining Senior NAV.
         // Cap srtPaidProjected by the paid projection actually included in `projUndo`.
         if (useJuniorCoversPaidSrtProjection && projUndo > 0) {
-            uint256 paidProjectedUnwound = projUndo == srtPnLProjected
-                ? srtPaidProjected
+            uint256 paidProjectedUnwound = projUndo == state.srtPnLProjected
+                ? state.srtPaidProjected
                 // Here, pre-unwind srtNavT0' < srtPnLProjected.
                 // Recover pre-unwind srtNavT0' as srtNavT0 + projUndo.
-                : Math.saturatingSub(srtNavT0 + projUndo + srtPaidProjected, srtPnLProjected);
+                : Math.saturatingSub(srtNavT0 + projUndo + state.srtPaidProjected, state.srtPnLProjected);
 
             if (srtPnLRealized < int256(paidProjectedUnwound)) {
                 // Only adjust if realized PnL does not already cover it
@@ -1066,6 +1283,15 @@ contract DYSAccounting is IAccounting, CDOComponent {
             }
         }
 
+        if (srtPnLRealized > 0 && underwriterFeeBps > 0) {
+            uint256 underwriterFee_dT =
+                uint256(srtPnLRealized) * riskPremium_ * underwriterFeeBps / PERCENTAGE_100 / PERCENTAGE_100;
+            srtPnLRealized -= int256(underwriterFee_dT);
+            srtNavT1 -= underwriterFee_dT;
+            pnl -= int256(underwriterFee_dT);
+            underwriterFeeNavT1 += underwriterFee_dT;
+        }
+
         // Junior PnL scenarios after Senior allocation:
         // pnl < 0 and srtPnLRealized < 0: reduces JRT Loss
         // pnl < 0 and srtPnLRealized > 0: increases JRT Loss (benchmark mode)
@@ -1083,6 +1309,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
             loss -= jrtLoss;
             uint256 reserveLoss = Math.min(reserveNavT1, loss);
             loss -= reserveLoss;
+            // Symbiotic coverage takes the Senior-bound remainder (Srt held whole, booked to insuranceAmount).
+            uint256 covered = _requestInsurance(loss);
+            loss -= covered;
             // Apply SRT loss to recently accrued balance
             uint256 srtLoss = Math.min(srtNavT1, loss);
             // The market is considered abandoned if losses would consume the protected dust NAV
@@ -1091,15 +1320,16 @@ contract DYSAccounting is IAccounting, CDOComponent {
             jrtNavT1Real = jrtNavT0Real - jrtLoss;
             srtNavT1 -= srtLoss;
             reserveNavT1 -= reserveLoss;
+            insuranceAmountT1 = insuranceAmountT1 + covered;
         }
 
         // Invariant: Total new NAV must equal sum of all NAVs
-        // This ensures no value is created or destroyed during reconciliation
-        if (navT1 != (jrtNavT1Real + srtNavT1 + reserveNavT1)) {
-            revert InvalidNavSplit(navT1, jrtNavT1Real, srtNavT1, reserveNavT1);
+        // Coverage holds a tranche whole against assets not yet injected, hence the added term.
+        if (navT1 + insuranceAmountT1 != (jrtNavT1Real + srtNavT1 + reserveNavT1 + underwriterFeeNavT1)) {
+            revert InvalidNavSplit(navT1, jrtNavT1Real, srtNavT1, reserveNavT1, underwriterFeeNavT1);
         }
 
-        return (jrtNavT1Real, jrtNavT1Real, srtNavT1, reserveNavT1);
+        return (jrtNavT1Real, jrtNavT1Real, srtNavT1, reserveNavT1, underwriterFeeNavT1, insuranceAmountT1);
     }
 
     /// @notice Computes the Senior NAV floor based on the rolling 24h window
@@ -1129,7 +1359,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
      *****************************************************************************/
 
     function updateAccountingInner(uint256 navT1) internal {
-        _accrueAssetTime();
+        TNavSplitState memory state = _currentNavSplitState();
+        _accrueAssetTime(state);
 
         bool isReconciliation = _shouldReconcile(nav, navT1);
 
@@ -1137,15 +1368,23 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 jrtNavT1Projected,
             uint256 jrtNavT1Real,
             uint256 srtNavT1,
-            uint256 reserveNavT1
+            uint256 reserveNavT1,
+            uint256 underwriterFeeNavT1,
+            uint256 insuranceAmountT1
         ) = calculateNAVSplit(
                 nav,
                 jrtNavProjected,
                 jrtBaseNav,
                 srtBaseNav,
                 reserveNav,
-                navT1
+                navT1,
+                state
             );
+
+        // Persist the underwriter fee bucket and insurance claim, and slash any newly booked insurance in the
+        // same transaction. Done here so `state` dies early and so underfunded insurance reverts before NAVs
+        // are persisted below.
+        _persistInsuranceClaim(underwriterFeeNavT1, state.insuranceAmount, insuranceAmountT1);
 
         if (isReconciliation) {
             // Track projected PnL increment for the next epoch
@@ -1202,6 +1441,43 @@ contract DYSAccounting is IAccounting, CDOComponent {
         jrtNavProjected = jrtNavT1Projected;
         jrtBaseNav = jrtNavT1Real;
         reserveNav = reserveNavT1;
+    }
+
+    /// @notice Persists the underwriter fee bucket and insurance claim produced by the split, then slashes
+    ///         any newly booked insurance in the same transaction.
+    /// @dev Split out of updateAccountingInner to mirror MTMAccounting state flow and reduce stack pressure.
+    function _persistInsuranceClaim(
+        uint256 underwriterFeeNavT1,
+        uint256 insuranceAmountT0,
+        uint256 insuranceAmountT1
+    )
+        internal
+    {
+        underwriterFeeNav = underwriterFeeNavT1;
+        if (insuranceAmountT1 == insuranceAmountT0) {
+            return;
+        }
+
+        insuranceAmount = insuranceAmountT1;
+        if (insuranceAmountT1 < insuranceAmountT0) {
+            // Protection not needed
+            return;
+        }
+        uint256 newClaim = insuranceAmountT1 - insuranceAmountT0;
+        uint256 covered = _slashNewClaim(newClaim);
+        // insuranceAmountT1 is capped by insurancePool.request(), so coverAndSlash()
+        // must cover the full new claim in the same transaction.
+        require(covered == newClaim, "CoverageUnderfunded");
+        emit InsuranceClaimed(covered, insuranceAmount);
+    }
+    /// @notice Synchronously slashes freshly-booked coverage in the same transaction it is claimed.
+    /// @dev The preview in `calculateNAVSplit` (via `request()`) sized `newClaim` within the current
+    ///      slashable stake, and this runs in the same tx, so the pool must cover it in full.
+    function _slashNewClaim (uint256 newClaim) internal returns (uint256 covered) {
+        if (address(insurancePool) == address(0)) {
+            return newClaim;
+        }
+        covered = insurancePool.coverAndSlash(address(cdo), newClaim);
     }
 
     /*****************************************************************************
@@ -1486,8 +1762,45 @@ contract DYSAccounting is IAccounting, CDOComponent {
             // Grace period starts; further grace periods in subsequent drops should handle PAUSER_ROLE
             valuationEnteredAt = uint64(block.timestamp);
         }
+        _coverValuationLoss(price);
         emit ValuationPriceChanged(price);
         return valuationLossEntered;
+    }
+
+    /// @notice Covers the Senior-bound valuation loss Junior cannot absorb, synchronously slashing it.
+    /// @dev Holds Senior whole against a de-peg: books the covered amount to both srtInsuranceFundNav
+    ///      (so calcEffectiveNav stops charging Junior for it) and insuranceAmount (settled at redemption).
+    ///      Any residual the pool cannot cover stays in the effective-NAV shortfall, i.e. Senior bears it.
+    function _coverValuationLoss (uint128 price) internal {
+        if (address(insurancePool) == address(0)) {
+            return;
+        }
+        uint256 uncovered = _seniorValuationShortfall(price);
+        if (uncovered == 0) {
+            return;
+        }
+        uint256 covered = insurancePool.coverAndSlash(address(cdo), uncovered);
+        if (covered > 0) {
+            // Credit Senior the owed tokens now and hold the matching claim until it is paid out at
+            // redemption, so nav + insuranceAmount == jrt + srt + reserve + underwriter fee keeps balancing.
+            srtInsuranceFundNav += covered;
+            srtBaseNav += covered;
+            insuranceAmount += covered;
+            emit InsuranceClaimed(covered, insuranceAmount);
+        }
+    }
+
+    /// @notice Senior-bound valuation loss at `price` that neither Senior's self-fund, the existing
+    ///         Symbiotic fund, nor Junior can absorb.
+    function _seniorValuationShortfall (uint128 price) internal view returns (uint256) {
+        if (price >= 1e18) {
+            return 0;
+        }
+        uint256 srtPrincipal = Math.saturatingSub(srtBaseNav, srtInsuranceFundNav);
+        uint256 extraNeeded = Math.saturatingSub(Math.mulDiv(srtPrincipal, 1e18, price), srtBaseNav);
+        extraNeeded = Math.saturatingSub(extraNeeded, srtFundNav);
+        uint256 juniorAvailable = Math.saturatingSub(jrtBaseNav, ONE_ASSET);
+        return Math.saturatingSub(extraNeeded, juniorAvailable);
     }
 
     /// @notice Sets the grace period
@@ -1506,6 +1819,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
     }
 
     function _resyncsrtFundNav(uint128 price) internal {
+        _resyncInsuranceFundNav(price);
         uint256 fundedGrossNav = srtFundedGrossNav;
         if (fundedGrossNav == 0) {
             return;
@@ -1518,6 +1832,34 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // Senior deposits self-fund only the valuation loss that existed at deposit time.
         // On further de-peg, Junior still covers the additional Senior loss.
         srtFundNav = Math.min(srtFundNav, Math.mulDiv(fundedGrossNav, 1e18 - price, price));
+    }
+
+    /// @notice On re-peg the Senior valuation shortfall shrinks; unwind the Symbiotic-covered part and
+    ///         reduce the outstanding claim by the same amount. Collateral already slashed is not
+    ///         returned: once injected it surfaces as a plain gain and flows to Junior, which took
+    ///         the de-peg loss first.
+    function _resyncInsuranceFundNav(uint128 price) internal {
+        uint256 fund = srtInsuranceFundNav;
+        if (fund == 0) {
+            return;
+        }
+        uint256 stillNeeded = 0;
+        if (price < 1e18) {
+            uint256 srtPrincipal = Math.saturatingSub(srtBaseNav, fund);
+            uint256 extraNeeded = Math.saturatingSub(Math.mulDiv(srtPrincipal, 1e18, price), srtBaseNav);
+            extraNeeded = Math.saturatingSub(extraNeeded, srtFundNav);
+            stillNeeded = Math.saturatingSub(extraNeeded, Math.saturatingSub(jrtBaseNav, ONE_ASSET));
+            stillNeeded = Math.min(stillNeeded, fund);
+        }
+        if (fund > stillNeeded) {
+            uint256 unwound = Math.min(fund - stillNeeded, insuranceAmount);
+            srtInsuranceFundNav = fund - unwound;
+            // Senior hands back the de-peg credit it no longer needs and the claim is cancelled by
+            // the same amount, so nav is untouched and the identity still holds. The collateral
+            // already slashed stays in the insurance vault rather than being credited to a tranche.
+            insuranceAmount -= unwound;
+            srtBaseNav -= unwound;
+        }
     }
 
     /// @notice Adjusts Junior and Senior NAVs when the base asset is trading below par (valuation loss)
@@ -1548,7 +1890,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
         if (valuationPrice == 1e18) {
             return (jrtFact, srtFact);
         }
-        uint256 extraNeeded = srtFact * (1e18 - valuationPrice) / valuationPrice;
+        // srtFact already includes any Symbiotic de-peg credit, which is compensation rather than
+        // principal: exclude it when sizing how many tokens Senior needs to be whole at this price.
+        uint256 srtPrincipal = Math.saturatingSub(srtFact, srtInsuranceFundNav);
+        uint256 extraNeeded = Math.saturatingSub(Math.mulDiv(srtPrincipal, 1e18, valuationPrice), srtFact);
         extraNeeded = Math.saturatingSub(extraNeeded, srtFundNav);
         uint256 extraTaken = Math.min(
             Math.saturatingSub(jrtFact, ONE_ASSET),

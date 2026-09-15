@@ -94,10 +94,10 @@ export class MKRAlphaDeployments extends DeploymentsBase<{
       });
 
       const mKRALPHA = await this.ds.ensureContract(MockMToken);
-      const midasDepositVault = await this.ds.ensureContract(MockDepositVault, {
-        arguments: [mKRALPHA.address],
-      });
       const oracle = await this.ds.ensureContract(MockOracle);
+      const midasDepositVault = await this.ds.ensureContract(MockDepositVault, {
+        arguments: [mKRALPHA.address, oracle.address],
+      });
       const midasRedemptionVault = await this.ds.ensureContract(
         MockRedemptionVault,
         {

@@ -36,7 +36,7 @@ contract MidasStrategyTest is Test {
         mToken = new MockMToken();
         baseAsset = new MockBaseAsset(); // 6 decimals (USDC)
         oracle = new MockOracle();
-        depositVault = new MockDepositVault(mToken);
+        depositVault = new MockDepositVault(mToken, oracle);
         redemptionVault = new MockRedemptionVault(mToken, baseAsset, oracle);
 
         // Set oracle round: $1.05 per mToken (1.05e8 in Chainlink 8-decimal)

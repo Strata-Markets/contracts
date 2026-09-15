@@ -9,6 +9,7 @@ import { Tranche } from '@0xc/hardhat/Tranche/Tranche';
 import { Eth } from '@s/platforms/Eth';
 import { NestOpalStrategy } from '@0xc/hardhat/NestOpalStrategy/NestOpalStrategy';
 import { $require } from 'dequanto/utils/$require';
+import { $test } from '../utils/$test';
 
 const test = await $hh.create('nestopal', {
     forked: 'latest',
@@ -64,7 +65,12 @@ UTest.create({
         $require.eq(strategyNOpalBalance, nOPALExpect, `Invalid Strategy's nOPAL Balance`);
 
         const jrtBalance = await jrtVault.balanceOf(deployer.address);
-        $require.eq(jrtBalance, BigInt(4.999999e18), `Invalid User's Junior Balance (1wei-rounding)`);
+        $test.eqDiff(
+            jrtBalance,
+            BigInt(4.999999e18),
+            BigInt(0.000001e18),
+            `Invalid User's Junior Balance (2wei-rounding) USDC<->Nest ~1wei; Nest<->Shares ~1wei`
+        );
 
     }
 })

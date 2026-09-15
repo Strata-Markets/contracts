@@ -111,7 +111,7 @@ contract IsolatedIntegrationDeploy is Test {
         vm.label(address(mHYPER), "mHYPER");
         oracle = new MockOracle(); // constructor sets roundId=1, answer=1e8
         vm.label(address(oracle), "Oracle");
-        depositVault = new MockDepositVault(mHYPER);
+        depositVault = new MockDepositVault(mHYPER, oracle);
         vm.label(address(depositVault), "DepositVault");
         redemptionVault = new MockRedemptionVault(mHYPER, baseAsset, oracle);
         redemptionVault.setInstantEnabled(true);

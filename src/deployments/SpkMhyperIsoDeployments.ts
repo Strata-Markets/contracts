@@ -101,10 +101,10 @@ export class SpkMhyperIsoDeployments extends DeploymentsBase<{
             });
 
             const mHYPER = await this.ds.ensureContract(MockMToken);
-            const depositVault = await this.ds.ensureContract(MockDepositVault, {
-                arguments: [mHYPER.address]
-            });
             const oracle = await this.ds.ensureContract(MockOracle);
+            const depositVault = await this.ds.ensureContract(MockDepositVault, {
+                arguments: [mHYPER.address, oracle.address]
+            });
             const redemptionVault = await this.ds.ensureContract(MockRedemptionVault, {
                 arguments: [mHYPER.address, USDC.address, oracle.address]
             });
