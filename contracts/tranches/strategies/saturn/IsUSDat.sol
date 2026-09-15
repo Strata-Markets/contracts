@@ -16,7 +16,8 @@ import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
  *     (same storage slot, different semantics — 6-decimal min net USDat per 1e18 shares)
  *   - Changed: depositFeeBps() now returns market-mode-dependent value
  *     (Regular=0, Elevated=elevatedDepositFeeBps, Restricted=deposits disabled)
- *   - Deposit fees stay in the vault (usdatBalance), not sent to feeRecipient
+ *   - Deposit fees stay in the vault (usdatBalance) for shareholders
+ *   - Removed: feeRecipient() — retired as private storage, no public getter in V2
  *   - Added: getWithdrawalQueue() still available for getting the queue contract
  */
 interface IsUSDat is IERC4626 {
@@ -25,11 +26,6 @@ interface IsUSDat is IERC4626 {
 
     /// @notice Deposit fee in basis points (market-mode dependent in V2)
     function depositFeeBps () external view returns (uint256);
-
-    /// @notice Address that receives deposit fees
-    /// @dev V2: deposit fees stay in the vault for shareholders, not sent to feeRecipient.
-    ///      This getter may still return a non-zero address but it is no longer used for deposit fees.
-    function feeRecipient () external view returns (address);
 
     // ============ Balance Tracking ============
 

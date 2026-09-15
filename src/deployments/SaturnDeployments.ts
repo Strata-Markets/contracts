@@ -18,7 +18,6 @@ import { MockStakedUSDat } from '@0xc/hardhat/MockStakedUSDat/MockStakedUSDat';
 import { TrancheDepositor } from '@0xc/hardhat/TrancheDepositor/TrancheDepositor';
 import { DeploymentsBase } from './DeploymentsBase';
 import { IStrategy } from '@0xc/hardhat/IStrategy/IStrategy';
-import { SUSDeAprPairProvider } from '@0xc/hardhat/sUSDeAprPairProvider/sUSDeAprPairProvider';
 import { IBeaconProxy } from 'dequanto/contracts/deploy/proxy/ProxyDeployment';
 import { MockERC20 } from '@0xc/hardhat/MockERC20/MockERC20';
 import { LensPriceFeed } from '@0xc/hardhat/LensPriceFeed/LensPriceFeed';
@@ -66,7 +65,7 @@ export class SaturnDeployments extends DeploymentsBase<{
             );
         }
         return {
-            provider: provider as any as InstanceType<typeof SUSDeAprPairProvider>
+            provider: provider as any as InstanceType<typeof SaturnAprPairProvider>
         };
     }
 
@@ -184,6 +183,9 @@ export class SaturnDeployments extends DeploymentsBase<{
         if (currentJrtVault !== jrtVaultAddr) {
             await saturnStrategy.$receipt().setJrtVault(this.owner, jrtVaultAddr);
         }
+
+        // Set initial maxPPS baseline for Junior premium fee
+        await saturnStrategy.$receipt().updateMaxJrtPricePerShare(this.owner);
     }
 
     async configureDepositor(depositor: TrancheDepositor) {
