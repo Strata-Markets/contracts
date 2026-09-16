@@ -7,6 +7,20 @@ import {
 } from "../../../governance/interfaces/IAccessControlManager.sol";
 import {IsUSDat} from "./IsUSDat.sol";
 
+/// @dev V1 sUSDat interface - functions removed after V2 upgrade
+interface IsUSDatV1 {
+    function vestingPeriod() external view returns (uint256);
+    function lastDistributionTimestamp() external view returns (uint256);
+    function getUnvestedAmount() external view returns (uint256);
+    function totalAssets() external view returns (uint256);
+    function getStrcOracle() external view returns (address);
+}
+
+/// @dev V1 STRC price oracle - removed after V2 upgrade
+interface IStrcPriceOracle {
+    function getPrice() external view returns (uint256 price, uint8 decimals);
+}
+
 /**
  * @title SaturnAprPairProvider
  * @notice Provides target APR (Senior benchmark) and base APR for the Saturn CDO.
@@ -17,21 +31,13 @@ import {IsUSDat} from "./IsUSDat.sol";
  *     and applies a ratio, e.g. 0.7, to derive the target APR).
  *
  * Base APR:
- *   - V1: Computed on-chain from sUSDat's STRC vesting state and STRC oracle price.
- *   - V2: STRCon yield is continuous in the token price (mark-to-market, no discrete vesting).
- *     The vesting surface is removed from the vault and moved into STRCMirrorModule,
- *     which is retired after the STRC→STRCon migration.
- *     getAPRbase() returns 0 as there is no discrete yield event to annualize.
- *     With riskPremium = 100%, the Senior APR equals aprTarget regardless of aprBase.
+ *   - The actual distribution rate that Saturn is currently vesting to sUSDat holders.
+ *   - Supports both V1 (STRC vesting) and V2 (surplus vesting) sUSDat contracts.
+ *   - getAPRbase probes vestingPeriod() to detect V1. If gone, falls back to V2.
+ *   - This allows deploying the provider before Saturn upgrades to V2.
  *
- * @dev V2 Changes:
- *   - Removed: getStrcOracle() from vault — constructor no longer reads it
- *   - Removed: vestingPeriod(), lastDistributionTimestamp(), getUnvestedAmount() from vault
- *   - getAPRbase() always returns 0 (STRCon yield is continuous, not discrete)
- *   - The strcOracle immutable is removed from this contract
- *
- * TODO: Consider whether a V2-specific APR computation is needed that reads STRCon price
- *       changes over time, or whether the keeper-driven aprTarget is sufficient.
+ * V1: APR from STRC vesting state + STRC oracle price.
+ * V2: APR from USDat surplus vesting - purely USDat distribution, no token price.
  */
 contract SaturnAprPairProvider is IStrategyAprPairProvider {
     bytes32 public constant UPDATER_FEED_ROLE = keccak256("UPDATER_FEED_ROLE");
@@ -80,7 +86,7 @@ contract SaturnAprPairProvider is IStrategyAprPairProvider {
      * @notice Update the target APR (benchmark for Senior tranche)
      * @dev Called by the Keeper when STRC announces the dividends.
      *      Keeper reads currentDividend from STRC API and applies seniorShare ratio.
-     *      Example: currentDividend = 11.5%, seniorShare = 70% → aprTarget = 8.05%
+     *      Example: currentDividend = 11.5%, seniorShare = 70% -> aprTarget = 8.05%
      * @param newAprTarget The new target APR, scaled by 1e12
      */
     function setAprTarget(int64 newAprTarget) external onlyRole(UPDATER_FEED_ROLE) {
@@ -94,17 +100,91 @@ contract SaturnAprPairProvider is IStrategyAprPairProvider {
     }
 
     /**
-     * @notice Returns the base APR.
-     * @dev V2: STRCon yield is continuous in the token price (sValue accumulation),
-     *      so there is no discrete vesting event to annualize. Returns 0.
-     *      With riskPremium = 100%, Senior APR = max(aprTarget, aprBase * 0) = aprTarget.
-     *      This function is retained for interface compatibility and monitoring.
-     *
-     *      TODO: Consider computing a trailing STRCon yield from price changes
-     *      if an on-chain APR signal is needed beyond the keeper-driven aprTarget.
-     * @return apr Always returns 0 in V2
+     * @notice Returns the base APR - the actual distribution rate Saturn vests.
+     * @dev Probes vestingPeriod() to detect V1. If it exists, uses V1 path.
+     *      If vestingPeriod() is gone (post-upgrade), falls back to V2 path.
+     * @return apr The annualized base APR, scaled by 1e12. Returns 0 if no active vesting.
      */
-    function getAPRbase() public pure returns (int64) {
-        return 0;
+    function getAPRbase() public view returns (int64) {
+        (bool isV1, uint256 period) = _probeV1();
+        if (isV1) return _getAPRbaseV1(period);
+        return _getAPRbaseV2();
+    }
+
+    // ============ V1: STRC Vesting ============
+
+    /// @dev Probes whether sUSDat is V1 by calling vestingPeriod().
+    ///      Returns (true, period) if V1 or (false, 0) if the function is gone.
+    function _probeV1() internal view returns (bool ok, uint256 period) {
+        bytes memory data;
+        (ok, data) = address(sUSDat).staticcall(
+            abi.encodeCall(IsUSDatV1.vestingPeriod, ())
+        );
+        if (ok && data.length >= 32) {
+            period = abi.decode(data, (uint256));
+        } else {
+            ok = false;
+        }
+    }
+
+    /**
+     * @dev V1 base APR from STRC vesting state and STRC oracle price.
+     *      Called only when the V1 probe succeeds - all V1 functions must exist.
+     *      Formula: (unvestedStrc * strcPrice / 10^decimals) / remaining * YEAR / totalAssets
+     */
+    function _getAPRbaseV1(uint256 period) internal view returns (int64) {
+        if (period == 0) return 0;
+
+        IsUSDatV1 vault = IsUSDatV1(address(sUSDat));
+
+        uint256 lastDist = vault.lastDistributionTimestamp();
+        if (lastDist == 0) return 0;
+
+        uint256 elapsed = block.timestamp - lastDist;
+        if (elapsed >= period) return 0;
+
+        uint256 unvestedStrc = vault.getUnvestedAmount();
+        uint256 total = vault.totalAssets();
+        if (total == 0 || unvestedStrc == 0) return 0;
+
+        IStrcPriceOracle oracle = IStrcPriceOracle(vault.getStrcOracle());
+        (uint256 strcPrice, uint8 priceDecimals) = oracle.getPrice();
+        if (strcPrice == 0) return 0;
+
+        uint256 unvestedUsd = unvestedStrc * strcPrice / (10 ** priceDecimals);
+        uint256 remainingTime = period - elapsed;
+
+        uint256 apr = unvestedUsd * SECONDS_PER_YEAR * 1e12 / (remainingTime * total);
+        if (apr > BOUND_MAX) apr = BOUND_MAX;
+
+        return int64(int256(apr));
+    }
+
+    // ============ V2: Surplus Vesting ============
+
+    /**
+     * @dev V2 base APR from USDat surplus vesting - pure distribution, no token price.
+     *      Called only when V1 probe fails - sUSDat is V2, all V2 functions must exist.
+     *      Same pattern as Ethena's sUSDeAprPairProvider.
+     *      Formula: unvestedSurplus / remainingTime * SECONDS_PER_YEAR / totalAssets
+     */
+    function _getAPRbaseV2() internal view returns (int64) {
+        uint256 vestingPeriod = sUSDat.surplusVestingPeriod();
+        if (vestingPeriod == 0) return 0;
+
+        uint256 elapsed = block.timestamp - sUSDat.surplusVestingStartTimestamp();
+        if (elapsed >= vestingPeriod) return 0;
+
+        uint256 unvestedSurplus = sUSDat.getUnvestedSurplus();
+        if (unvestedSurplus == 0) return 0;
+
+        uint256 totalAssets = sUSDat.totalAssets();
+        if (totalAssets == 0) return 0;
+
+        uint256 remainingTime = vestingPeriod - elapsed;
+        uint256 apr = unvestedSurplus * SECONDS_PER_YEAR * 1e12 / (remainingTime * totalAssets);
+
+        if (apr > BOUND_MAX) apr = BOUND_MAX;
+        return int64(int256(apr));
     }
 }

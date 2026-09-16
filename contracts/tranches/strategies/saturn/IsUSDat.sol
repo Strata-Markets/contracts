@@ -32,6 +32,17 @@ interface IsUSDat is IERC4626 {
     /// @notice Internally tracked USDat balance (6 decimals)
     function usdatBalance() external view returns (uint256);
 
+    // ============ Surplus Vesting (V2 Distribution) ============
+
+    /// @notice Amount of USDat still unvested in the current surplus tranche (6 decimals)
+    function getUnvestedSurplus() external view returns (uint256);
+
+    /// @notice Timestamp when the current surplus vesting started
+    function surplusVestingStartTimestamp() external view returns (uint256);
+
+    /// @notice Duration of the surplus vesting window (default 3 days)
+    function surplusVestingPeriod() external view returns (uint256);
+
     // ============ Withdrawal Queue ============
 
     /// @notice Requests a withdrawal of the given shares via the async withdrawal queue
