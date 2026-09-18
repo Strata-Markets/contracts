@@ -54,7 +54,7 @@ export class SaturnDeployments extends DeploymentsBase<{
             arguments: [
                 acm.address,
                 sUSDat.address,
-                .075e12
+                .078e12
             ]
         });
 

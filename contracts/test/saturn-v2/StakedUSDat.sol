@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.36;
+pragma solidity ^0.8.28;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IERC20Metadata} from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -73,8 +73,8 @@ contract StakedUSDat is
     IWithdrawalQueueERC721 private immutable WITHDRAWAL_QUEUE;
 
     /// @dev Transaction-scoped queued-redemption price snapshot.
-    uint256 private transient _redemptionBatchAssetBasis;
-    uint256 private transient _redemptionBatchShareBasis;
+    uint256 private _redemptionBatchAssetBasis;
+    uint256 private _redemptionBatchShareBasis;
 
     /// @dev Mapping of blacklisted addresses
     mapping(address account => bool isBlacklisted) private _blacklisted;

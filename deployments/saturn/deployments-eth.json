@@ -268,14 +268,24 @@
     "id": "SaturnAprPairProvider",
     "name": "SaturnAprPairProvider",
     "main": "./0xc/hardhat/SaturnAprPairProvider/SaturnAprPairProvider.ts",
-    "bytecodeHash": "0x41fc24d1e3b7453df87b50f49103c41e60cba66582cab136c8473a5169e0fb6a",
-    "address": "0x4bcc15f6C0c63E511a1b55a7625f311a93854bE8",
-    "block": 24952878,
-    "tx": "0x5d4262995d2b85d560585d3f3adbecf3947e3b1fed5dfd89349769f90ec51157",
-    "gas": "515549",
+    "bytecodeHash": "0xc80bd1e626b47cc77e0e79aa36e9d44e140f248c13b4044c33ecda256a08280b",
+    "address": "0x81CCc891868194a5605DED10FDF5c77BB889cb01",
+    "block": 26003171,
+    "tx": "0x3004c8abfc8ea116a2013da4b8102338cb9aae5e5949f05a220125ee7cd7851c",
+    "gas": 656523,
     "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
-    "timestamp": 1777070425,
-    "verified": "2026-04-24T22:41:53.298Z"
+    "timestamp": 1789719876,
+    "verified": "2026-09-18T08:24:47.987Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/SaturnAprPairProvider/SaturnAprPairProvider.ts",
+        "address": "0x4bcc15f6C0c63E511a1b55a7625f311a93854bE8",
+        "block": 24952878,
+        "tx": "0x5d4262995d2b85d560585d3f3adbecf3947e3b1fed5dfd89349769f90ec51157",
+        "gas": "515549",
+        "verified": "2026-04-24T22:41:53.298Z"
+      }
+    ]
   },
   {
     "id": "SaturnAprFeeds",
