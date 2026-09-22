@@ -84,18 +84,19 @@ export class MM1UsdDeployments extends DeploymentsBase<{
                 id: 'MockMM1USD',
                 arguments: [],
             });
+            const oracle = await this.ds.ensureContract(MockOracle, {
+                id: 'MockMM1USDOracle',
+                arguments: [],
+            });
             const midasDepositVault = await this.ds.ensureContract(MockDepositVault, {
                 id: 'MockMM1USDDepositVault',
-                arguments: [mM1USD.address],
+                arguments: [mM1USD.address, oracle.address],
             });
             const midasRedemptionVault = await this.ds.ensureContract(MockRedemptionVault, {
                 id: 'MockMM1USDRedemptionVault',
                 arguments: [mM1USD.address, USDC.address, $address.ZERO],
             });
-            const oracle = await this.ds.ensureContract(MockOracle, {
-                id: 'MockMM1USDOracle',
-                arguments: [],
-            });
+
 
             return {
                 base: USDC as any,

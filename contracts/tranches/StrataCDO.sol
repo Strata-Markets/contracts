@@ -10,7 +10,9 @@ pragma solidity ^0.8.28;
 */
 
 import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
+import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import { AccessControlled } from "../governance/AccessControlled.sol";
 import { IErrors } from "./interfaces/IErrors.sol";
 import { ITranche } from "./interfaces/ITranche.sol";
@@ -19,6 +21,8 @@ import { IStrataCDO, IStrataCDOSetters } from "./interfaces/IStrataCDO.sol";
 import { TActionState } from "./structs/TActionState.sol";
 import { IAccounting } from "./interfaces/IAccounting.sol";
 import { ISharesCooldown } from "./interfaces/cooldown/ISharesCooldown.sol";
+import { IInsuranceMiddleware } from "./symbiotic/interfaces/IInsuranceMiddleware.sol";
+import { IInsuranceVault } from "./symbiotic/interfaces/IInsuranceVault.sol";
 import { RoundingGuard } from "./utils/RoundingGuard.sol";
 
 
@@ -65,12 +69,33 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
 
     ISharesCooldown public sharesCooldown;
 
+    /// @dev The Symbiotic insurance middleware receiving underwriter fee payments
+    IInsuranceMiddleware public insuranceMiddleware;
+
+    /// @dev When true, accrued underwriter fee is sent to `underwriterFeeRewardSafe` for manual distribution in
+    ///      Strata assets (via the Symbiotic UI). When false (default), it flows to the Symbiotic
+    ///      AppAdapter for the automatic CoWSwap convert-to-vault-asset reward flow.
+    bool public manualUnderwriterFeeDistribution;
+
+    /// @dev Receiver of the underwriter fee when `manualUnderwriterFeeDistribution` is true (a dedicated safe).
+    address public underwriterFeeRewardSafe;
+
+    /// @dev Holds the swapped coverage assets backing `accounting.insuranceAmount` and pays a
+    ///      redeeming Senior its covered slice. Never part of the strategy, so never part of nav.
+    IInsuranceVault public insuranceVault;
+
     uint256 public immutable baseAssetDecimals;
 
     event DepositsStateChanged(address indexed tranche, bool enabled);
     event WithdrawalsStateChanged(address indexed tranche, bool enabled);
     event ReserveReduced(address token, uint256 amount);
     event ReserveDistributed(uint256 jrtAmount, uint256 srtAmount);
+    event UnderwriterFeePaid(address token, uint256 tokenAmount, uint256 baseAssets);
+    event InsuranceConfigSet(address insuranceMiddleware, address insuranceVault);
+    event ManualUnderwriterFeeDistributionSet(bool enabled);
+    event UnderwriterFeeRewardSafeSet(address safe);
+    event UnderwriterFeePercentageChanged(uint256 fee);
+    event InsuranceClaimFunded(address token, uint256 amount, uint256 baseAssets);
     event TreasurySet(address treasury);
     event ShortfallPaused();
     event JrtShortfallPausePriceSet(uint256 pricePerShare);
@@ -333,15 +358,32 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         // When the sender is the shares lockup contract, we should skip any cooldown on our side,
         // unless the underlying protocol has some cooldown/unstake process.
         bool shouldSkipCooldown = isSharesLockup == true;
-        if (strategyOptions.length == 0) {
-            // Support older strategies that don't accept options.
-            strategy.withdraw(tranche, token, tokenAmount, baseAssets, sender, receiver, shouldSkipCooldown);
-        } else {
-            strategy.withdraw(tranche, token, tokenAmount, baseAssets, sender, receiver, shouldSkipCooldown, strategyOptions);
-        }
+
+        // Book the flow first: it reports how much of this Senior exit is backed by the coverage
+        // claim rather than the strategy, and clears that slice from insuranceAmount.
         uint256 jrtAssetsOut = isJrt_ ? baseAssets : 0;
         uint256 srtAssetsOut = isJrt_ ? 0          : baseAssets;
-        accounting.updateBalanceFlow(0, jrtAssetsOut, 0, srtAssetsOut);
+        uint256 insuranceBaseOut = accounting.updateBalanceFlow(0, jrtAssetsOut, 0, srtAssetsOut);
+
+        // The covered slice is paid from the vault in the coverage token; only the remainder comes
+        // out of the strategy. payCoverage reverts while the claim is unfunded, so the keeper must
+        // finalize the Symbiotic claim before Senior redemptions can clear.
+        uint256 baseAssetsFromStrategy = baseAssets - insuranceBaseOut;
+        if (insuranceBaseOut > 0) {
+            if (address(insuranceVault) == address(0)) {
+                revert ZeroAddress();
+            }
+            // Revert here if funds are not yet in the insurance fund
+            insuranceVault.payCoverage(_baseToCoverage(insuranceBaseOut), receiver);
+        }
+
+        if (baseAssetsFromStrategy > 0) {
+            if (strategyOptions.length == 0) {
+                strategy.withdraw(tranche, token, tokenAmount, baseAssetsFromStrategy, sender, receiver, shouldSkipCooldown);
+            } else {
+                strategy.withdraw(tranche, token, tokenAmount, baseAssetsFromStrategy, sender, receiver, shouldSkipCooldown, strategyOptions);
+            }
+        }
         shortfallPauser();
     }
 
@@ -447,6 +489,125 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         // The accounting contract reverts if reserves are insufficient.
         accounting.reduceReserve(jrtAmountIn + srtAmountIn, jrtAmountIn, srtAmountIn);
         emit ReserveDistributed(jrtAmountIn, srtAmountIn);
+    }
+
+    /// @notice Pays the accrued underwriter fee to the Symbiotic underwriters
+    /// @dev Only callable by RESERVE_MANAGER_ROLE. Books the outflow against the underwriter fee bucket,
+    ///      then transfers the tokens from the strategy to the receiver chosen by
+    ///      `manualUnderwriterFeeDistribution`: the AppAdapter (automatic CoWSwap convert flow, default) or
+    ///      `underwriterFeeRewardSafe` (manual distribution in Strata assets via the Symbiotic UI). A plain
+    ///      transfer to the AppAdapter is equivalent to AppAdapter.reward(), which only pulls tokens.
+    /// @param token The token to pay the underwriter fee in
+    function payUnderwriterFee (address token) external onlyRole(RESERVE_MANAGER_ROLE) {
+        address receiver = _underwriterFeeReceiver();
+        // The full accrued underwriter fee bucket, in base assets
+        uint256 baseAssets = accounting.totalUnderwriterFeeNav();
+        if (baseAssets == 0) {
+            revert ZeroAmount();
+        }
+        // Reverts if the token is not supported. Convert to tokens and back so the booked
+        // reduction matches the transferred amount exactly; rounding dust stays in the bucket.
+        uint256 tokenAmount = strategy.convertToTokens(token, baseAssets, Math.Rounding.Floor);
+        uint256 baseAssetsNet = strategy.convertToAssets(token, tokenAmount, Math.Rounding.Floor);
+        accounting.reduceUnderwriterFee(baseAssetsNet);
+        // Transfers tokens out instantly if possible, or through the cooldown process
+        strategy.reduceReserve(token, tokenAmount, receiver);
+        emit UnderwriterFeePaid(token, tokenAmount, baseAssetsNet);
+    }
+
+    /// @notice Resolves the underwriter fee receiver from `manualUnderwriterFeeDistribution`.
+    /// @dev Manual mode routes to the dedicated safe; automatic mode to the Symbiotic AppAdapter
+    ///      (resolved via the insurance middleware). Reverts if the selected target is unset.
+    function _underwriterFeeReceiver () internal view returns (address) {
+        if (manualUnderwriterFeeDistribution) {
+            if (underwriterFeeRewardSafe == address(0)) {
+                revert ZeroAddress();
+            }
+            return underwriterFeeRewardSafe;
+        }
+        if (address(insuranceMiddleware) == address(0)) {
+            revert ZeroAddress();
+        }
+        address appAdapter = address(insuranceMiddleware.appAdapter());
+        if (appAdapter == address(0)) {
+            revert ZeroAddress();
+        }
+        return appAdapter;
+    }
+
+    /// @notice Finalizes a Symbiotic claim: funds the insurance vault with the swapped proceeds.
+    /// @dev Only callable by RESERVE_MANAGER_ROLE, the multisig that holds the slashed uniBTC and
+    ///      swaps it. The proceeds deliberately never enter the strategy: on a loss the underlying is
+    ///      usually the impaired asset, so buying back into it would expose Senior to a further drop.
+    ///      The outstanding `insuranceAmount` is therefore left open and settles by paying redeeming
+    ///      Seniors their covered slice from the vault. The caller MUST approve this contract for
+    ///      `amount` of `token` beforehand.
+    /// @param token The coverage token the uniBTC was swapped into (e.g. USDC).
+    /// @param amount The funded amount, in `token` units.
+    function fundInsuranceClaim (address token, uint256 amount) external onlyRole(RESERVE_MANAGER_ROLE) nonReentrant {
+        if (amount == 0) {
+            revert ZeroAmount();
+        }
+        if (address(insuranceMiddleware) == address(0) || address(insuranceVault) == address(0)) {
+            revert ZeroAddress();
+        }
+        // Straight from the multisig into the vault, so only this contract needs an approval.
+        SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(insuranceVault), amount);
+        insuranceVault.recordFunding(token, amount);
+        // The middleware tracks the in-flight claim in base assets, so value the proceeds there too.
+        uint256 baseAssets = _coverageToBase(amount);
+        insuranceMiddleware.confirmInsuranceClaimFunding(address(this), baseAssets);
+        emit InsuranceClaimFunded(token, amount, baseAssets);
+    }
+
+    /// @notice Converts a base-asset amount into coverage-token units at the current valuation price.
+    /// @dev The claim is denominated in base assets, the vault holds a stablecoin: a base token is
+    ///      worth `valuationPrice` of it, so a de-pegged claim needs proportionally less coverage.
+    function _baseToCoverage (uint256 baseAmount) internal view returns (uint256) {
+        uint256 usd = Math.mulDiv(baseAmount, accounting.valuationPrice(), 1e18);
+        return Math.mulDiv(usd, 10 ** insuranceVault.coverageTokenDecimals(), 10 ** baseAssetDecimals);
+    }
+
+    /// @notice Inverse of {_baseToCoverage}.
+    function _coverageToBase (uint256 coverageAmount) internal view returns (uint256) {
+        uint256 usd = Math.mulDiv(
+            coverageAmount,
+            10 ** baseAssetDecimals,
+            10 ** insuranceVault.coverageTokenDecimals()
+        );
+        return Math.mulDiv(usd, 1e18, accounting.valuationPrice());
+    }
+
+    /// @notice Sets the Symbiotic insurance middleware and the vault backing `accounting.insuranceAmount`.
+    function setInsuranceConfig (
+        IInsuranceMiddleware insuranceMiddleware_,
+        IInsuranceVault insuranceVault_
+    ) external onlyOwner {
+        insuranceMiddleware = insuranceMiddleware_;
+        insuranceVault = insuranceVault_;
+        accounting.setInsurancePool(insuranceMiddleware_);
+        emit InsuranceConfigSet(address(insuranceMiddleware_), address(insuranceVault_));
+    }
+
+    /// @notice Toggles underwriter fee routing between the AppAdapter (automatic) and the reward safe (manual)
+    /// @param enabled True routes underwriter fee to `underwriterFeeRewardSafe`; false to the Symbiotic AppAdapter
+    function setManualUnderwriterFeeDistribution (bool enabled) external onlyOwner {
+        manualUnderwriterFeeDistribution = enabled;
+        emit ManualUnderwriterFeeDistributionSet(enabled);
+    }
+
+    /// @notice Sets the dedicated safe that receives the underwriter fee in manual distribution mode
+    function setUnderwriterFeeRewardSafe (address safe) external onlyOwner {
+        underwriterFeeRewardSafe = safe;
+        emit UnderwriterFeeRewardSafeSet(safe);
+    }
+
+    function setUnderwriterFeeBps (uint256 fee) external {
+        if (address(insuranceMiddleware) != msg.sender) {
+            revert InvalidCaller(msg.sender);
+        }
+        accounting.setUnderwriterFeeBps(fee);
+        emit UnderwriterFeePercentageChanged(fee);
     }
 
     /// @notice Sets the address of the reserve treasury

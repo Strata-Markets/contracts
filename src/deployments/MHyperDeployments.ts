@@ -98,12 +98,17 @@ export class MHyperDeployments extends DeploymentsBase<{
                 arguments: ['USDS', 18]
             });
 
+            const oracle = await this.ds.ensureContract(MockOracle);
+
             const mHYPER = await this.ds.ensureContract(MockMToken);
             const midasDepositVault = await this.ds.ensureContract(MockDepositVault, {
-                arguments: [ mHYPER.address ]
+                arguments: [
+                    mHYPER.address,
+                    oracle.address,
+                ]
             });
 
-            const oracle = await this.ds.ensureContract(MockOracle);
+
             const midasRedemptionVault = await this.ds.ensureContract(MockRedemptionVault, {
                 arguments: [
                     mHYPER.address,

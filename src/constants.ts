@@ -18,6 +18,9 @@ export const Addresses = {
         AavePool: '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2',
 
         SparkUSDCVault: '0x28B3a8fb53B741A8Fd78c0fb9A6B2393d896a43d',
+
+        // Symbiotic coverage vault asset
+        uniBTC: '0x004E9C3EF86bc1ca1f0bB5C7662861Ee93350568',
     },
     hoodi: {
         USDe: "0x7054A803361640970176Edbd91992DcC52B7D235",
@@ -37,4 +40,21 @@ export const Addresses = {
     NUSD?: TEth.Address;
     sNUSD?: TEth.Address;
     SparkUSDCVault?: TEth.Address;
+    uniBTC?: TEth.Address;
 }>;
+
+/// A Chainlink push feed (AggregatorV3 with latestRoundData).
+export interface IChainlinkFeed {
+    address: TEth.Address;
+    decimals: number;
+}
+
+/// Chainlink feeds used by the Symbiotic OracleAdapter
+export const ChainlinkFeeds = {
+    eth: {
+        'USDe/USD':   { address: '0xa569d910839Ae8865Da8F8e70FfFb0cBA869F961', decimals: 8 },
+        'USDC/USD':   { address: '0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6', decimals: 8 },
+        'uniBTC/BTC': { address: '0x861d15F8a4059cb918bD6F3670adAEB1220B298f', decimals: 18 },
+        'BTC/USD':    { address: '0xF4030086522a5bEEa4988F8cA5B36dbC97BeE88c', decimals: 8 },
+    },
+} as Record<string, Record<string, IChainlinkFeed>>;
