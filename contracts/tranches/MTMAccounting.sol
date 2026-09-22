@@ -9,6 +9,7 @@ import {IAprPairFeed} from "./interfaces/IAprPairFeed.sol";
 import {CDOComponent} from "./base/CDOComponent.sol";
 import {UD60x18Ext} from "./utils/UD60x18Ext.sol";
 import {AccountingLib} from "./utils/AccountingLib.sol";
+import {IRiskPremiumModel} from "./accounting/premium/IRiskPremiumModel.sol";
 import {IInsurancePool} from "./symbiotic/interfaces/IInsurancePool.sol";
 
 /**
@@ -207,9 +208,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
     ///      0 means rate tracking is not enabled; the proportional nav-time formula is used instead.
     uint256 public strategyRate;
 
-    /// @dev Reserved so the Symbiotic block below lands on the same slots as the other accounting
-    ///      variants, where this slot holds riskPremiumModel. Unused here.
-    uint256 private __gap_riskPremiumModel;
+    /// @notice Optional external risk premium model.
+    /// @dev When unset, accounting falls back to the legacy `x + y * TVL_ratio_sr^k`
+    ///      model configured by `riskX`, `riskY`, and `riskK`.
+    IRiskPremiumModel public riskPremiumModel;
 
     /* Underwriter Fee (Symbiotic) Parameters */
 
@@ -275,6 +277,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
     event UnderwriterFeeReduced(uint256 amount);
     event InsuranceClaimed(uint256 amount, uint256 insuranceAmount);
     event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
+    event RiskModelChanged(address riskPremiumModel);
     event MinimumJrtSrtRatioChanged(uint256 ratio);
     event MinimumJrtSrtRatioBufferChanged(uint256 ratio);
     event FeeAccrued(
@@ -1752,6 +1755,11 @@ contract MTMAccounting is IAccounting, CDOComponent {
         UD60x18 tvlRatio = UD60x18.wrap(
             srtEffective == 0 ? 0 : ((srtEffective * 1e18) / (srtEffective + jrtEffective))
         );
+
+        if (address(riskPremiumModel) != address(0)) {
+            return riskPremiumModel.riskPremium(tvlRatio);
+        }
+
         UD60x18 riskPremium = calculateRiskPremiumInner(
             riskX,
             riskY,
@@ -1875,6 +1883,20 @@ contract MTMAccounting is IAccounting, CDOComponent {
         require(risk.unwrap() < PERCENTAGE_100, ">=100%");
         emit RiskParametersChanged(riskX_, riskY_, riskK_);
         updateAprSrt(aprTarget, aprBase);
+    }
+
+    /// @notice Sets the optional external risk premium model.
+    /// @dev Set to the zero address to use the legacy `x + y * TVL_ratio_sr^k` model.
+    /// @param riskPremiumModel_ External model contract, or zero address for the legacy model.
+    function setRiskModel(IRiskPremiumModel riskPremiumModel_) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
+        if (address(riskPremiumModel_) != address(0)) {
+            UD60x18 risk = riskPremiumModel_.riskPremium(UD60x18.wrap(1e18));
+            require(risk.unwrap() < PERCENTAGE_100, ">=100%");
+        }
+        riskPremiumModel = riskPremiumModel_;
+        emit RiskModelChanged(address(riskPremiumModel_));
     }
 
     /// @notice Sets the APR feed contract for fetching APR target and APR base.
