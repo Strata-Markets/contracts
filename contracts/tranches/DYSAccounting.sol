@@ -1387,6 +1387,16 @@ contract DYSAccounting is IAccounting, CDOComponent {
         _persistInsuranceClaim(underwriterFeeNavT1, state.insuranceAmount, insuranceAmountT1);
 
         if (isReconciliation) {
+            emit Reconciled(
+                epochStart,
+                block.timestamp,
+                nav,
+                navT1,
+                jrtNavT1Real,
+                srtNavT1,
+                reserveNavT1
+            );
+
             // Track projected PnL increment for the next epoch
             // The calculateNAVSplitProjected during the epoch accumulated srtPnLProjected
             // At reconciliation, the true-up was already applied, so reset

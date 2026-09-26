@@ -9,6 +9,15 @@ interface IAccounting is ICDOComponent, IAprPairFeedListener {
 
     event ValuationPriceChanged(uint256 valuationPrice);
     event ValuationGracePeriodChanged(uint64 period);
+    event Reconciled(
+        uint256 epochStart,
+        uint256 epochEnd,
+        uint256 navT0,
+        uint256 navT1,
+        uint256 jrtNav,
+        uint256 srtNav,
+        uint256 reserveNav
+    );
 
     function updateAccounting () external;
     function updateBalanceFlow (

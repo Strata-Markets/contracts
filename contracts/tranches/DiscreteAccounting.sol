@@ -122,7 +122,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     uint256 public feeWatermarkNav;
 
     /// @notice Timestamp of the last successful NAV reconciliation.
-    /// @dev Only used when useNavAtReconciliation is true. Passed to totalStrategyAssets so
+    /// @dev Used for reconciliations when useNavAtReconciliation is true. Passed to totalStrategyAssets so
     ///      sub-strategies gate their reward signal on this value, which only advances when
     ///      real rewards are detected — not on every deposit.
     uint256 public lastReconciliation;
@@ -221,9 +221,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         }
         valuationPrice = 1e18;
         feeWatermarkNav = nav;
-        if (useNavAtReconciliation) {
-            lastReconciliation = navTimestamp;
-        }
+        lastReconciliation = navTimestamp;
         migrationBitmap |= MIGRATION_V2;
     }
 
@@ -814,10 +812,22 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             uint256 insuranceAmountT1
         ) = calculateNAVSplit(nav, jrtNavProjected, jrtBaseNav, srtBaseNav, reserveNav, underwriterFeeNav, insuranceAmount, navT1);
         updateIndex();
-        if (useNavAtReconciliation && navT1 != nav) lastReconciliation = block.timestamp;
-        if (navT1 != nav && navT1 > feeWatermarkNav) {
-            feeWatermarkNav = navT1;
+        if (navT1 != nav) {
+            emit Reconciled(
+                lastReconciliation,
+                block.timestamp,
+                nav,
+                navT1,
+                jrtNavT1Real,
+                srtNavT1,
+                reserveNavT1
+            );
+            lastReconciliation = block.timestamp;
+            if (navT1 > feeWatermarkNav) {
+                feeWatermarkNav = navT1;
+            }
         }
+
         nav = navT1;
         navTimestamp = block.timestamp;
         srtBaseNav = srtNavT1;
