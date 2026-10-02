@@ -137,12 +137,12 @@ contract MockNestVaultPredicateProxy {
         uint256 depositAmount,
         address recipient,
         address /* nestVault */,
-        PredicateMessage calldata predicateMessage
+        bytes calldata predicateMessage
     ) external returns (uint256 shares) {
         if (rejectDeposits) revert DepositRejected();
 
-        // Predicate message must have a non-empty taskId (simulates compliance check)
-        if (bytes(predicateMessage.taskId).length == 0) revert InvalidPredicateMessage();
+        // Predicate message must be non-empty
+        if (bytes(predicateMessage).length == 0) revert InvalidPredicateMessage();
 
         // Pull deposit asset from caller
         IERC20(depositAsset).safeTransferFrom(msg.sender, address(this), depositAmount);

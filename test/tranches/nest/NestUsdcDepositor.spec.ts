@@ -14,6 +14,7 @@ import { $test } from '../utils/$test';
 const test = await $hh.create('nestopal', {
     forked: 'latest',
     fresh: true,
+    chainId: 1,
 });
 
 UTest.create({

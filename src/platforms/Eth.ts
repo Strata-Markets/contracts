@@ -104,7 +104,8 @@ export const Eth: IPlatform = {
     nestopal: {
         nOPAL: '0x119Dd7dAFf816f29D7eE47596ae5E4bdC4299165',
         accountant: '0x2Ed2f77a961fc92F73D1087786099c39C894Ed1D',
-        predicateProxy: '0xfc0c4222b3a0c9b060c0b959dec62442036b9035',
+        //predicateProxyV0: '0xfc0c4222b3a0c9b060c0b959dec62442036b9035',
+        predicateProxy: '0xb65b65cff0ca1f3cc12fe58a13110e43dfa999f1',
         teller: '0xA5F8e5843dd597a179453bF782844e8Bf808A90b',
         nestVault: '0xd258029cf5a177e3306e09fbea63424543a505c0',
     },

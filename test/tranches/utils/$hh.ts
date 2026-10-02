@@ -52,6 +52,9 @@ export namespace $hh {
         accounts?: TCDOKey | 'operator' | 'deployer'
         // Relevant for forked tests: when true, all contracts being redeployed, otherwise will reuse existing contracts
         fresh?: boolean
+        // The default Hardhat chainId is 31337. This creates a new Hardhat instance with the overridden chainId.
+        // Required for forked networks that include the chainId in signatures.
+        chainId?: 1 | number
     }
 
     export function create<T extends TCDOKey>(cdo: T, params?: ITestParams) {
@@ -112,7 +115,10 @@ export namespace $hh {
 
             const client = this.params?.forked == null
                 ? await getClient()
-                : await hh.forked({ platform: 'eth', block: this.params.forked });
+                : await (this.params.chainId
+                    ? hh.createFork({ chainId: this.params.chainId, platform: 'eth', block: this.params.forked })
+                    : hh.forked({ platform: 'eth', block: this.params.forked })
+                );
 
             if (this.params?.forked != null) {
                 client.configureFork('eth');
