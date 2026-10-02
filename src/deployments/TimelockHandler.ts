@@ -16,7 +16,7 @@ export class TimelockHandler {
     }
 
     async get () {
-        let timelockAcc = await ChainAccountService.get('timelock/eth/strata');
+        let timelockAcc = await ChainAccountService.get(`timelock/${this.ds.client.network}/strata`);
         return new StrataMasterChef(timelockAcc.address, this.ds.client);
     }
 

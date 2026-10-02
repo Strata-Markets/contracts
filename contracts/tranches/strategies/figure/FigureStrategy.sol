@@ -391,6 +391,7 @@ contract FigureStrategy is Strategy {
 
         bool isDisabled = primeCooldownJrt_ == 0 && primeCooldownSrt_ == 0;
         erc20Cooldown.setCooldownDisabled(stakingVault, isDisabled);
+        erc20Cooldown.setCooldownDisabled(yieldVault, isDisabled);
         emit CooldownsChanged(primeCooldownJrt_, primeCooldownSrt_);
     }
 

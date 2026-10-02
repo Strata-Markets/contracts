@@ -254,9 +254,8 @@ contract SparkUSDCStrategy is Strategy {
     }
 
     function getSupportedTokens() external view returns (IERC20[] memory) {
-        IERC20[] memory tokens = new IERC20[](2);
+        IERC20[] memory tokens = new IERC20[](1);
         tokens[0] = USDC;
-        tokens[1] = IERC20(address(spVault));
         return tokens;
     }
 
