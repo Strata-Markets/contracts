@@ -24,6 +24,7 @@ import { l } from 'dequanto/utils/$logger';
 import { NestOpalDepositAdapter } from '@0xc/hardhat/NestOpalDepositAdapter/NestOpalDepositAdapter';
 import { Eth } from '@s/platforms/Eth';
 import { ERC20 } from 'dequanto/prebuilt/openzeppelin/ERC20';
+import { Tranche } from '@0xc/hardhat/Tranche/Tranche';
 
 
 type TUnderlyingContracts = {
@@ -162,18 +163,22 @@ export class NestOpalDeployments extends DeploymentsBase<{
 
     async configureDepositor(depositor: TrancheDepositor) {
         let { USDC } = await this.ensureUnderlying();
-        let { cdo, jrtVault } = await this.ensureCDO();
+        let [ cdo, jrtVault ] = await Promise.all([
+            this.get(StrataCDO),
+            this.get(Tranche, { id: 'Jrt' })
+        ]);
 
         let config = await depositor.trancheAdapterSwaps(jrtVault.address, USDC.address);
-        if (config.adapter == $address.ZERO) {
-            const depositorProxy = await this.ds.ensureContract(NestOpalDepositAdapter, {
-                arguments: [
-                    Eth.nestopal.predicateProxy,
-                    Eth.nestopal.nestVault,
-                    Eth.nestopal.nOPAL,
-                ]
-            });
-            await depositor.$receipt().addCdoAdapterSwap(this.owner, cdo.address, USDC.address, {
+        const depositorProxy = await this.ds.ensureContract(NestOpalDepositAdapter, {
+            arguments: [
+                Eth.nestopal.predicateProxy,
+                Eth.nestopal.nestVault,
+                Eth.nestopal.nOPAL,
+            ]
+        });
+        if ($address.eq(config.adapter, depositorProxy.address) === false) {
+            let account = await this.getAccountByRole('DEPOSITOR_CONFIG_ROLE');
+            await depositor.$receipt().addCdoAdapterSwap(account, cdo.address, USDC.address, {
                 adapter: depositorProxy.address,
                 minimumReturnPercentage: 900,
                 tokenOut: Eth.nestopal.nOPAL
