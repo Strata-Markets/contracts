@@ -1126,19 +1126,19 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     }
 
     function _resyncSrtFundNav(uint128 price) internal {
-        _resyncInsuranceFundNav(price);
         uint256 fundedGrossNav = srtFundedGrossNav;
-        if (fundedGrossNav == 0) {
-            return;
+        if (fundedGrossNav > 0) {
+            if (price == 1e18) {
+                srtFundedGrossNav = 0;
+                srtFundNav = 0;
+            } else {
+                // Senior deposits self-fund only the valuation loss that existed at deposit time.
+                // On further de-peg, Junior still covers the additional Senior loss.
+                srtFundNav = Math.min(srtFundNav, Math.mulDiv(fundedGrossNav, 1e18 - price, price));
+            }
         }
-        if (price == 1e18) {
-            srtFundedGrossNav = 0;
-            srtFundNav = 0;
-            return;
-        }
-        // Senior deposits self-fund only the valuation loss that existed at deposit time.
-        // On further de-peg, Junior still covers the additional Senior loss.
-        srtFundNav = Math.min(srtFundNav, Math.mulDiv(fundedGrossNav, 1e18 - price, price));
+        // Size retained insurance using Senior's self-funded coverage at the new price.
+        _resyncInsuranceFundNav(price);
     }
 
     /// @notice On re-peg the Senior valuation shortfall shrinks; unwind the Symbiotic-covered part and
@@ -1153,10 +1153,16 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         uint256 stillNeeded = 0;
         if (price < 1e18) {
             uint256 srtPrincipal = Math.saturatingSub(srtBaseNav, fund);
-            uint256 extraNeeded = Math.saturatingSub(Math.mulDiv(srtPrincipal, 1e18, price), srtBaseNav);
-            extraNeeded = Math.saturatingSub(extraNeeded, srtFundNav);
-            stillNeeded = Math.saturatingSub(extraNeeded, Math.saturatingSub(jrtBaseNav, ONE_ASSET));
-            stillNeeded = Math.min(stillNeeded, fund);
+            uint256 insuranceNeeded = Math.saturatingSub(
+                Math.mulDiv(srtPrincipal, 1e18, price),
+                srtPrincipal
+            );
+            insuranceNeeded = Math.saturatingSub(insuranceNeeded, srtFundNav);
+            insuranceNeeded = Math.saturatingSub(
+                insuranceNeeded,
+                Math.saturatingSub(jrtBaseNav, ONE_ASSET)
+            );
+            stillNeeded = Math.min(insuranceNeeded, fund);
         }
         if (fund > stillNeeded) {
             uint256 unwound = Math.min(fund - stillNeeded, insuranceAmount);
