@@ -1700,6 +1700,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
         lastAccrual = timestamp;
         srtBaseNav = srtNavT1;
         jrtNavProjected = jrtNavT1Projected;
+        // Require a decrease to the floor or below so an empty market does not suspend fees.
+        if (jrtNavT1Real <= ONE_ASSET && jrtNavT1Real < jrtBaseNav) {
+            _disablePerformanceFee();
+        }
         jrtBaseNav = jrtNavT1Real;
         reserveNav = reserveNavT1;
 
@@ -2012,12 +2016,24 @@ contract MTMAccounting is IAccounting, CDOComponent {
         emit MinimumJrtSrtRatioBufferChanged(ratio);
     }
 
+    /// @dev Suspends performance fees after a loss; only setReserveBps can re-enable them.
+    function _disablePerformanceFee() internal {
+        if (reserveBps == 0) {
+            return;
+        }
+        reserveBps = 0;
+        emit ReservePercentageChanged(0);
+    }
+
     /// @notice Sets the valuation price for the base asset.
     function setValuationPrice (uint128 price) external onlyCDO returns (bool){
         bool isValuationLossPeriod = valuationPrice < 1e18;
         bool valuationLossEntered = isValuationLossPeriod == false && price < 1e18;
         // Allow the valuation price in range 0.0001-1
         require(0.0001e18 <= price && price <= 1e18, "InvalidValuationPrice");
+        if (price < 1e18) {
+            _disablePerformanceFee();
+        }
         _resyncsrtFundNav(price);
         valuationPrice = price;
         valuationUpdatedAt = uint64(block.timestamp);
