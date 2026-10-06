@@ -1199,9 +1199,9 @@ contract MTMAccounting is IAccounting, CDOComponent {
             jrtNavT1Projected,
             jrtNavT1Real,
             srtNavT1,
-            ,
-            underwriterFeeNavT1,
-            insuranceAmountT1
+            , // reserveNavT1
+            , // underwriterFeeNavT1
+              // insuranceAmountT1
         ) = calculateNAVSplitReconciliation(
                 navT0,
                 jrtNavT0Projected,
@@ -1213,16 +1213,22 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 state
             );
 
-        // No changes to reserve on MTM Projection
+        // Keep the reserve, underwriter fees, and insurance claim unchanged during MTM projection
         reserveNavT1 = reserveNavT0;
+        underwriterFeeNavT1 = state.underwriterFeeNav;
+        insuranceAmountT1 = state.insuranceAmount;
 
-        // Reflect Senior MTM projected movement in Junior real NAV.
+        // Reflect Senior MTM projected movement in Junior real NAV
         if (srtNavT1 >= srtNavT0) {
             uint256 srtProjection = srtNavT1 - srtNavT0;
-            jrtNavT1Real = jrtNavT0Real - Math.min(
+            // Cap Senior's projected gain at Junior's available coverage above ONE_ASSET
+            uint256 fundedProjection = Math.min(
                 srtProjection,
                 Math.saturatingSub(jrtNavT0Real, ONE_ASSET)
             );
+            jrtNavT1Real = jrtNavT0Real - fundedProjection;
+            srtNavT1 = srtNavT0 + fundedProjection;
+
         } else {
             jrtNavT1Real = jrtNavT0Real + (srtNavT0 - srtNavT1);
         }
