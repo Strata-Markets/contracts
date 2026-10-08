@@ -1369,17 +1369,17 @@ contract MTMAccounting is IAccounting, CDOComponent {
         int256 pnl = int256(navT1) - int256(navT0);
         insuranceAmountT1 = state.insuranceAmount;
 
-        // A gain first unwinds any outstanding coverage claim (recovery of a previously covered
-        // loss) before it is distributed to the reserve and tranches.
+        // Gains repay only NAV-loss claims; valuation claims unwind with their credit through price updates.
         if (pnl > 0 && insuranceAmountT1 > 0) {
-            uint256 unwind = Math.min(uint256(pnl), insuranceAmountT1);
+            uint256 realizedClaim = Math.saturatingSub(insuranceAmountT1, srtInsuranceFundNav);
+            uint256 unwind = Math.min(uint256(pnl), realizedClaim);
             insuranceAmountT1 -= unwind;
             pnl -= int256(unwind);
         }
         // Reserve allocation
         uint256 reserve_dT = 0;
         if (pnl > 0 && navT1 > state.feeWatermarkNav && reserveBps > 0) {
-            uint256 feeableGain = navT1 - state.feeWatermarkNav;
+            uint256 feeableGain = Math.min(uint256(pnl), navT1 - state.feeWatermarkNav);
             reserve_dT = feeableGain * reserveBps / PERCENTAGE_100;
             pnl -= int256(reserve_dT);
         }

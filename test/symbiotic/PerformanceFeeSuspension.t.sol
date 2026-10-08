@@ -108,7 +108,7 @@ contract PerformanceFeeSuspensionTest is Test {
             assertEq(accounting.reserveBps(), 0);
             mockStrategyTvl += 100e18;
             accounting.updateAccounting();
-            assertEq(accounting.insuranceAmount(), 401e18, "yield still repays insurance first");
+            assertEq(accounting.insuranceAmount(), 501e18, "yield preserves valuation coverage");
             assertEq(accounting.reserveNav(), 0);
         }
     }

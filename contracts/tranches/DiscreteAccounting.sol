@@ -617,9 +617,10 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         }
         uint256 gain_dTAbs = uint256(gain_dT);
 
-        // A gain first unwinds any outstanding insurance claim before distribution.
+        // Gains repay only NAV-loss claims; valuation claims unwind with their credit through price updates.
         if (gain_dTAbs > 0 && insuranceAmountT1 > 0) {
-            uint256 unwind = Math.min(gain_dTAbs, insuranceAmountT1);
+            uint256 realizedClaim = Math.saturatingSub(insuranceAmountT1, srtInsuranceFundNav);
+            uint256 unwind = Math.min(gain_dTAbs, realizedClaim);
             insuranceAmountT1 -= unwind;
             gain_dTAbs -= unwind;
         }
@@ -627,7 +628,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         // #1 Final new reserve
         uint256 reserve_dT = 0;
         if (navT1 > feeWatermarkNav && reserveBps > 0) {
-            uint256 feeableGain = navT1 - feeWatermarkNav;
+            uint256 feeableGain = Math.min(gain_dTAbs, navT1 - feeWatermarkNav);
             reserve_dT = feeableGain * reserveBps / PERCENTAGE_100;
             gain_dTAbs -= reserve_dT;
         }

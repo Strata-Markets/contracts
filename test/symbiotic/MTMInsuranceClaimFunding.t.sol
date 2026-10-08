@@ -92,6 +92,52 @@ contract MTMInsuranceClaimFundingTest is Test {
         _deploy();
     }
 
+    function test_valuationGain_preservesCreditAndSplitsNormally() public {
+        accounting.setValuationPrice(0.4e18);
+        uint256 credit = accounting.srtInsuranceFundNav();
+        uint256 seniorBefore = accounting.srtBaseNav();
+        uint256 juniorBefore = accounting.jrtBaseNav();
+        vm.warp(block.timestamp + 1 days);
+        mockStrategyTvl += 100e18;
+        accounting.updateAccounting();
+
+        assertEq(accounting.insuranceAmount(), credit);
+        assertEq(accounting.srtInsuranceFundNav(), credit);
+        assertGt(accounting.srtBaseNav(), seniorBefore);
+        assertGt(accounting.jrtBaseNav(), juniorBefore);
+        assertEq(accounting.srtFundNav(), 0, "earnings use normal protection");
+        uint256 seniorGain = accounting.srtBaseNav() - seniorBefore;
+        accounting.setValuationPrice(1e18);
+        assertEq(accounting.insuranceAmount(), 0);
+        assertEq(accounting.srtInsuranceFundNav(), 0);
+        assertEq(accounting.srtBaseNav(), 1000e18 + seniorGain);
+    }
+
+    function test_valuationGain_withFeesEnabled() public {
+        accounting.setValuationPrice(0.4e18);
+        accounting.setReserveBps(0.1e18);
+        vm.warp(block.timestamp + 1 days);
+        mockStrategyTvl += 100e18;
+        accounting.totalAssets();
+        accounting.updateAccounting();
+        assertEq(accounting.reserveNav(), 10e18);
+        assertEq(accounting.insuranceAmount(), 501e18);
+        assertEq(accounting.srtInsuranceFundNav(), 501e18);
+    }
+
+    function test_mixedClaim_gainRepaysOnlyNavLoss() public {
+        accounting.setValuationPrice(0.4e18);
+        mockStrategyTvl = 800e18;
+        accounting.updateAccounting();
+        uint256 valuationClaim = accounting.srtInsuranceFundNav();
+        uint256 realizedClaim = accounting.insuranceAmount() - valuationClaim;
+        assertGt(realizedClaim, 0);
+        mockStrategyTvl += realizedClaim;
+        accounting.updateAccounting();
+        assertEq(accounting.insuranceAmount(), valuationClaim);
+        assertEq(accounting.srtInsuranceFundNav(), valuationClaim);
+    }
+
     /// A realized gain accrues underwriter fee from final Senior gain, not total PnL.
     function test_underwriterFeeAccruesFromSeniorGain() public {
         vm.warp(block.timestamp + 365 days);

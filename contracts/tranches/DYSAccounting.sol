@@ -1171,9 +1171,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
         int256 pnl = int256(navT1) - int256(navT0);
         insuranceAmountT1 = state.insuranceAmount;
 
-        // A realized gain first unwinds any outstanding insurance claim before it is skimmed/split.
+        // Gains repay only NAV-loss claims; valuation claims unwind with their credit through price updates.
         if (pnl > 0 && insuranceAmountT1 > 0) {
-            uint256 unwind = Math.min(uint256(pnl), insuranceAmountT1);
+            uint256 realizedClaim = Math.saturatingSub(insuranceAmountT1, srtInsuranceFundNav);
+            uint256 unwind = Math.min(uint256(pnl), realizedClaim);
             insuranceAmountT1 -= unwind;
             pnl -= int256(unwind);
         }
@@ -1181,7 +1182,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // Reserve allocation
         reserveNavT1 = reserveNavT0;
         if (pnl > 0 && navT1 > feeWatermarkNav && reserveBps > 0) {
-            uint256 feeableGain = navT1 - feeWatermarkNav;
+            uint256 feeableGain = Math.min(uint256(pnl), navT1 - feeWatermarkNav);
             uint256 reserveIncrease = feeableGain * reserveBps / PERCENTAGE_100;
             pnl -= int256(reserveIncrease);
             reserveNavT1 += reserveIncrease;
