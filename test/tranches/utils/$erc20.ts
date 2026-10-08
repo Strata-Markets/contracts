@@ -1,4 +1,3 @@
-import memd from'memd';
 import { TEth } from 'dequanto/models/TEth';
 import { ERC20 } from 'dequanto/prebuilt/openzeppelin/ERC20';
 import { $bigint } from 'dequanto/utils/$bigint';
@@ -112,9 +111,10 @@ export namespace $erc20 {
     }
 
     class Tools {
-        // Use a low maxAge because HH resets can redeploy tokens with different decimals.
-        // (i) Redeployments may reuse the same address when the EOA nonce is reset.
-        @memd.deco.memoize({ keyResolver: x => x.address, maxAge: 0.5 })
+        // Not memoized: HH resets can redeploy tokens with different decimals.
+        // (i) Redeployments may reuse the same address when the EOA nonce is reset,
+        //     e.g. an 18-dec MockUSDe and a 6-dec USDC mock both land on 0x5FbDB...
+        //     An address-keyed cache (even with a 0.5s maxAge) leaks across specs run back-to-back.
         static async decimals (erc20: ERC20) {
             return await erc20.decimals();
         }
