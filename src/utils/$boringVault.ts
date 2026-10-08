@@ -41,8 +41,8 @@ export namespace $boringVault {
     }) {
         let toBlock = options?.toBlock;
         let fromBlock = toBlock
-            ? toBlock - Math.ceil(7 * 24 * 60 * 60 / 12)
-            : $date.additive(new Date(), '-7days');
+            ? toBlock - Math.ceil(10 * 24 * 60 * 60 / 12)
+            : $date.additive(new Date(), '-10days');
 
         return fetchLatestRoundsInner(
             accountantAddress,
