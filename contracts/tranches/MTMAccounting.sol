@@ -952,46 +952,20 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
         TNavSplitState memory state = _currentNavSplitState();
         _accrueAssetTime(block.timestamp, state);
+        uint256 insuranceBaseOut_;
+        bool valuationWithdrawal = valuationPrice < 1e18 && srtAssetsOut > 0;
+        if (valuationWithdrawal) {
+            uint256 juniorCoverageOut;
+            uint256 seniorStrategyOut;
+            (juniorCoverageOut, seniorStrategyOut, insuranceBaseOut_) = _splitValuationWithdrawal(srtAssetsOut);
+            jrtAssetsOut += juniorCoverageOut;
+            // Senior base NAV includes both strategy assets and insurance credit.
+            srtAssetsOut = seniorStrategyOut + insuranceBaseOut_;
+        }
+        // New deposits must not change the funding attributed to an existing Senior withdrawal.
         srtFundNav += _trackSrtFundNavIn(srtAssetsIn);
 
-
-        if (valuationPrice < 1e18 && srtAssetsOut > 0) {
-            uint256 fundedFundOut;
-            if (srtFundedGrossNav > 0) {
-                (, uint256 srtNavEffective) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
-                uint256 fundedGrossOut = Math.min(
-                    srtAssetsOut,
-                    Math.mulDiv(srtAssetsOut, srtFundedGrossNav, srtNavEffective)
-                );
-                fundedFundOut = Math.min(
-                    srtFundNav,
-                    Math.mulDiv(fundedGrossOut, 1e18 - valuationPrice, valuationPrice)
-                );
-                srtFundedGrossNav -= fundedGrossOut;
-                srtFundNav -= fundedFundOut;
-            }
-
-            uint256 jrtAssetsOutEffective = jrtAssetsOut;
-            (jrtAssetsOut, srtAssetsOut) = AccountingLib.splitValuatedNavOut(
-                jrtBaseNav,
-                srtBaseNav,
-                ONE_ASSET,
-                valuationPrice,
-                jrtAssetsOut,
-                srtAssetsOut
-            );
-            uint256 jrtCoverage = jrtAssetsOut - jrtAssetsOutEffective;
-            // Use the Senior-funded top-up to reduce Junior's realized coverage loss.
-            // Cap it by remaining Senior base capacity to avoid over-withdrawing Senior NAV.
-            uint256 remainingSrtCapacity = Math.saturatingSub(srtBaseNav + srtAssetsIn, srtAssetsOut);
-            uint256 coveredByFund = Math.min(
-                Math.min(Math.mulDiv(fundedFundOut, valuationPrice, 1e18), jrtCoverage),
-                remainingSrtCapacity
-            );
-            jrtAssetsOut -= coveredByFund;
-            srtAssetsOut += coveredByFund;
-        }
-        if (srtAssetsOut > 0 && srtPnLProjected > 0) {
+        if (!valuationWithdrawal && srtAssetsOut > 0 && srtPnLProjected > 0) {
             if (useConservativePrice) {
                 // Conservative redemptions pay only net Senior assets
                 // Return the unpaid projection to Junior real NAV
@@ -1034,15 +1008,14 @@ contract MTMAccounting is IAccounting, CDOComponent {
         // the insurance vault rather than the strategy, so srtBaseNav drops by the full outflow while
         // nav drops only by what actually leaves the strategy. Both sides of
         // nav + insuranceAmount == jrt + srt + reserve + underwriter fee then move by srtAssetsOut.
-        uint256 insuranceBaseOut_;
-        if (insuranceAmount > 0 && srtAssetsOut > 0 && srtBaseNav > 0) {
+        if (!valuationWithdrawal && insuranceAmount > 0 && srtAssetsOut > 0 && srtBaseNav > 0) {
             insuranceBaseOut_ = Math.min(
                 insuranceAmount,
                 Math.mulDiv(srtAssetsOut, insuranceAmount, srtBaseNav)
             );
-            insuranceAmount -= insuranceBaseOut_;
             srtInsuranceFundNav = Math.saturatingSub(srtInsuranceFundNav, insuranceBaseOut_);
         }
+        insuranceAmount -= insuranceBaseOut_;
         insuranceBaseOut = insuranceBaseOut_;
 
         jrtBaseNav = jrtBaseNav + jrtAssetsIn - jrtAssetsOut;
@@ -1061,6 +1034,38 @@ contract MTMAccounting is IAccounting, CDOComponent {
         (bool modified, UD60x18 aprTarget_, UD60x18 aprBase_) = fetchAprs();
         if (modified == false) {
             updateAprSrt(aprTarget_, aprBase_);
+        }
+    }
+
+    /// @dev Consume each backing component using the same pre-exit effective Senior NAV.
+    ///      Round component payouts down and assign the withdrawal remainder to Senior base NAV.
+    function _splitValuationWithdrawal(uint256 assetsOut)
+        internal returns (uint256 juniorOut, uint256 seniorStrategyOut, uint256 insuranceOut)
+    {
+        uint256 liveProjection = Math.saturatingSub(srtPnLProjected, srtPaidProjected);
+        uint256 seniorNav = srtBaseNav;
+        uint256 juniorNav = jrtBaseNav;
+        if (useConservativePrice) {
+            liveProjection = Math.min(liveProjection, seniorNav);
+            seniorNav -= liveProjection;
+            juniorNav += liveProjection;
+        }
+        (, uint256 seniorEffective) = calcEffectiveNav(juniorNav, seniorNav);
+        (juniorOut, seniorStrategyOut, insuranceOut) = AccountingLib.splitValuatedNavOut(
+            seniorNav, seniorEffective, insuranceAmount, assetsOut
+        );
+        srtInsuranceFundNav -= Math.mulDiv(assetsOut, srtInsuranceFundNav, seniorEffective);
+        srtFundedGrossNav -= Math.mulDiv(assetsOut, srtFundedGrossNav, seniorEffective);
+        srtFundNav -= Math.mulDiv(assetsOut, srtFundNav, seniorEffective);
+
+        uint256 projectionOut = Math.mulDiv(assetsOut, liveProjection, seniorEffective);
+        if (useConservativePrice) {
+            srtPnLProjected -= projectionOut;
+            srtBaseNav -= projectionOut;
+            jrtBaseNav += projectionOut;
+            jrtNavProjected = Math.max(jrtNavProjected, jrtBaseNav);
+        } else {
+            srtPaidProjected += projectionOut;
         }
     }
 

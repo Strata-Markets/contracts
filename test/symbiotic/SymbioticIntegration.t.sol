@@ -456,17 +456,19 @@ contract SymbioticIntegrationTest is Test {
 
         address srtVault = address(cdo.srtVault());
         address user = makeAddr("depegRedeemer");
-        uint256 baseAssets = accounting.maxWithdraw(false) / 10;
+        uint256 seniorEffective = accounting.maxWithdraw(false);
+        uint256 baseAssets = seniorEffective / 10;
         assertGt(baseAssets, 0, "Senior must have redeemable NAV");
 
         uint256 shareAmount = strategy.convertToTokens(SUSDE, baseAssets, Math.Rounding.Ceil);
         vm.prank(srtVault);
         cdo.withdraw(srtVault, SUSDE, shareAmount, baseAssets, srtVault, user, "");
 
-        // The claim delta is the covered slice in base terms. Note updateBalanceFlow converts the
-        // Senior outflow from effective to base terms first, so it is well below `baseAssets`.
+        // The redemption takes the same fraction of the claim as of effective Senior NAV.
         uint256 insuranceBaseOut = claim - accounting.insuranceAmount();
         assertGt(insuranceBaseOut, 0, "the redemption must consume part of the claim");
+        assertApproxEqAbs(insuranceBaseOut, Math.mulDiv(baseAssets, claim, seniorEffective), 2,
+            "Senior receives its proportional share of liquid coverage");
 
         uint256 paid = IERC20(USDC).balanceOf(user);
         uint256 expectedUsdc = insuranceBaseOut * price / 1e18 / 1e12;
