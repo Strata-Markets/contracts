@@ -2,6 +2,7 @@
 pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
+import { stdError } from "forge-std/StdError.sol";
 import "./AccessControlManagerGrantCall.sol";
 import "./AccountingOnAprChangedSandwich.sol";
 import "./AccountingRetroactiveAPR.sol";
@@ -19,15 +20,17 @@ contract GuardianPoCsTest is Test {
     function testReserveWithdrawalUnitMismatchTest_testReserveWithdrawalShareMismatch() public {
         ReserveWithdrawalUnitMismatchTest reserveWithdrawalUnitMismatchTest = new ReserveWithdrawalUnitMismatchTest();
         reserveWithdrawalUnitMismatchTest.setUp();
-        vm.expectRevert();
-        reserveWithdrawalUnitMismatchTest.testReserveWithdrawalShareMismatch();
+        // Fixed: reduceReserve now converts the USDe amount to shares (sUSDe.convertToShares, floor), so the
+        // payout is no longer above the deducted USDe and the PoC's overpayment log (usdePayout - reserveUSDe) underflows
+        vm.expectRevert(stdError.arithmeticError);
+        reserveWithdrawalUnitMismatchTest.pocReserveWithdrawalShareMismatch();
     }
 
     function testJrtSupplyRunawayTest_test_poc() public {
         JrtSupplyRunawayTest jrtSupplyRunawayTest = new JrtSupplyRunawayTest();
         jrtSupplyRunawayTest.setUp();
         vm.expectRevert(bytes("(PoC) JRT deposit is still enabled"));
-        jrtSupplyRunawayTest.testJrtSupplyRunawayDueToTinyPrice();
+        jrtSupplyRunawayTest.pocJrtSupplyRunawayDueToTinyPrice();
     }
 
     function testWithdrawGriefingDoS_test_poc() public {
@@ -38,28 +41,29 @@ contract GuardianPoCsTest is Test {
             0xa959355654849CbEAbBf65235f8235833b9e031D,
             0x97d8f58e0f008a842799f9fb6a4e6212ac93db0249409467f149ba102924e880
         ));
-        withdrawGriefingDoS.test_poc();
+        withdrawGriefingDoS.poc();
     }
 
     function testAccountingOnAprChangedSandwichTest_testOnAprChangedCanBeSandwiched() public {
         AccountingOnAprChangedSandwichTest accountingOnAprChangedSandwichTest = new AccountingOnAprChangedSandwichTest();
         accountingOnAprChangedSandwichTest.setUp();
         vm.expectRevert(bytes("APR must stay sticky"));
-        accountingOnAprChangedSandwichTest.testOnAprChangedCanBeSandwiched();
+        accountingOnAprChangedSandwichTest.pocOnAprChangedCanBeSandwiched();
     }
 
     function testAccessControlManagerGrantCallTest_testGrantCallFallbackSelectorGivesDefaultAdmin() public {
         AccessControlManagerGrantCallTest accessControlManagerGrantCallTest = new AccessControlManagerGrantCallTest();
         accessControlManagerGrantCallTest.setUp();
         vm.expectRevert(bytes("StrictPermissionOnly"));
-        accessControlManagerGrantCallTest.testGrantCallFallbackSelectorGivesDefaultAdmin();
+        accessControlManagerGrantCallTest.pocGrantCallFallbackSelectorGivesDefaultAdmin();
     }
 
     function testAccountingRiskLag_testRiskUsesPreSplitBalances() public {
         AccountingRiskLagTest accountingRiskLagTest = new AccountingRiskLagTest();
         accountingRiskLagTest.setUp();
-        vm.expectRevert(bytes(">=100%"));
-        accountingRiskLagTest.testRiskUsesPreSplitBalances();
+        // Fixed: risk now uses post-deposit balances, so the PoC's own lag assertion fails
+        vm.expectRevert(bytes("risk used should match pre-deposit ratio"));
+        accountingRiskLagTest.pocRiskUsesPreSplitBalances();
     }
 
     function testTrancheMaxMintTest_testJrtMaxMintRevertsWhenSharePriceBelowOne() public {
@@ -72,15 +76,16 @@ contract GuardianPoCsTest is Test {
     function testAccountingRiskDoSTest_testRiskOverOneHundredPercentRevertsUpdate() public {
         AccountingRiskDoSTest accountingRiskDoSTest = new AccountingRiskDoSTest();
         accountingRiskDoSTest.setUp();
-        vm.expectRevert(">=100%");
-        accountingRiskDoSTest.testRiskOverOneHundredPercentRevertsUpdate();
+        // Fixed: setRiskParameters rejects max risk above 100% at config time
+        vm.expectRevert(">100%");
+        accountingRiskDoSTest.pocRiskOverOneHundredPercentRevertsUpdate();
     }
 
     function testAccountingRetroactiveAPR_testRiskOverOneHundredPercentRevertsUpdate() public {
         AccountingRetroactiveAPR accountingRetroactiveAPR = new AccountingRetroactiveAPR();
         accountingRetroactiveAPR.setUp();
         vm.expectRevert("index accrues at new apr");
-        accountingRetroactiveAPR.testRetroactiveAPRJump();
+        accountingRetroactiveAPR.pocRetroactiveAPRJump();
     }
 
 }

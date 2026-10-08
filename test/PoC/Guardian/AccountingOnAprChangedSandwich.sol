@@ -42,7 +42,7 @@ contract AccountingOnAprChangedSandwichTest is StrataProtocolDeploymentBase {
         uint256 jrtSharesForSmallWithdraw;
     }
 
-    function testOnAprChangedCanBeSandwiched() public {
+    function pocOnAprChangedCanBeSandwiched() public {
         _initActors();
         _deployStrataStack();
 

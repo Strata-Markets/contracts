@@ -41,21 +41,19 @@ contract CDOLensGetPriceTest is Test {
         vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
         lens = _deployLens();
 
-        // Configure the direct Chainlink feed for USDe
+        // Configure the direct Chainlink feeds for USDe, USDC and NUSD
         lens.setPriceFeed(USDe, IChainlinkPriceFeed(USDE_USD_FEED));
         lens.setPriceFeed(USDC, IChainlinkPriceFeed(USDC_USD_FEED));
+        nusdFeed = new LensPriceFeed(alice);
+        lens.setPriceFeed(NUSD, IChainlinkPriceFeed(address(nusdFeed)));
     }
 
+    /// @dev Deploys a bare lens with no price feeds or curve routes configured
     function _deployLens() internal returns (CDOLens) {
         CDOLens impl = new CDOLens();
         ERC1967Proxy proxy =
             new ERC1967Proxy(address(impl), abi.encodeWithSelector(CDOLens.initialize.selector, address(this)));
-        lens = CDOLens(address(proxy));
-
-        // Configure the Chainlink feed for USDe
-        lens.setPriceFeed(USDe, IChainlinkPriceFeed(USDE_USD_FEED));
-        nusdFeed = new LensPriceFeed(alice);
-        lens.setPriceFeed(NUSD, IChainlinkPriceFeed(nusdFeed));
+        return CDOLens(address(proxy));
     }
 
     function _setCurveRoute() internal {

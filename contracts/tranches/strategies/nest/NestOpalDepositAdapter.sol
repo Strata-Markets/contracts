@@ -54,7 +54,7 @@ contract NestOpalDepositAdapter is IAdapter {
 
         // Decode the PredicateMessage struct from data
         // data = abi.encode(PredicateMessage({taskId, expireByBlockNumber, signerAddresses, signatures}))
-        PredicateMessage memory predicateMessage = abi.decode(data, (PredicateMessage));
+        // PredicateMessage memory predicateMessage = abi.decode(data, (PredicateMessage));
 
         uint256 sharesBefore = IERC20(nOPAL).balanceOf(address(this));
 
@@ -63,7 +63,7 @@ contract NestOpalDepositAdapter is IAdapter {
             amountIn,
             address(this),   // to: adapter receives shares, then forwards
             nestVault,
-            predicateMessage
+            data
         );
 
         amountOut = IERC20(nOPAL).balanceOf(address(this)) - sharesBefore;

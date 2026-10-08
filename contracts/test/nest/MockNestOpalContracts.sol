@@ -5,7 +5,6 @@ import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {MockNestAccountant} from "./MockNestContracts.sol";
-import {PredicateMessage} from "../../tranches/strategies/nest/interfaces/INestContracts.sol";
 
 /// @title MockNOpal
 /// @notice Mock nOPAL BoringVault token with 6 decimals (matching mainnet)
@@ -26,9 +25,9 @@ contract MockNOpal is ERC20 {
 }
 
 /// @title MockNestPredicateProxy
-/// @notice Mock old-style PredicateProxy that simulates the 6-parameter deposit flow
-/// @dev Uses the Accountant rate to calculate shares minted. Validates predicate message.
-///      Key difference from MockNestVaultPredicateProxy: takes minimumMint and teller params.
+/// @notice Mock NestVaultPredicateProxy (V2) for nOPAL, matching what NestOpalDepositAdapter calls
+/// @dev Uses the Accountant rate to calculate shares minted. Rejects an empty predicate payload.
+///      Same deposit flow as MockNestVaultPredicateProxy, but mints nOPAL.
 contract MockNestPredicateProxy {
     using SafeERC20 for IERC20;
 
@@ -38,40 +37,35 @@ contract MockNestPredicateProxy {
 
     error DepositRejected();
     error InvalidPredicateMessage();
-    error MinimumMintNotMet(uint256 shares, uint256 minimumMint);
 
     constructor(MockNOpal nOpalToken_, MockNestAccountant accountant_) {
         nOpalToken = nOpalToken_;
         accountant = accountant_;
     }
 
-    /// @notice Simulates the old-style PredicateProxy deposit flow
+    /// @notice Simulates the V2 NestVaultPredicateProxy deposit flow: pull USDC, mint nOPAL to recipient
     /// @dev shares = depositAmount * 1e6 / exchangeRate (since both are 6 dec)
     function deposit(
         address depositAsset,
         uint256 depositAmount,
-        uint256 minimumMint,
-        address to,
-        address /* teller */,
-        PredicateMessage calldata predicateMessage
-    ) external {
+        address recipient,
+        address /* nestVault */,
+        bytes calldata predicateMessage
+    ) external returns (uint256 shares) {
         if (rejectDeposits) revert DepositRejected();
 
-        // Predicate message must have a non-empty taskId (simulates compliance check)
-        if (bytes(predicateMessage.taskId).length == 0) revert InvalidPredicateMessage();
+        // Predicate payload must be non-empty (simulates compliance check)
+        if (predicateMessage.length == 0) revert InvalidPredicateMessage();
 
         // Pull deposit asset from caller
         IERC20(depositAsset).safeTransferFrom(msg.sender, address(this), depositAmount);
 
         // Calculate shares using the Accountant rate
         uint256 rate = accountant.exchangeRate();
-        uint256 shares = (depositAmount * 1e6) / rate;
-
-        // Enforce minimumMint
-        if (shares < minimumMint) revert MinimumMintNotMet(shares, minimumMint);
+        shares = (depositAmount * 1e6) / rate;
 
         // Mint nOPAL to recipient
-        nOpalToken.mint(to, shares);
+        nOpalToken.mint(recipient, shares);
     }
 
     // ═══════ Test helpers ═══════

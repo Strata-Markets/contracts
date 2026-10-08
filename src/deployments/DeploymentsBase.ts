@@ -849,6 +849,13 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         return depositor;
     }
 
+    async getDepositor () {
+        let v = this.cdoInfo.ContractVersions?.depositor ?? 'V3';
+        return await this.common.get(TrancheDepositor, {
+            id: `TrancheDepositor${v}`,
+        });
+    }
+
     async ensureValuationOracles() {
         const { valuationKeeper, valuationKeeperOptions } = this.cdoInfo.ContractVersions;
         if (valuationKeeper == null) {
@@ -1133,6 +1140,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         RESERVE_MANAGER_ROLE: $contract.keccak256("RESERVE_MANAGER_ROLE"),
         COOLDOWN_WORKER_ROLE: $contract.keccak256("COOLDOWN_WORKER_ROLE"),
         PROPOSER_CONFIG_ROLE: $contract.keccak256("PROPOSER_CONFIG_ROLE"),
+        DEPOSITOR_CONFIG_ROLE: $contract.keccak256("DEPOSITOR_CONFIG_ROLE"),
     };
 
     public async ensureKyberSwapAdapter () {

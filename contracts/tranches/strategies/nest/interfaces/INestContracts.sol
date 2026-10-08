@@ -62,7 +62,7 @@ struct PredicateMessage {
 /// @notice Minimal interface for the NEW NestVaultPredicateProxy deposit entry point (used by nALPHA, nFALCON)
 /// @dev 5-parameter deposit — no minimumMint parameter
 ///      On-chain selector: deposit(address,uint256,address,address,(string,uint256,address[],bytes[])) = 0xa46ea103
-interface INestVaultPredicateProxy {
+interface INestVaultPredicateProxyV0 {
     /// @notice Deposit assets into a NestVault through the predicate-gated proxy
     /// @param depositAsset The address of the asset to deposit (e.g. USDC)
     /// @param depositAmount The amount of the deposit asset
@@ -76,6 +76,28 @@ interface INestVaultPredicateProxy {
         address recipient,
         address nestVault,
         PredicateMessage calldata predicateMessage
+    ) external returns (uint256 shares);
+}
+
+
+/// @title INestVaultPredicateProxy
+/// @notice Minimal interface for the NEW NestVaultPredicateProxy deposit entry point (used by nALPHA, nFALCON)
+/// @dev 5-parameter deposit — no minimumMint parameter
+///      On-chain selector: deposit(address,uint256,address,address,(string,uint256,address[],bytes[])) = 0xa46ea103
+interface INestVaultPredicateProxy {
+    /// @notice Deposit assets into a NestVault through the predicate-gated proxy
+    /// @param depositAsset The address of the asset to deposit (e.g. USDC)
+    /// @param depositAmount The amount of the deposit asset
+    /// @param recipient The address that receives the minted shares
+    /// @param nestVault The address of the NestVault to deposit into
+    /// @param signatures The compliance predicate attestation from the Predicate V2 API
+    /// @return shares The amount of vault shares minted
+    function deposit(
+        address depositAsset,
+        uint256 depositAmount,
+        address recipient,
+        address nestVault,
+        bytes calldata signatures
     ) external returns (uint256 shares);
 }
 

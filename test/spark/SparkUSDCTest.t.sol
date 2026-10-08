@@ -164,9 +164,12 @@ contract SparkUSDCTest is SparkUSDCDeploy {
         // TVL should be ~midway + new deposit; gain must not be double-counted
         assertApproxEqAbs(strategy.totalAssets(), tvlMidway + DEPOSIT_AMOUNT, 1);
 
-        // After a full new vesting window the remaining gain fully vests
+        // After a full new vesting window the remaining gain fully vests.
+        // deposit() credits spVault.convertToAssets(shares) and _drip() uses previewRedeem, both floor,
+        // so once the vault rate is above 1 each can land 1 wei under. Never over (protocol-favorable).
         vm.warp(block.timestamp + 24 hours);
-        assertApproxEqAbs(strategy.totalAssets(), DEPOSIT_AMOUNT * 2 + yield, 1);
+        assertLe(strategy.totalAssets(), DEPOSIT_AMOUNT * 2 + yield, "rounding must never inflate TVL");
+        assertApproxEqAbs(strategy.totalAssets(), DEPOSIT_AMOUNT * 2 + yield, 2);
     }
 
     function test_Vesting_WithdrawCorrectlyReducesPrincipal() public {
@@ -257,9 +260,16 @@ contract SparkUSDCTest is SparkUSDCDeploy {
         assertEq(strategy.lastDistributionTimestamp(), t0, "mid-cycle deposit preserves timestamp");
         assertApproxEqAbs(strategy.vestingAmount(), yield1, 1, "mid-cycle deposit preserves vestingAmount");
         assertApproxEqAbs(strategy.getUnvestedAmount(), unvestedAt6h, 1, "unvested schedule preserved");
-        assertEq(
+        // deposit() credits spVault.convertToAssets(shares) (floor), so up to 1 wei under, never over
+        assertLe(
             strategy.lastReportedAssets(),
             lastReportedBeforeBob + DEPOSIT_AMOUNT,
+            "deposit must never over-credit lastReportedAssets"
+        );
+        assertApproxEqAbs(
+            strategy.lastReportedAssets(),
+            lastReportedBeforeBob + DEPOSIT_AMOUNT,
+            1,
             "deposit only grows lastReportedAssets"
         );
 

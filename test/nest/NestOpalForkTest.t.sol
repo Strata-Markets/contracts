@@ -2,32 +2,39 @@
 pragma solidity 0.8.28;
 
 import {Test, console2} from "forge-std/Test.sol";
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {INestAccountant, INestPredicateProxy} from "../../contracts/tranches/strategies/nest/interfaces/INestContracts.sol";
+import {INestAccountant, INestVaultPredicateProxy} from "../../contracts/tranches/strategies/nest/interfaces/INestContracts.sol";
 
 /**
  * @title NestOpalForkTest
  * @notice Fork tests against real mainnet nOPAL contracts.
- * @dev Run with: forge test --match-path test/nest/NestOpalForkTest.t.sol --fork-url $ETH_RPC_URL -v
+ * @dev Forks MAINNET_RPC_URL in setUp. Run with:
+ *      MAINNET_RPC_URL=<archive rpc> forge test --match-path test/nest/NestOpalForkTest.t.sol -v
  *
  *      Validates that:
  *      1. nOPAL token has 6 decimals (critical for 1e6 divisor)
  *      2. Accountant returns a valid rate via getRateInQuoteSafe
  *      3. Hook does not block transfers (shareLockPeriod = 0 or no lock)
- *      4. PredicateProxy at 0x6104fe10... has deployed code
+ *      4. V2 NestVaultPredicateProxy at 0xB65B65Cf... has deployed code and exposes the bytes deposit
  *      5. Teller at 0xA5F8e584... has deployed code
  *      6. NAV formula produces correct results with live rate
  */
 contract NestOpalForkTest is Test {
 
-    // ═══════ Mainnet addresses (from nOPAL_integration_doc.md) ═══════
+    // ═══════ Mainnet addresses (keep in sync with Eth.nestopal in src/platforms/Eth.ts) ═══════
 
     address constant NOPAL = 0x119Dd7dAFf816f29D7eE47596ae5E4bdC4299165;
     address constant ACCOUNTANT = 0x2Ed2f77a961fc92F73D1087786099c39C894Ed1D;
-    address constant PREDICATE_PROXY = 0x6104fe10ca937a086ba7AdbD0910A4733d380cB6;
+    address constant PREDICATE_PROXY = 0xB65B65CfF0CA1f3cc12fe58a13110E43DfA999F1;
     address constant TELLER = 0xA5F8e5843dd597a179453bF782844e8Bf808A90b;
     address constant USDC = 0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48;
+
+    /// @dev bytes32(uint256(keccak256("eip1967.proxy.implementation")) - 1)
+    bytes32 constant ERC1967_IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+
+    function setUp() public {
+        vm.createSelectFork(vm.envString("MAINNET_RPC_URL"));
+    }
 
     // ═══════ Tests ═══════
 
@@ -127,12 +134,31 @@ contract NestOpalForkTest is Test {
         assertApproxEqAbs(tokensBack, originalTokens, 2, "Round-trip difference should be at most 2 wei");
     }
 
-    /// @notice Verify the function selector matches the old PredicateProxy deposit
-    function test_Fork_PredicateProxy_Selector() public pure {
-        // On-chain signature: deposit(address,uint256,uint256,address,address,(string,uint256,address[],bytes[]))
-        // The last param is PredicateMessage struct which ABI-encodes as a tuple
-        bytes4 expectedSelector = bytes4(keccak256("deposit(address,uint256,uint256,address,address,(string,uint256,address[],bytes[]))"));
-        assertEq(expectedSelector, bytes4(0x0edb4e20), "Selector mismatch for 6-param deposit with PredicateMessage struct");
+    /// @notice Verify the V2 bytes deposit selector matches our interface and is present in the live implementation
+    function test_Fork_PredicateProxy_Selector() public view {
+        // On-chain signature: deposit(address,uint256,address,address,bytes) returns (uint256 shares)
+        bytes4 expectedSelector = bytes4(keccak256("deposit(address,uint256,address,address,bytes)"));
+        assertEq(expectedSelector, bytes4(0x16c730be), "Selector mismatch for V2 bytes deposit");
+        assertEq(INestVaultPredicateProxy.deposit.selector, expectedSelector, "INestVaultPredicateProxy selector drifted");
+
+        // The proxy is ERC1967, so look for the selector in the implementation's dispatcher
+        address impl = address(uint160(uint256(vm.load(PREDICATE_PROXY, ERC1967_IMPL_SLOT))));
+        assertGt(impl.code.length, 0, "Implementation should have deployed code");
+        assertTrue(_codeHasSelector(impl.code, expectedSelector), "Implementation does not expose the V2 bytes deposit");
+    }
+
+    /// @dev Looks for PUSH4 <selector> (0x63 ++ selector) in the runtime bytecode
+    function _codeHasSelector(bytes memory code, bytes4 selector) internal pure returns (bool) {
+        for (uint256 i = 0; i + 4 < code.length; i++) {
+            if (
+                code[i] == 0x63 &&
+                code[i + 1] == selector[0] &&
+                code[i + 2] == selector[1] &&
+                code[i + 3] == selector[2] &&
+                code[i + 4] == selector[3]
+            ) return true;
+        }
+        return false;
     }
 
     /// @notice Verify Accountant rate is consistent across multiple calls

@@ -488,14 +488,24 @@
     "id": "NestOpalDepositAdapter",
     "name": "NestOpalDepositAdapter",
     "main": "./0xc/hardhat/NestOpalDepositAdapter/NestOpalDepositAdapter.ts",
-    "bytecodeHash": "0x66407bca00500e6b48d582c670619d824410c184fcd134a56d870ca34dee300a",
-    "address": "0x959514B34Be9f67fb5593FF52C44d137AE95aC1b",
-    "block": 25497650,
-    "tx": "0x00f5dc8ff9454010f22a2a0edeacfa9a8e9ace3873dbaa20ba0bdd56a32dcf25",
-    "gas": "557159",
+    "bytecodeHash": "0x8b8d4f6b7b277b4e602a2227ca8c44ec9d5b43c8bafc5a13b0b6a114c79ca56a",
+    "address": "0xA5dDE21eD403CdDd096a978B5E75c8f28EF5902B",
+    "block": 26124634,
+    "tx": "0xa4e9498c6a43435b9144401dacdc810070d3304b2f1f2047f3e45d97676c9ce8",
+    "gas": 387844,
     "deployer": "0x296400D87BE5cFB63C5025904cD006EBB23d15d5",
-    "timestamp": 1783631724,
-    "verified": "2026-07-09T21:21:37.654Z"
+    "timestamp": 1791184812,
+    "verified": "2026-10-05T07:20:23.822Z",
+    "history": [
+      {
+        "main": "./0xc/hardhat/NestOpalDepositAdapter/NestOpalDepositAdapter.ts",
+        "address": "0x959514B34Be9f67fb5593FF52C44d137AE95aC1b",
+        "block": 25497650,
+        "tx": "0x00f5dc8ff9454010f22a2a0edeacfa9a8e9ace3873dbaa20ba0bdd56a32dcf25",
+        "gas": "557159",
+        "verified": "2026-07-09T21:21:37.654Z"
+      }
+    ]
   },
   {
     "id": "NestOpalConfigManager",

@@ -54,7 +54,7 @@ contract NestDepositAdapter is IAdapter {
 
         // Decode the PredicateMessage struct from data
         // data = abi.encode(PredicateMessage({taskId, expireByBlockNumber, signerAddresses, signatures}))
-        PredicateMessage memory predicateMessage = abi.decode(data, (PredicateMessage));
+        // PredicateMessage memory predicateMessage = abi.decode(data, (PredicateMessage));
 
         uint256 sharesBefore = IERC20(nALPHA).balanceOf(address(this));
 
@@ -64,7 +64,7 @@ contract NestDepositAdapter is IAdapter {
             amountIn,
             address(this),   // recipient = adapter, then forward to caller
             nestVault,
-            predicateMessage
+            data
         );
 
         amountOut = IERC20(nALPHA).balanceOf(address(this)) - sharesBefore;

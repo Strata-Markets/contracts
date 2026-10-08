@@ -50,15 +50,16 @@ export class NestUsdcParamsResolver {
         let params = predicateProxy.$parseInputData(data);
         let predicateMessage = params.params.predicateMessage;
 
-        let predicateMessageBytes = $abiCoder.encode(
-            [
-                'tuple(string taskId,uint256 expireByBlockNumber,address[] signerAddresses,bytes[] signatures)'
-            ],
-            [predicateMessage]
-        );
+        // No need to encode, Nest V2 returns ready-to-use signed hex
+        // let predicateMessageBytes = $abiCoder.encode(
+        //     [
+        //         'tuple(string taskId,uint256 expireByBlockNumber,address[] signerAddresses,bytes[] signatures)'
+        //     ],
+        //     [predicateMessage]
+        // );
 
         return {
-            bytes: predicateMessageBytes
+            bytes: predicateMessage
         };
     }
 }

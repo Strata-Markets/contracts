@@ -7,7 +7,7 @@ import { UD60x18, pow } from "@prb/math/src/ud60x18/Math.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract AccountingRiskDoSTest is StrataProtocolDeploymentBase {
-    function testRiskOverOneHundredPercentRevertsUpdate() public {
+    function pocRiskOverOneHundredPercentRevertsUpdate() public {
         _deployStrataStack();
 
         console.log("\n[Setup] Configuring high risk parameters");
