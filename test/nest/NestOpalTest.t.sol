@@ -15,12 +15,13 @@ import {IErrors} from "../../contracts/tranches/interfaces/IErrors.sol";
 import {ICooldown, IERC20Cooldown} from "../../contracts/tranches/interfaces/cooldown/ICooldown.sol";
 import {NestAccountantAprProvider} from "../../contracts/tranches/strategies/nest/NestAccountantAprProvider.sol";
 import {INestAccountant, IAprSnapshotProvider, PredicateMessage} from "../../contracts/tranches/strategies/nest/interfaces/INestContracts.sol";
+import {MockNestPredicateProxy} from "../../contracts/test/nest/MockNestOpalContracts.sol";
 
 /**
  * @title NestOpalTest
  * @notice Comprehensive tests for the NestOpal strategy covering:
  *         TG-1: NestOpalStrategy unit tests
- *         TG-2: NestOpalDepositAdapter unit tests (old-style PredicateProxy)
+ *         TG-2: NestOpalDepositAdapter unit tests (V2 NestVaultPredicateProxy)
  *         TG-3: Full adapter deposit path integration
  *         TG-4: TrancheDepositor backward compatibility
  */
@@ -231,14 +232,28 @@ contract NestOpalTest is NestOpalDeploy {
         assertApproxEqAbs(tokensBack, originalTokens, 2, "Round-trip difference should be at most 2 wei");
     }
 
+    /// @dev Unlike NestAlphaStrategy, NestOpalStrategy quotes USDC (the base asset) 1:1.
+    ///      Deposits and withdrawals in USDC still revert with UnsupportedToken.
+    function test_ConvertToAssets_USDC_IsOneToOne() public view {
+        assertEq(strategy.convertToAssets(address(usdc), 1000, Math.Rounding.Floor), 1000);
+        assertEq(strategy.convertToAssets(address(usdc), 1000, Math.Rounding.Ceil), 1000);
+    }
+
+    function test_ConvertToTokens_USDC_IsOneToOne() public view {
+        assertEq(strategy.convertToTokens(address(usdc), 1000, Math.Rounding.Floor), 1000);
+        assertEq(strategy.convertToTokens(address(usdc), 1000, Math.Rounding.Ceil), 1000);
+    }
+
     function test_ConvertToAssets_RevertUnsupportedToken() public {
-        vm.expectRevert(abi.encodeWithSelector(IErrors.UnsupportedToken.selector, address(usdc)));
-        strategy.convertToAssets(address(usdc), 1000, Math.Rounding.Floor);
+        address unsupported = makeAddr("unsupported");
+        vm.expectRevert(abi.encodeWithSelector(IErrors.UnsupportedToken.selector, unsupported));
+        strategy.convertToAssets(unsupported, 1000, Math.Rounding.Floor);
     }
 
     function test_ConvertToTokens_RevertUnsupportedToken() public {
-        vm.expectRevert(abi.encodeWithSelector(IErrors.UnsupportedToken.selector, address(usdc)));
-        strategy.convertToTokens(address(usdc), 1000, Math.Rounding.Floor);
+        address unsupported = makeAddr("unsupported");
+        vm.expectRevert(abi.encodeWithSelector(IErrors.UnsupportedToken.selector, unsupported));
+        strategy.convertToTokens(unsupported, 1000, Math.Rounding.Floor);
     }
 
     function test_ConvertToAssets_RevertWhenPaused() public {
@@ -401,14 +416,14 @@ contract NestOpalTest is NestOpalDeploy {
         vm.startPrank(alice);
         usdc.approve(address(opalAdapter), ONE_USDC);
 
-        vm.expectRevert(); // MockNestPredicateProxy reverts on empty predicate
+        vm.expectRevert(MockNestPredicateProxy.InvalidPredicateMessage.selector);
         opalAdapter.swap(
             address(usdc),
             address(nOpal),
             ONE_USDC,
             0,
             alice,
-            _emptyPredicateMessage() // empty taskId triggers revert
+            _emptyPredicateMessage() // empty payload triggers revert
         );
         vm.stopPrank();
     }
@@ -884,7 +899,8 @@ contract NestOpalTest is NestOpalDeploy {
             _makeProviderRounds()
         );
 
-        (uint96 seedRate, uint64 seedTime) = provider.buffer(5);
+        // head == 0 after construction, so the latest entry is buffer[BUFFER_SIZE - 1]
+        (uint96 seedRate, uint64 seedTime) = provider.buffer(9);
 
         // Same rate, 1 hour later → negligible
         assertFalse(
@@ -904,10 +920,17 @@ contract NestOpalTest is NestOpalDeploy {
             "+2% in 1h should be meaningful (APR threshold)"
         );
 
-        // Same timestamp → not meaningful
-        assertFalse(
+        // Same timestamp as the latest buffer entry → that entry was already written by
+        // updateSnapshot, so it counts as meaningful (see NestAccountantAprProvider.isMeaningfulUpdate)
+        assertTrue(
             provider.isMeaningfulUpdate(seedRate * 2, seedTime),
-            "Same timestamp should not be meaningful"
+            "Same timestamp as the latest entry should be meaningful"
+        );
+
+        // Older than the latest entry → ignored
+        assertFalse(
+            provider.isMeaningfulUpdate(seedRate * 2, seedTime - 1),
+            "Timestamp before the latest entry should not be meaningful"
         );
     }
     // ═══════════════════════════════════════════════════════════════════════════
@@ -924,14 +947,10 @@ contract NestOpalTest is NestOpalDeploy {
         }));
     }
 
-    /// @dev Constructs a PredicateMessage with empty taskId (should trigger revert)
+    /// @dev Empty predicate payload (should trigger revert). The V2 proxy takes raw signed bytes,
+    ///      so an ABI-encoded struct with an empty taskId is still a non-empty payload.
     function _emptyPredicateMessage() internal pure returns (bytes memory) {
-        return abi.encode(PredicateMessage({
-            taskId: "",
-            expireByBlockNumber: 0,
-            signerAddresses: new address[](0),
-            signatures: new bytes[](0)
-        }));
+        return "";
     }
 
     /// @dev Creates a TRound[10] array from the mock accountant's current state.

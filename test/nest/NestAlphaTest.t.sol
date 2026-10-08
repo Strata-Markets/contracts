@@ -15,6 +15,7 @@ import {IErrors} from "../../contracts/tranches/interfaces/IErrors.sol";
 import {ICooldown, IERC20Cooldown} from "../../contracts/tranches/interfaces/cooldown/ICooldown.sol";
 import {NestAccountantAprProvider} from "../../contracts/tranches/strategies/nest/NestAccountantAprProvider.sol";
 import {INestAccountant, IAprSnapshotProvider, PredicateMessage} from "../../contracts/tranches/strategies/nest/interfaces/INestContracts.sol";
+import {MockNestVaultPredicateProxy} from "../../contracts/test/nest/MockNestContracts.sol";
 
 /**
  * @title NestAlphaTest
@@ -400,14 +401,14 @@ contract NestAlphaTest is NestAlphaDeploy {
         vm.startPrank(alice);
         usdc.approve(address(nestAdapter), ONE_USDC);
 
-        vm.expectRevert(); // MockNestVaultPredicateProxy reverts on empty predicate
+        vm.expectRevert(MockNestVaultPredicateProxy.InvalidPredicateMessage.selector);
         nestAdapter.swap(
             address(usdc),
             address(nAlpha),
             ONE_USDC,
             0,
             alice,
-            _emptyPredicateMessage() // empty taskId triggers revert
+            _emptyPredicateMessage() // empty payload triggers revert
         );
         vm.stopPrank();
     }
@@ -693,14 +694,10 @@ contract NestAlphaTest is NestAlphaDeploy {
         }));
     }
 
-    /// @dev Constructs a PredicateMessage with empty taskId (should trigger revert)
+    /// @dev Empty predicate payload (should trigger revert). The V2 proxy takes raw signed bytes,
+    ///      so an ABI-encoded struct with an empty taskId is still a non-empty payload.
     function _emptyPredicateMessage() internal pure returns (bytes memory) {
-        return abi.encode(PredicateMessage({
-            taskId: "",
-            expireByBlockNumber: 0,
-            signerAddresses: new address[](0),
-            signatures: new bytes[](0)
-        }));
+        return "";
     }
 
     /// @dev Creates a TRound[10] array from the mock accountant's current state.

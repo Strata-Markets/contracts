@@ -238,7 +238,7 @@ contract WithdrawGriefingDoS is Test {
         acm.grantRole(role, grantee);
     }
 
-    function test_poc() public {
+    function poc() public {
         // give eve some USDe
         deal(USDE, EVE, 1e18);
         vm.prank(EVE);

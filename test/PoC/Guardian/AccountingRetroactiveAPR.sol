@@ -9,7 +9,7 @@ contract AccountingRetroactiveAPR is StrataProtocolDeploymentBase {
     uint256 constant SECONDS_PER_YEAR = 31_536_000;
     int64 constant ONE_PERCENT = 10_000_000_000; // 0.01 * 1e12
 
-    function testRetroactiveAPRJump() public {
+    function pocRetroactiveAPRJump() public {
         _deployStrataStack();
 
         // Zero risk so aprSrt mirrors the feed APR

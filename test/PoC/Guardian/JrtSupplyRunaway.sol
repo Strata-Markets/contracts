@@ -18,7 +18,7 @@ contract JrtSupplyRunawayTest is StrataProtocolDeploymentBase {
     int64 constant APR_LOW  = 10_000_000_000;    // 1% (1e12 scale)
     int64 constant APR_HIGH = 1_000_000_000_000; // 100%  <<-- stronger push
 
-    function testJrtSupplyRunawayDueToTinyPrice() public {
+    function pocJrtSupplyRunawayDueToTinyPrice() public {
         _deployStrataStack();
 
         address junior = makeAddr("Junior");

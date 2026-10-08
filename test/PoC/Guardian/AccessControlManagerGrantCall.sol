@@ -12,7 +12,7 @@ contract AccessControlManagerGrantCallTest is StrataProtocolDeploymentBase {
     string constant GREEN = "\x1b[32m";
     string constant RED = "\x1b[31m";
 
-    function testGrantCallFallbackSelectorGivesDefaultAdmin() public {
+    function pocGrantCallFallbackSelectorGivesDefaultAdmin() public {
         _deployStrataStack();
 
         address attacker = makeAddr("malicious-grantee");

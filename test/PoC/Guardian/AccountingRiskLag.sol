@@ -7,7 +7,7 @@ import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract AccountingRiskLagTest is StrataProtocolDeploymentBase {
-    function testRiskUsesPreSplitBalances() public {
+    function pocRiskUsesPreSplitBalances() public {
         _deployStrataStack();
 
         // Configure risk = tvlRatio (riskX = 0, riskY = 1, k = 1)

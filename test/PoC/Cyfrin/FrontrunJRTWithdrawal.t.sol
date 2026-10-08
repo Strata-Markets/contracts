@@ -2,63 +2,65 @@
 pragma solidity ^0.8.28;
 
 import { CDOTest } from "../../CDO.t.sol";
-import { IStrataCDO } from "../../../contracts/tranches/interfaces/IStrataCDO.sol";
-import { IUnstakeHandler } from "../../../contracts/tranches/interfaces/cooldown/IUnstakeHandler.sol";
-import { ERC4626 } from "@openzeppelin/contracts/token/ERC20/extensions/ERC4626.sol";
+import { IErrors } from "../../../contracts/tranches/interfaces/IErrors.sol";
 
+/// @notice Regression for the Cyfrin "frontrun JRT withdrawal" finding.
+/// @dev Originally an SRT deposit could push the JRT/SRT ratio to the hard floor and zero JRT maxWithdraw.
+///      Fix: SRT deposits stop at `minimumJrtSrtRatioBuffer` (6%), above the JRT exit floor `minimumJrtSrtRatio` (5%).
+///      So at max SRT, JRT keeps `jrt * (1 - 5/6) = jrt / 6` withdrawable. A frontrun can still shrink the headroom,
+///      but it can no longer zero it.
 contract FrontrunJRTWithdrawal is CDOTest {
 
     function test_FrontrunJRTWithdrawal() public {
-        // Setup initial state: Mint and deposit to JRT and SRT
         address victim = address(0x1234);
         address attacker = address(0x5678);
         address initialDepositor = address(0x9999);
 
-        uint256 initialJRTDeposit = 100 ether; // jrtNav ≈ 100 ether
-        uint256 initialSRTDeposit = 1000 ether; // srtNav ≈ 1000 ether
-        uint256 victimWithdrawalAmount = 40 ether; // Should be valid pre-attack
-        uint256 attackDepositAmount = 1000 ether; // Enough to push JRT maxWithdraw to 0
+        uint256 initialJRTDeposit = 100 ether;
+        uint256 initialSRTDeposit = 1000 ether;
+        uint256 attackDepositAmount = 1000 ether; // Used to be enough to zero JRT maxWithdraw
 
-        // Victim deposits to JRT
         vm.startPrank(victim);
         USDe.mint(victim, initialJRTDeposit);
         USDe.approve(address(jrtVault), initialJRTDeposit);
         jrtVault.deposit(initialJRTDeposit, victim);
         vm.stopPrank();
 
-        // Initial depositor to SRT (could be anyone)
         vm.startPrank(initialDepositor);
         USDe.mint(initialDepositor, initialSRTDeposit);
         USDe.approve(address(srtVault), initialSRTDeposit);
         srtVault.deposit(initialSRTDeposit, initialDepositor);
         vm.stopPrank();
 
-        // Verify initial state: JRT maxWithdraw should allow the withdrawal
-        uint256 preMaxWithdraw = accounting.maxWithdraw(true); // isJrt=true
-        assertGt(preMaxWithdraw, victimWithdrawalAmount, "Initial maxWithdraw too low");
+        assertGt(accounting.maxWithdraw(true), 0, "JRT should be withdrawable before the attack");
 
-        // Simulate attacker frontrunning with large SRT deposit
         vm.startPrank(attacker);
         USDe.mint(attacker, attackDepositAmount);
         USDe.approve(address(srtVault), attackDepositAmount);
+
+        // The original attack size is now rejected by the SRT deposit buffer
+        vm.expectRevert(abi.encodeWithSelector(IErrors.DepositCapReached.selector, address(srtVault)));
         srtVault.deposit(attackDepositAmount, attacker);
+
+        // The strongest frontrun left is filling SRT up to the cap
+        uint256 maxSrtDeposit = accounting.maxDeposit(false);
+        assertGt(maxSrtDeposit, 0, "SRT should still accept some deposits");
+        assertLt(maxSrtDeposit, attackDepositAmount, "Cap should be below the original attack size");
+        srtVault.deposit(maxSrtDeposit, attacker);
         vm.stopPrank();
 
-        // Now simulate victim's withdrawal attempt (should fail due to updated cap)
-        vm.startPrank(victim);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                ERC4626.ERC4626ExceededMaxWithdraw.selector,
-                victim,
-                victimWithdrawalAmount,
-                0 // Post-attack maxWithdraw should be 0
-            )
-        );
-        jrtVault.withdraw(victimWithdrawalAmount, victim, victim);
-        vm.stopPrank();
+        assertEq(accounting.maxDeposit(false), 0, "SRT should be at the cap");
 
-        // Verify post-attack state
+        // JRT exit is not zeroed: about jrt / 6 stays withdrawable
+        uint256 jrtNav = accounting.jrtNav();
         uint256 postMaxWithdraw = accounting.maxWithdraw(true);
-        assertEq(postMaxWithdraw, 0, "Post-attack maxWithdraw not zeroed");
+        assertGt(postMaxWithdraw, 0, "Frontrun must not zero JRT maxWithdraw");
+        assertApproxEqRel(postMaxWithdraw, jrtNav / 6, 0.001e18, "JRT headroom should be about jrt / 6");
+
+        // And the victim can actually use that headroom
+        uint256 victimBalanceBefore = jrtVault.balanceOf(victim);
+        vm.prank(victim);
+        jrtVault.withdraw(postMaxWithdraw, victim, victim);
+        assertLt(jrtVault.balanceOf(victim), victimBalanceBefore, "Victim withdrawal should go through");
     }
 }

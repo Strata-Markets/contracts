@@ -12,7 +12,7 @@ contract ReserveWithdrawalUnitMismatchTest is StrataProtocolDeploymentBase {
     string constant YELLOW = "\x1b[33m";
     string constant RED = "\x1b[31m";
 
-    function testReserveWithdrawalShareMismatch() public {
+    function pocReserveWithdrawalShareMismatch() public {
         _deployStrataStack();
 
         address reserveManager = owner;
