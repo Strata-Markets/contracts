@@ -801,6 +801,14 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // New deposits must not change the funding attributed to an existing Senior withdrawal.
         srtFundNav += _trackSrtFundNavIn(srtAssetsIn);
 
+        // Conservative exits forfeit their benchmark entitlement even when no projection is funded.
+        // At par, the exit fraction uses net base NAV; valuation exits use effective NAV below.
+        if (!valuationWithdrawal && useConservativePrice && useBenchmarkProjection && srtAssetsOut > 0 && srtPnLBenchmark > 0) {
+            uint256 srtNetNav = Math.saturatingSub(srtBaseNav, srtPnLProjected);
+            uint256 forfeitedBenchmark = Math.mulDiv(srtAssetsOut, srtPnLBenchmark, srtNetNav);
+            srtPnLBenchmark -= Math.min(forfeitedBenchmark, srtPnLBenchmark);
+        }
+
         if (!valuationWithdrawal && srtAssetsOut > 0 && srtPnLProjected > 0) {
             if (useConservativePrice) {
                 // Conservative redemptions pay only net Senior assets
@@ -896,6 +904,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
         uint256 projectionOut = Math.mulDiv(assetsOut, liveProjection, seniorEffective);
         if (useConservativePrice) {
+            // Use the same pre-exit effective NAV as the projection and coverage payouts.
+            if (useBenchmarkProjection && srtPnLBenchmark > 0) {
+                uint256 forfeitedBenchmark = Math.mulDiv(assetsOut, srtPnLBenchmark, seniorEffective);
+                srtPnLBenchmark -= Math.min(forfeitedBenchmark, srtPnLBenchmark);
+            }
             srtPnLProjected -= projectionOut;
             srtBaseNav -= projectionOut;
             jrtBaseNav += projectionOut;
