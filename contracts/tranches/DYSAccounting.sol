@@ -442,7 +442,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
         uint256 systemAssets = srtNavT0 + jrtNavT0Projected + reserveNavT0;
 
-        srtNavTime_ += srtNavT0 * dt;
+        // Insurance backs Senior outside the strategy and does not participate in strategy PnL.
+        srtNavTime_ += Math.saturatingSub(srtNavT0, state.insuranceAmount) * dt;
         navTime_ += systemAssets * dt;
         navTimeNet_ += navT0 * dt;
         srtProjectedPnLTime_ += Math.saturatingSub(state.srtPnLProjected, state.srtPaidProjected) * dt;
@@ -1125,7 +1126,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         view
         returns (int256 srtPnLRealized, uint256 riskPremium_)
     {
-        uint256 srtNavTime_ = state.navTime > 0 ? state.srtNavTime : srtNavT0;
+        uint256 srtNavTime_ = state.navTime > 0 ? state.srtNavTime : Math.saturatingSub(srtNavT0, state.insuranceAmount);
         uint256 navTime_ = state.navTime > 0 ? state.navTime : navT0;
 
         // Note: riskPremium is capped at 1e18 (100%) via setRiskParameters validation
@@ -1793,6 +1794,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Sets the valuation price for the base asset.
     function setValuationPrice (uint128 price) external onlyCDO returns (bool){
+        // Preserve the elapsed weight before valuation changes Senior NAV and its insurance claim.
+        _accrueAssetTime();
         bool isValuationLossPeriod = valuationPrice < 1e18;
         bool valuationLossEntered = isValuationLossPeriod == false && price < 1e18;
         // Allow the valuation price in range 0.0001-1
