@@ -7,8 +7,8 @@ pragma solidity ^0.8.28;
 interface IInsurancePool {
     /// @notice Returns how much of `lossAmount` the pool can currently cover for `cdo`.
     /// @dev View: does NOT reserve or slash. The returned amount is bounded by the pool's
-    ///      available insurance NAV and the market's coverage limit. Actual funds are pulled
-    ///      only at settlement (settleInsurance / fundInsuranceClaim).
+    ///      available insurance NAV. Accounting calls coverAndSlash synchronously when booking
+    ///      new coverage; fundInsuranceClaim subsequently delivers the slashed collateral.
     /// @param cdo The market requesting coverage.
     /// @param lossAmount The uncovered loss, in the market's base asset.
     /// @return covered The coverable portion, in the market's base asset (<= lossAmount).
@@ -22,4 +22,8 @@ interface IInsurancePool {
     /// @param lossAmount The Senior-bound loss to cover, in the market's base asset.
     /// @return covered The base actually covered (<= lossAmount).
     function coverAndSlash(address cdo, uint256 lossAmount) external returns (uint256 covered);
+
+    /// @notice Synchronizes already-slashed backing after accounting reduces its outstanding claim.
+    /// @dev Only the registered accounting may call; must precede any later claim increase.
+    function syncInsuranceClaim(address cdo) external;
 }

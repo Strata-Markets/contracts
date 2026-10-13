@@ -46,6 +46,9 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     /// @notice Enumerable list of registered market CDOs, used to net shared coverage capacity
     address[] public marketCdos;
 
+    /// @notice Outstanding claim backed by prior slashes, in base assets, independent of funding status.
+    mapping(address cdo => uint256) public slashedClaimBase;
+
     // ===============================================
     // Events and Errors
 
@@ -89,6 +92,11 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
 
         market.totalSlashed += slashed;
         market.pendingInsuranceClaimFunding += slashed;
+        uint256 unslashed = _unslashedClaim(cdo, market);
+        uint256 coveredBase = slashed >= neededAmount
+            ? unslashed
+            : Math.min(unslashed, Math.mulDiv(_toBaseAsset(market, slashed), BPS, BPS + market.bufferBps));
+        slashedClaimBase[cdo] = Math.min(slashedClaimBase[cdo], market.accounting.insuranceAmount()) + coveredBase;
         emit CoverageSlashed(cdo, neededAmount, slashed);
     }
 
@@ -131,10 +139,23 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         coveredBase = slashed >= neededVault
             ? lossBase
             : Math.min(deliverableBase, lossBase);
+        // Accounting synchronizes reductions separately; this call always covers a new claim increment.
+        slashedClaimBase[cdo] += coveredBase;
+    }
+
+    /// @notice Drops backing for claims that have settled through redemption or recovery.
+    /// @dev Accounting must call immediately after every claim decrease, before any subsequent increase.
+    ///      A reduction first removes any unslashed obligation; retained backing cannot exceed the live claim.
+    function syncInsuranceClaim(address cdo) external {
+        TMarket storage market = markets[cdo];
+        if (msg.sender != address(market.accounting)) {
+            revert NotAuthorized(msg.sender);
+        }
+        slashedClaimBase[cdo] = Math.min(slashedClaimBase[cdo], market.accounting.insuranceAmount());
     }
 
     /// @notice Marks a completed insurance claim funding: slashed funds were funded into the market's insurance vault.
-    /// @dev Reduces the in-flight amount so future slashes are sized against the remaining deficit.
+    /// @dev Updates funding status only; already-slashed backing remains until the claim settles.
     ///      Called by the market's CDO itself during fundInsuranceClaim(), or by the owner as a manual fallback.
     /// @param cdo The CDO address identifying the market in the coverage registry.
     /// @param amount The funded claim amount, denominated in the market's base asset.
@@ -218,10 +239,8 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     }
 
     /// @notice Total coverage already committed across all markets, in vault asset.
-    /// @dev Per market: the outstanding claim (accounting.insuranceAmount) as buffered vault asset,
-    ///      less what has already been slashed for it (pendingInsuranceClaimFunding). The remainder is a claim that
-    ///      will still consume the shared slashable stake, so it is reserved out of new requests. The
-    ///      claim is buffered to match what slashing it will actually pull (see {_bufferedVault}).
+    /// @dev Only unslashed claims consume live stake. Funding already-slashed claims does not
+    ///      create a new reservation. Reserve the buffered vault equivalent of the remaining deficit.
     function _committedVault() internal view returns (uint256 total) {
         uint256 len = marketCdos.length;
         for (uint256 i; i < len; ++i) {
@@ -229,8 +248,7 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
             if (!market.enabled) {
                 continue;
             }
-            uint256 claimVault = _bufferedVault(market, market.accounting.insuranceAmount());
-            total += Math.saturatingSub(claimVault, market.pendingInsuranceClaimFunding);
+            total += _bufferedVault(market, _unslashedClaim(marketCdos[i], market));
         }
     }
 
@@ -238,12 +256,15 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     // Internal functions
 
     /// @notice Returns the amount to slash for a market, in vault asset terms.
-    /// @dev Deficit still pending insurance claim funding is excluded so the same shortfall is not slashed twice.
+    /// @dev Both funded and pending backing are excluded so the same claim is not slashed twice.
     ///      The adapter additionally caps the executed amount to the currently slashable stake.
     function _getNeededAmount(address cdo) internal view returns (uint256) {
         TMarket storage market = markets[cdo];
-        uint256 deficit = _bufferedVault(market, market.accounting.insuranceAmount());
-        return Math.saturatingSub(deficit, market.pendingInsuranceClaimFunding);
+        return _bufferedVault(market, _unslashedClaim(cdo, market));
+    }
+
+    function _unslashedClaim(address cdo, TMarket storage market) internal view returns (uint256) {
+        return Math.saturatingSub(market.accounting.insuranceAmount(), slashedClaimBase[cdo]);
     }
 
     /// @notice Vault asset required to cover a base-asset claim, including the market's swap buffer.

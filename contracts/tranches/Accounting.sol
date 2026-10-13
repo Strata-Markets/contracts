@@ -432,6 +432,9 @@ contract Accounting is IAccounting, CDOComponent {
             srtInsuranceFundNav = Math.saturatingSub(srtInsuranceFundNav, insuranceBaseOut_);
         }
         insuranceAmount -= insuranceBaseOut_;
+        if (insuranceBaseOut_ > 0) {
+            _syncInsuranceClaim();
+        }
         insuranceBaseOut = insuranceBaseOut_;
 
         jrtBaseNav = jrtBaseNav + jrtAssetsIn - jrtAssetsOut;
@@ -661,6 +664,10 @@ contract Accounting is IAccounting, CDOComponent {
         reserveNav = reserveNavT1;
         underwriterFeeNav = underwriterFeeNavT1;
         insuranceAmount = insuranceAmountT1;
+        if (insuranceAmountT1 < insuranceAmountT0) {
+            // Sync only decreases; increases are tracked by coverAndSlash via _slashNewClaim below.
+            _syncInsuranceClaim();
+        }
 
         if (insuranceAmountT1 > insuranceAmountT0) {
             uint256 newClaim = insuranceAmountT1 - insuranceAmountT0;
@@ -669,6 +676,15 @@ contract Accounting is IAccounting, CDOComponent {
             // must cover the full new claim in the same transaction.
             require(covered == newClaim, "CoverageUnderfunded");
             emit InsuranceClaimed(covered, insuranceAmount);
+        }
+    }
+
+    /// @dev Cap the middleware's already-slashed claim counter to the reduced insuranceAmount.
+    ///      This updates bookkeeping only; it does not move or return slashed collateral.
+    ///      Sync before any later claim increase so cancelled coverage cannot count toward a new claim.
+    function _syncInsuranceClaim() internal {
+        if (address(insurancePool) != address(0)) {
+            insurancePool.syncInsuranceClaim(address(cdo));
         }
     }
 
@@ -1020,6 +1036,7 @@ contract Accounting is IAccounting, CDOComponent {
             // the same amount, so nav is untouched and the identity still holds. The collateral
             // already slashed stays in the insurance vault rather than being credited to a tranche.
             insuranceAmount -= unwound;
+            _syncInsuranceClaim();
             srtBaseNav -= unwound;
         }
     }

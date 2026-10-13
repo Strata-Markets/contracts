@@ -21,6 +21,8 @@ contract MockInsurancePool is IInsurancePool {
         capacity -= covered;
     }
 
+    function syncInsuranceClaim(address) external {}
+
     function confirmInsuranceClaimFunding(address cdo, uint256 amount) external {
 
     }

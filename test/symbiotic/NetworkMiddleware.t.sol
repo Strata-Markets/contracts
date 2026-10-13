@@ -255,6 +255,7 @@ contract InsuranceMiddlewareTest is Test {
         middleware.slash(cdoB);
 
         assertEq(adapter.lastSlashAmount(), 1e8 * (10_000 + bufferBps) / 10_000); // 1.1 uniBTC
+        assertEq(middleware.slashedClaimBase(cdoB), 60_000e18);
     }
 
     function test_slash_convertsDeficitAndBooks() public {
@@ -281,6 +282,7 @@ contract InsuranceMiddlewareTest is Test {
         uint256 covered = middleware.coverAndSlash(cdo, 60_000e18);
 
         assertEq(covered, 60_000e18, "full coverage returns the requested base");
+        assertEq(middleware.slashedClaimBase(cdo), covered);
         assertEq(adapter.lastSlashAmount(), 1e8, "1 uniBTC slashed");
         (,, uint256 totalSlashed, uint256 pendingInsuranceClaimFunding,,) = middleware.markets(cdo);
         assertEq(totalSlashed, 1e8);
@@ -302,6 +304,7 @@ contract InsuranceMiddlewareTest is Test {
 
         assertEq(adapter.lastSlashAmount(), 0.5e8, "only what was slashable");
         assertEq(covered, 30_000e18, "covered is the de-buffered slashed base");
+        assertEq(middleware.slashedClaimBase(cdo), covered);
     }
 
     function test_slash_decimalConversionFloors() public {
@@ -326,6 +329,16 @@ contract InsuranceMiddlewareTest is Test {
         // Only the executed amount is booked
         assertEq(totalSlashed, 0.5e8);
         assertEq(pendingInsuranceClaimFunding, 0.5e8);
+        assertEq(middleware.slashedClaimBase(cdo), 30_000e18);
+
+        vm.prank(cdo);
+        middleware.confirmInsuranceClaimFunding(cdo, 30_000e18);
+        adapter.setSlashable(1e8);
+        assertEq(middleware.request(cdo, 60_000e18), 30_000e18, "reserve only the unslashed half");
+        vm.prank(owner);
+        middleware.slash(cdo);
+        assertEq(adapter.lastSlashAmount(), 0.5e8);
+        assertEq(middleware.slashedClaimBase(cdo), 60_000e18);
     }
 
     function test_slash_noDoubleSlashForSameDeficit() public {
@@ -430,6 +443,41 @@ contract InsuranceMiddlewareTest is Test {
         assertEq(pendingInsuranceClaimFunding, 0);
     }
 
+    function test_fundingDoesNotChangeCapacityOrAllowReslash() public {
+        accounting.setInsuranceAmount(60_000e18);
+        vm.prank(owner);
+        middleware.slash(cdo);
+        uint256 available = middleware.request(cdo, type(uint128).max);
+        vm.prank(cdo);
+        middleware.confirmInsuranceClaimFunding(cdo, 60_000e18);
+        assertEq(middleware.slashedClaimBase(cdo), 60_000e18);
+        assertEq(middleware.request(cdo, type(uint128).max), available);
+        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
+        vm.prank(owner);
+        middleware.slash(cdo);
+    }
+
+    function test_syncInsuranceClaim_onlyAccounting() public {
+        vm.expectRevert(abi.encodeWithSelector(InsuranceMiddleware.NotAuthorized.selector, stranger));
+        vm.prank(stranger);
+        middleware.syncInsuranceClaim(cdo);
+    }
+
+    function test_settledBackingCannotHideLaterUnslashedClaim() public {
+        accounting.setInsuranceAmount(60_000e18);
+        vm.prank(owner);
+        middleware.slash(cdo);
+        accounting.setInsuranceAmount(20_000e18);
+        vm.prank(address(accounting));
+        middleware.syncInsuranceClaim(cdo);
+        assertEq(middleware.slashedClaimBase(cdo), 20_000e18);
+        accounting.setInsuranceAmount(40_000e18);
+        vm.prank(owner);
+        middleware.slash(cdo);
+        assertEq(middleware.slashedClaimBase(cdo), 40_000e18);
+        assertEq(adapter.lastSlashAmount(), uint256(20_000e18) * 1e8 / UNIBTC_PRICE);
+    }
+
     function test_confirmInsuranceClaimFunding_reopensSlashCapacity() public {
         accounting.setInsuranceAmount(60_000e18);
         vm.prank(owner);
@@ -441,6 +489,8 @@ contract InsuranceMiddlewareTest is Test {
 
         // Once accounting clears the deficit, and a NEW deficit appears, slashing works again
         accounting.setInsuranceAmount(0);
+        vm.prank(address(accounting));
+        middleware.syncInsuranceClaim(cdo);
         vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
         vm.prank(owner);
         middleware.slash(cdo);

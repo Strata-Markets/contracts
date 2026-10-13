@@ -812,6 +812,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
         insuranceAmount = insuranceAmountT1;
         if (insuranceAmountT1 < insuranceAmountT0) {
+            _syncInsuranceClaim();
             // Protection not needed
             return;
         }
@@ -821,6 +822,15 @@ contract MTMAccounting is IAccounting, CDOComponent {
         // must cover the full new claim in the same transaction.
         require(covered == newClaim, "InsuranceUnderfunded");
         emit InsuranceClaimed(covered, insuranceAmount);
+    }
+
+    /// @dev Cap the middleware's already-slashed claim counter to the reduced insuranceAmount.
+    ///      This updates bookkeeping only; it does not move or return slashed collateral.
+    ///      Sync before any later claim increase so cancelled coverage cannot count toward a new claim.
+    function _syncInsuranceClaim() internal {
+        if (address(insurancePool) != address(0)) {
+            insurancePool.syncInsuranceClaim(address(cdo));
+        }
     }
 
     /// @notice Synchronously slashes freshly-booked coverage in the same transaction it is claimed.
@@ -1025,6 +1035,9 @@ contract MTMAccounting is IAccounting, CDOComponent {
             srtInsuranceFundNav = Math.saturatingSub(srtInsuranceFundNav, insuranceBaseOut_);
         }
         insuranceAmount -= insuranceBaseOut_;
+        if (insuranceBaseOut_ > 0) {
+            _syncInsuranceClaim();
+        }
         insuranceBaseOut = insuranceBaseOut_;
 
         jrtBaseNav = jrtBaseNav + jrtAssetsIn - jrtAssetsOut;
@@ -2165,6 +2178,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
             // the same amount, so nav is untouched and the identity still holds. The collateral
             // already slashed stays in the insurance vault rather than being credited to a tranche.
             insuranceAmount -= unwound;
+            _syncInsuranceClaim();
             srtBaseNav -= unwound;
         }
     }
