@@ -1452,7 +1452,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 srtGain = srtNavT1 > srtBaseNav ? srtNavT1 - srtBaseNav : 0;
             srtPnLProjected += srtGain;
 
-            if (useBenchmarkProjection) {
+            // Accrue only for intervals where Junior stays above the floor; retain earlier entitlement.
+            if (useBenchmarkProjection && jrtNavT1Real > ONE_ASSET && jrtBaseNav > ONE_ASSET) {
                 uint256 benchmarkIndexT1 = getBenchmarkIndexT1();
                 int256 srtBenchmarkGain = calculateGain(
                     srtBaseNav, benchmarkIndexT1, benchmarkIndex

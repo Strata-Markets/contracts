@@ -249,7 +249,7 @@ contract BenchmarkTrackerOnExitTest is Test {
         assertApproxEqAbs(accounting.srtPnLProjected(), 20e18, TOL);
     }
 
-    function test_valuationExitWithoutProjection_stillForfeitsBenchmark() public {
+    function test_valuationExitAfterJuniorDepletion_hasNoNewBenchmark() public {
         vm.prank(address(cdo));
         accounting.updateBalanceFlow(0, 999e18, 0, 0);
         strategy.setTotalAssets(accounting.nav());
@@ -257,11 +257,11 @@ contract BenchmarkTrackerOnExitTest is Test {
         vm.prank(address(cdo));
         accounting.setValuationPrice(0.8e18);
         assertEq(accounting.srtPnLProjected(), 0);
-        assertApproxEqAbs(accounting.srtPnLBenchmark(), BENCHMARK, TOL);
+        assertEq(accounting.srtPnLBenchmark(), 0);
         // No available Junior or insurance coverage: effective Senior NAV remains 1000.
         _valuationExit(500e18);
         assertEq(accounting.srtPnLProjected(), 0);
-        assertApproxEqAbs(accounting.srtPnLBenchmark(), 20e18, TOL);
+        assertEq(accounting.srtPnLBenchmark(), 0);
     }
 
     function test_nonConservativeValuationExit_keepsBenchmark() public {
@@ -276,17 +276,28 @@ contract BenchmarkTrackerOnExitTest is Test {
         assertApproxEqAbs(accounting.srtPaidProjected(), 20e18, TOL);
     }
 
-    function test_exitWithoutFundedProjection_stillForfeitsBenchmark() public {
+    function test_juniorDepositResumesBenchmarkWithoutBackfill() public {
+        vm.prank(address(cdo));
+        accounting.updateBalanceFlow(0, 999e18, 0, 0);
+        strategy.setTotalAssets(accounting.nav());
+        vm.warp(vm.getBlockTimestamp() + 365 days);
+        _deposit(jrt, carol, 100e18);
+        assertEq(accounting.srtPnLBenchmark(), 0, "deposit cannot earn benchmark for the depleted year");
+        _project();
+        assertApproxEqAbs(accounting.srtPnLBenchmark(), BENCHMARK, TOL, "only the funded half-year accrues");
+    }
+
+    function test_exitAfterJuniorDepletion_hasNoNewBenchmark() public {
         // Simulate Junior outflow to its protected floor before benchmark accrues.
         vm.prank(address(cdo));
         accounting.updateBalanceFlow(0, 999e18, 0, 0);
         strategy.setTotalAssets(accounting.nav());
         _project();
         assertEq(accounting.srtPnLProjected(), 0, "Junior cannot fund projection");
-        assertApproxEqAbs(accounting.srtPnLBenchmark(), BENCHMARK, TOL);
+        assertEq(accounting.srtPnLBenchmark(), 0);
         assertApproxEqAbs(_redeem(srt, bob, 500e18), 500e18, TOL);
         assertEq(accounting.srtPnLProjected(), 0);
-        assertApproxEqAbs(accounting.srtPnLBenchmark(), 20e18, TOL, "unfunded benchmark is forfeited too");
+        assertEq(accounting.srtPnLBenchmark(), 0);
     }
 }
 

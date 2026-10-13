@@ -1702,7 +1702,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
             uint256 srtGain = srtNavT1 > srtBaseNavReal ? srtNavT1 - srtBaseNavReal : 0;
             srtPnLProjected = srtPaidProjected + srtGain;
 
-            if (useBenchmarkProjection) {
+            // Accrue only for intervals where Junior stays above the floor; retain earlier entitlement.
+            if (useBenchmarkProjection && jrtNavT1Real > ONE_ASSET && jrtBaseNav > ONE_ASSET) {
                 uint256 benchmarkIndexT1 = getBenchmarkIndexT1(navMTMTime);
                 int256 srtBenchmarkGain = calculateGain(
                     srtBaseNav, benchmarkIndexT1, benchmarkIndex
