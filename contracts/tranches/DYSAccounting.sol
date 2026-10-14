@@ -1867,6 +1867,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             // redemption, so nav + insuranceAmount == jrt + srt + reserve + underwriter fee keeps balancing.
             srtInsuranceFundNav += covered;
             srtBaseNav += covered;
+            // Valuation credit is a Senior flow, not PnL, for the daily loss floor.
+            windowNetFlows += int256(covered);
             insuranceAmount += covered;
             emit InsuranceClaimed(covered, insuranceAmount);
         }
@@ -1963,6 +1965,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             insuranceAmount -= unwound;
             _syncInsuranceClaim();
             srtBaseNav -= unwound;
+            // Returning valuation credit is not a Senior loss.
+            windowNetFlows -= int256(unwound);
         }
     }
 
