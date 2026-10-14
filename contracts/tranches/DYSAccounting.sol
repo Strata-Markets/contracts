@@ -1382,6 +1382,17 @@ contract DYSAccounting is IAccounting, CDOComponent {
      *****************************************************************************/
 
     function updateAccountingInner(uint256 navT1) internal {
+        checkpointAccountingInner(navT1);
+        // Realized losses can consume Junior NAV backing Senior's de-peg protection.
+        // Cover any resulting valuation shortfall after checkpointing.
+        if (valuationPrice < 1e18) {
+            _coverValuationLoss(valuationPrice);
+        }
+    }
+
+    /// @dev Checkpoints PnL and asset-time without topping up valuation coverage.
+    ///      Keeping coverage separate lets valuation setters apply the new price first.
+    function checkpointAccountingInner(uint256 navT1) internal {
         TNavSplitState memory state = _currentNavSplitState();
         _accrueAssetTime(state);
 
@@ -1479,16 +1490,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
         }
         jrtBaseNav = jrtNavT1Real;
         reserveNav = reserveNavT1;
-        // A realized loss can consume Junior NAV already backing Senior during a de-peg.
-        // Cover the resulting valuation shortfall using the updated stored NAVs.
-        if (valuationPrice < 1e18) {
-            _coverValuationLoss(valuationPrice);
-        }
     }
 
     /// @notice Persists the underwriter fee bucket and insurance claim produced by the split, then slashes
     ///         any newly booked insurance in the same transaction.
-    /// @dev Split out of updateAccountingInner to mirror MTMAccounting state flow and reduce stack pressure.
+    /// @dev Split out of checkpointAccountingInner to mirror MTMAccounting state flow and reduce stack pressure.
     function _persistInsuranceClaim(
         uint256 underwriterFeeNavT1,
         uint256 insuranceAmountT0,
@@ -1814,12 +1820,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     /// @notice Sets the valuation price for the base asset.
     function setValuationPrice (uint128 price) external onlyCDO returns (bool){
-        // Preserve the elapsed weight before valuation changes Senior NAV and its insurance claim.
-        _accrueAssetTime();
         bool isValuationLossPeriod = valuationPrice < 1e18;
         bool valuationLossEntered = isValuationLossPeriod == false && price < 1e18;
         // Allow the valuation price in range 0.0001-1
         require(0.0001e18 <= price && price <= 1e18, "InvalidValuationPrice");
+        // Settle pending PnL first, without slashing valuation coverage at the old price.
+        checkpointAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         if (price < 1e18) {
             _disablePerformanceFee();
         }

@@ -792,7 +792,18 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         );
     }
 
-    function updateAccountingInner (uint256 navT1) internal {
+    function updateAccountingInner(uint256 navT1) internal {
+        checkpointAccountingInner(navT1);
+        // Realized losses can consume Junior NAV backing Senior's de-peg protection.
+        // Cover any resulting valuation shortfall after checkpointing.
+        if (valuationPrice < 1e18) {
+            _coverValuationLoss(valuationPrice);
+        }
+    }
+
+    /// @dev Checkpoints PnL without topping up valuation coverage.
+    ///      Keeping coverage separate lets valuation setters apply the new price first.
+    function checkpointAccountingInner(uint256 navT1) internal {
         uint256 insuranceAmountT0 = insuranceAmount;
         (
             uint256 jrtNavT1Projected,
@@ -842,11 +853,6 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             // must cover the full new claim in the same transaction.
             require(covered == newClaim, "CoverageUnderfunded");
             emit InsuranceClaimed(covered, insuranceAmount);
-        }
-        // A realized loss can consume Junior NAV already backing Senior during a de-peg.
-        // Cover the resulting valuation shortfall using the updated stored NAVs.
-        if (valuationPrice < 1e18) {
-            _coverValuationLoss(valuationPrice);
         }
     }
 
@@ -1083,6 +1089,8 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         bool valuationLossEntered = isValuationLossPeriod == false && price < 1e18;
         // Allow the valuation price in range 0.0001-1
         require(0.0001e18 <= price && price <= 1e18, "InvalidValuationPrice");
+        // Settle pending PnL first, without slashing valuation coverage at the old price.
+        checkpointAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         if (price < 1e18) {
             _disablePerformanceFee();
         }

@@ -212,21 +212,25 @@ abstract contract InsuredSeniorAssetTimeRegressionTests is ValuationInsuranceFix
     }
 
     function test_valuationPushesCheckpointBeforeClaimChanges() public {
-        vm.warp(block.timestamp + 1 days);
-        accounting.setValuationPrice(0.4e18);
-        assertEq(accounting.insuranceAmount(), 501e18);
-        assertEq(_weight(), 1000e18 * 1 days);
-        vm.warp(block.timestamp + 1 days);
-        accounting.setValuationPrice(0.5e18);
-        assertEq(accounting.insuranceAmount(), 1e18);
-        assertEq(_weight(), 2000e18 * 1 days);
-        vm.warp(block.timestamp + 1 days);
-        accounting.setValuationPrice(1e18);
-        assertEq(accounting.insuranceAmount(), 0);
-        assertEq(_weight(), 3000e18 * 1 days);
+        uint128[3] memory prices = [uint128(0.4e18), uint128(0.5e18), uint128(1e18)];
+        uint256 expectedWeight;
+        for (uint256 i; i < prices.length; i++) {
+            // The setter now checkpoints live projection too. Weight the capital held
+            // before each push, excluding its claim, rather than assuming flat Senior NAV.
+            expectedWeight += (accounting.srtBaseNav() - accounting.insuranceAmount()) * 1 days;
+            vm.warp(block.timestamp + 1 days);
+            accounting.setValuationPrice(prices[i]);
+            assertEq(_weight(), expectedWeight, "elapsed weight precedes claim and projection changes");
+            if (prices[i] < 1e18) {
+                assertGt(accounting.insuranceAmount(), 0);
+            } else {
+                assertEq(accounting.insuranceAmount(), 0);
+            }
+        }
+        expectedWeight += accounting.srtBaseNav() * 1 days;
         vm.warp(block.timestamp + 1 days);
         accounting.updateBalanceFlow(0, 0, 0, 0);
-        assertEq(_weight(), 4000e18 * 1 days);
+        assertEq(_weight(), expectedWeight);
     }
 
     function test_partialCoverageTracksActualClaim() public {

@@ -797,7 +797,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
     /// @notice Persists the underwriter fee bucket and insurance claim produced by the split, then slashes
     ///         any newly booked insurance in the same transaction.
-    /// @dev Split out of updateAccountingInner to keep that function under the stack limit.
+    /// @dev Split out of checkpointAccountingInner to keep that function under the stack limit.
     function _persistInsuranceClaim(
         uint256 underwriterFeeNavT1,
         uint256 insuranceAmountT0,
@@ -1628,6 +1628,22 @@ contract MTMAccounting is IAccounting, CDOComponent {
         uint256 navMTM,
         uint256 navMTMTime
     ) internal {
+        checkpointAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
+        // Realized losses can consume Junior NAV backing Senior's de-peg protection.
+        // Cover any resulting valuation shortfall after checkpointing.
+        if (valuationPrice < 1e18) {
+            _coverValuationLoss(valuationPrice);
+        }
+    }
+
+    /// @dev Checkpoints PnL and asset-time without topping up valuation coverage.
+    ///      Keeping coverage separate lets valuation setters apply the new price first.
+    function checkpointAccountingInner(
+        uint256 navT1,
+        uint256 navT1Time,
+        uint256 navMTM,
+        uint256 navMTMTime
+    ) internal {
 
         bool isReconciliation = _shouldReconcile(nav, navT1);
         bool hasMTMAfterReconciliation = isReconciliation && navMTMTime > navT1Time;
@@ -1741,17 +1757,12 @@ contract MTMAccounting is IAccounting, CDOComponent {
         reserveNav = reserveNavT1;
 
         if (hasMTMAfterReconciliation) {
-            updateAccountingInner(
+            checkpointAccountingInner(
                 navT1,
                 navT1Time,
                 navMTM,
                 navMTMTime
             );
-        }
-        // A realized loss can consume Junior NAV already backing Senior during a de-peg.
-        // Cover the resulting valuation shortfall using the updated stored NAVs.
-        if (valuationPrice < 1e18) {
-            _coverValuationLoss(valuationPrice);
         }
     }
 
@@ -2065,12 +2076,13 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
     /// @notice Sets the valuation price for the base asset.
     function setValuationPrice (uint128 price) external onlyCDO returns (bool){
-        // Preserve the elapsed weight before valuation changes Senior NAV and its insurance claim.
-        _accrueAssetTime(block.timestamp, _currentNavSplitState());
         bool isValuationLossPeriod = valuationPrice < 1e18;
         bool valuationLossEntered = isValuationLossPeriod == false && price < 1e18;
         // Allow the valuation price in range 0.0001-1
         require(0.0001e18 <= price && price <= 1e18, "InvalidValuationPrice");
+        // Settle pending PnL first, without slashing valuation coverage at the old price.
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        checkpointAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         if (price < 1e18) {
             _disablePerformanceFee();
         }
