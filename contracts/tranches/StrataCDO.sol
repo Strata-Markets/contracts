@@ -375,6 +375,8 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
             }
             // Revert here if funds are not yet in the insurance fund
             insuranceVault.payCoverage(_baseToCoverage(insuranceBaseOut), receiver);
+            // Quote only the strategy remainder; insurance pays the covered portion separately.
+            tokenAmount = strategy.convertToTokens(token, baseAssetsFromStrategy, Math.Rounding.Floor);
         }
 
         if (baseAssetsFromStrategy > 0) {
