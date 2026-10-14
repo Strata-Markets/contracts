@@ -1748,6 +1748,11 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 navMTMTime
             );
         }
+        // A realized loss can consume Junior NAV already backing Senior during a de-peg.
+        // Cover the resulting valuation shortfall using the updated stored NAVs.
+        if (valuationPrice < 1e18) {
+            _coverValuationLoss(valuationPrice);
+        }
     }
 
     /*****************************************************************************

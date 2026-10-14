@@ -53,15 +53,17 @@ contract DepegClaimGainTest is PerformanceFeeSuspensionTest {
             mockStrategyTvl = 800e18;
             a.updateAccounting();
             uint256 claim = a.insuranceAmount();
-            assertGt(claim, 501e18);
+            uint256 valuationClaim = a.srtInsuranceFundNav();
+            assertEq(valuationClaim, 1500e18, "lost Junior backing is covered immediately");
+            assertGt(claim, valuationClaim);
             mockStrategyTvl += 100e18;
             a.updateAccounting();
             assertEq(a.insuranceAmount(), claim - 100e18);
-            assertEq(a.srtInsuranceFundNav(), 501e18);
-            mockStrategyTvl += claim - 100e18 - 501e18;
+            assertEq(a.srtInsuranceFundNav(), valuationClaim);
+            mockStrategyTvl += claim - 100e18 - valuationClaim;
             a.updateAccounting();
-            assertEq(a.insuranceAmount(), 501e18);
-            assertEq(a.srtInsuranceFundNav(), 501e18);
+            assertEq(a.insuranceAmount(), valuationClaim);
+            assertEq(a.srtInsuranceFundNav(), valuationClaim);
         }
     }
 }

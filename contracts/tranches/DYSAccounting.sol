@@ -1479,6 +1479,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
         }
         jrtBaseNav = jrtNavT1Real;
         reserveNav = reserveNavT1;
+        // A realized loss can consume Junior NAV already backing Senior during a de-peg.
+        // Cover the resulting valuation shortfall using the updated stored NAVs.
+        if (valuationPrice < 1e18) {
+            _coverValuationLoss(valuationPrice);
+        }
     }
 
     /// @notice Persists the underwriter fee bucket and insurance claim produced by the split, then slashes

@@ -843,6 +843,11 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             require(covered == newClaim, "CoverageUnderfunded");
             emit InsuranceClaimed(covered, insuranceAmount);
         }
+        // A realized loss can consume Junior NAV already backing Senior during a de-peg.
+        // Cover the resulting valuation shortfall using the updated stored NAVs.
+        if (valuationPrice < 1e18) {
+            _coverValuationLoss(valuationPrice);
+        }
     }
 
     /// @dev Cap the middleware's already-slashed claim counter to the reduced insuranceAmount.
