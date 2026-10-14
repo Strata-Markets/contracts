@@ -475,6 +475,9 @@ contract Accounting is IAccounting, CDOComponent {
         if (isJrt) {
             jrtBaseNav -= amountToReserve;
         } else {
+            if (valuationPrice < 1e18) {
+                _scaleSrtFund(srtBaseNav, srtBaseNav - amountToReserve);
+            }
             srtBaseNav -= amountToReserve;
         }
         emit FeeAccrued(isJrt, amountToReserve, amount - amountToReserve);
@@ -669,6 +672,9 @@ contract Accounting is IAccounting, CDOComponent {
         // Require a decrease to the floor or below so an empty market does not suspend fees.
         if (jrtNavT1 <= ONE_ASSET && jrtNavT1 < jrtBaseNav) {
             _disablePerformanceFee();
+        }
+        if (valuationPrice < 1e18) {
+            _scaleSrtFund(srtBaseNav, srtNavT1);
         }
         jrtBaseNav = jrtNavT1;
         srtBaseNav = srtNavT1;
@@ -992,6 +998,21 @@ contract Accounting is IAccounting, CDOComponent {
         require(period <= 1 days, "GracePeriodTooLong");
         valuationGracePeriod = period;
         emit ValuationGracePeriodChanged(period);
+    }
+
+    /// @dev Write down self-funding only when fees or realized losses reduce Senior principal.
+    ///      Valuation insurance credit is compensation, not principal; exclude it from the ratio.
+    function _scaleSrtFund(uint256 seniorBefore, uint256 seniorAfter) internal {
+        if (seniorAfter >= seniorBefore || (srtFundedGrossNav == 0 && srtFundNav == 0)) {
+            return;
+        }
+        uint256 principalBefore = Math.saturatingSub(seniorBefore, srtInsuranceFundNav);
+        uint256 principalAfter = Math.saturatingSub(seniorAfter, srtInsuranceFundNav);
+        if (principalBefore == 0) {
+            return;
+        }
+        srtFundedGrossNav = Math.mulDiv(srtFundedGrossNav, principalAfter, principalBefore);
+        srtFundNav = Math.mulDiv(srtFundNav, principalAfter, principalBefore);
     }
 
     function _trackSrtFundNavIn(uint256 amount) internal returns (uint256 srtFundAmountIn) {

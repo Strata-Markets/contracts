@@ -932,6 +932,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
             jrtBaseNav -= amountToReserve;
             jrtNavProjected -= amountToReserve;
         } else {
+            if (valuationPrice < 1e18) {
+                // Remaining projection is assumed negligible
+                _scaleSrtFund(srtBaseNav, srtBaseNav - amountToReserve);
+            }
             srtBaseNav -= amountToReserve;
             windowNetFlows -= int256(amountToReserve);
         }
@@ -1421,6 +1425,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
         _persistInsuranceClaim(underwriterFeeNavT1, state.insuranceAmount, insuranceAmountT1);
 
         if (isReconciliation) {
+            if (valuationPrice < 1e18) {
+                // Remaining projection is assumed negligible for scaling.
+                _scaleSrtFund(srtBaseNav, srtNavT1);
+            }
             emit Reconciled(
                 epochStart,
                 block.timestamp,
@@ -1882,6 +1890,21 @@ contract DYSAccounting is IAccounting, CDOComponent {
         require(period <= 1 days, "GracePeriodTooLong");
         valuationGracePeriod = period;
         emit ValuationGracePeriodChanged(period);
+    }
+
+    /// @dev Scale self-funding with Senior NAV reductions from fees or reconciliation.
+    ///      Valuation insurance credit is compensation, not principal; exclude it from the ratio.
+    function _scaleSrtFund(uint256 seniorBefore, uint256 seniorAfter) internal {
+        if (seniorAfter >= seniorBefore || (srtFundedGrossNav == 0 && srtFundNav == 0)) {
+            return;
+        }
+        uint256 principalBefore = Math.saturatingSub(seniorBefore, srtInsuranceFundNav);
+        uint256 principalAfter = Math.saturatingSub(seniorAfter, srtInsuranceFundNav);
+        if (principalBefore == 0) {
+            return;
+        }
+        srtFundedGrossNav = Math.mulDiv(srtFundedGrossNav, principalAfter, principalBefore);
+        srtFundNav = Math.mulDiv(srtFundNav, principalAfter, principalBefore);
     }
 
     function _trackSrtFundNavIn(uint256 amount) internal returns (uint256 srtFundAmountIn) {

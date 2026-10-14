@@ -508,6 +508,9 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             jrtBaseNav -= amountToReserve;
             jrtNavProjected -= amountToReserve;
         } else {
+            if (valuationPrice < 1e18) {
+                _scaleSrtFund(srtBaseNav, srtBaseNav - amountToReserve);
+            }
             srtBaseNav -= amountToReserve;
         }
         emit FeeAccrued(isJrt, amountToReserve, amount - amountToReserve);
@@ -827,6 +830,9 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             lastReconciliation = block.timestamp;
             if (navT1 > feeWatermarkNav) {
                 feeWatermarkNav = navT1;
+            }
+            if (valuationPrice < 1e18) {
+                _scaleSrtFund(srtBaseNav, srtNavT1);
             }
         }
 
@@ -1148,6 +1154,21 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         emit ValuationGracePeriodChanged(period);
     }
 
+
+    /// @dev Write down self-funding only when fees or realized losses reduce Senior principal.
+    ///      Valuation insurance credit is compensation, not principal; exclude it from the ratio.
+    function _scaleSrtFund(uint256 seniorBefore, uint256 seniorAfter) internal {
+        if (seniorAfter >= seniorBefore || (srtFundedGrossNav == 0 && srtFundNav == 0)) {
+            return;
+        }
+        uint256 principalBefore = Math.saturatingSub(seniorBefore, srtInsuranceFundNav);
+        uint256 principalAfter = Math.saturatingSub(seniorAfter, srtInsuranceFundNav);
+        if (principalBefore == 0) {
+            return;
+        }
+        srtFundedGrossNav = Math.mulDiv(srtFundedGrossNav, principalAfter, principalBefore);
+        srtFundNav = Math.mulDiv(srtFundNav, principalAfter, principalBefore);
+    }
 
     function _trackSrtFundNavIn(uint256 amount) internal returns (uint256 srtFundAmountIn) {
         if (amount == 0 || valuationPrice == 1e18) {
