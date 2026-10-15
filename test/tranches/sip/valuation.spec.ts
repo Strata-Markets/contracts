@@ -74,6 +74,17 @@ UTest.create({
         $require.eq(await jrtVault.totalAssets(), BigInt(1e18));
         $require.eq(await srtVault.totalAssets(), BigInt(199e18));
 
+        // The first deposit below the threshold now reverts instead of completing and pausing.
+        let supplyBefore = await jrtVault.totalSupply();
+        let error = await $erc4626.deposit(jrtVault, deployer, 1).then(() => null, error => error);
+        $require.notNull(error, 'Deposit below the shortfall threshold must revert');
+        $require.match(/Shortfall/, error.message);
+        $require.eq(await jrtVault.totalSupply(), supplyBefore, 'Rejected deposit must not mint shares');
+        $require.eq(await jrtVault.totalAssets(), BigInt(1e18));
+
+        // This test exercises recapitalization; explicitly lower the threshold to permit it.
+        await cdo.$receipt().setJrtShortfallPausePrice(deployer, 0n);
+
         l`Deposit 1 USDe to JRT, that should be moved to SRT for full coverage`;
         await $erc4626.deposit(jrtVault, deployer, 1);
         $require.eq(await jrtVault.totalAssets(), BigInt(1e18));
@@ -95,7 +106,7 @@ UTest.create({
 
 
         l`Deposit 1 USDe to JRT, that should remain`;
-        // Re-enable JRT deposits, as due to loss pps dropped < jrtShortfallPausePrice
+        // Reopen Junior withdrawals, which were disabled when valuation loss began.
         await cdo.$receipt().setActionStates(deployer, jrtVault.address, true, true);
 
         $require.eq(await cdo.maxDeposit(jrtVault.address), $bigint.MAX_UINT256, `JRT max depositable`);
@@ -127,7 +138,7 @@ UTest.create({
 
         await cdo.$receipt().setValuationPrice(deployer, BigInt(.5e18));
 
-        // Re-enable JRT deposits, as due to loss pps dropped < jrtShortfallPausePrice
+        // Valuation loss disables Junior withdrawals; reopen them for this redemption test.
         await cdo.$receipt().setActionStates(deployer, jrtVault.address, true, true);
 
         const srRedeemed = await $erc4626.redeem(srtVault, deployer, '100%');

@@ -97,10 +97,11 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     event UnderwriterFeePercentageChanged(uint256 fee);
     event InsuranceClaimFunded(address token, uint256 amount, uint256 baseAssets);
     event TreasurySet(address treasury);
-    event ShortfallPaused();
     event JrtShortfallPausePriceSet(uint256 pricePerShare);
     event ExitFeesSet(uint256 jrt, uint256 srt);
     event SharesCooldownSet(address sharesCooldown);
+
+    error Shortfall(uint256 jrtPrice);
 
 
     /// @notice Restricts function access to only the junior (JRT) or senior (SRT) tranche contracts
@@ -336,7 +337,7 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         uint256 jrtAssetsIn = isJrt_ ? baseAssetsNet : 0;
         uint256 srtAssetsIn = isJrt_ ? 0             : baseAssetsNet;
         accounting.updateBalanceFlow(jrtAssetsIn, 0, srtAssetsIn, 0);
-        shortfallPauser();
+        shortfallCheck(isJrt_, true);
     }
 
     function withdraw(address tranche, address token, uint256 tokenAmount, uint256 baseAssets, address sender, address receiver, bytes memory strategyOptions) external onlyTranche nonReentrant {
@@ -386,14 +387,13 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
                 strategy.withdraw(tranche, token, tokenAmount, baseAssetsFromStrategy, sender, receiver, shouldSkipCooldown, strategyOptions);
             }
         }
-        shortfallPauser();
+        shortfallCheck(isJrt_, false);
     }
 
     /// @notice Lets a tranche refresh APRs after NAV-affecting events (e.g., fee accrual in burnSharesAsFee).
     /// @dev updates use current NAVs as a zero flow delta.
     function updateBalanceFlow() external onlyTranche {
         accounting.updateBalanceFlow(0, 0, 0, 0);
-        shortfallPauser();
     }
 
     /// @notice Initiates a cooldown period for share redemption by transferring shares to the cooldown contract.
@@ -679,16 +679,16 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         }
     }
 
-
-    function shortfallPauser () internal {
+    /// @dev Requires Junior PPS to remain above the shortfall threshold after deposits and Junior withdrawals.
+    function shortfallCheck (bool isJrt_, bool isDeposit_) internal view {
+        if (!isJrt_ && !isDeposit_) {
+            // Senior withdrawals remain allowed regardless of Junior PPS.
+            return;
+        }
         (uint256 jrtNav,,) = accounting.totalAssetsT0();
         uint256 jrtPrice = calculatePricePerShare(jrtNav, jrtVault.totalSupply(), baseAssetDecimals);
         if (jrtPrice <= jrtShortfallPausePrice) {
-            actionsJrt.isDepositEnabled = false;
-            actionsSrt.isDepositEnabled = false;
-            emit DepositsStateChanged(address(jrtVault), false);
-            emit DepositsStateChanged(address(srtVault), false);
-            emit ShortfallPaused();
+            revert Shortfall(jrtPrice);
         }
     }
 
