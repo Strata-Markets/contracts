@@ -6,6 +6,8 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 
 import { IInsuranceMiddleware } from "./interfaces/IInsuranceMiddleware.sol";
+import { IAccounting } from "../interfaces/IAccounting.sol";
+import { IInsuranceVault } from "./interfaces/IInsuranceVault.sol";
 import { IAppAdapter } from "./interfaces/IAppAdapter.sol";
 import { IStrataAccounting } from "./interfaces/IStrataAccounting.sol";
 import { IStrataCDO } from "../interfaces/IStrataCDO.sol";
@@ -46,20 +48,21 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     /// @notice Enumerable list of registered market CDOs, used to net shared coverage capacity
     address[] public marketCdos;
 
-    /// @notice Outstanding claim backed by prior slashes, in base assets, independent of funding status.
+    /// @notice Outstanding claim backed by slashes or reused funding, in base assets.
     mapping(address cdo => uint256) public slashedClaimBase;
 
     // ===============================================
     // Events and Errors
 
-    error NoSlashableAmount();
-    error MarketNotEnabled(address cdo);
+    error InvalidReturnedAmount();
     error NotAuthorized(address sender);
 
     event MarketSet(address indexed cdo, address accounting, address baseAsset, uint256 bufferBps, bool enabled);
     event OracleSet(address indexed oracle);
+    event CoverageReused(address indexed cdo, uint256 coveredBase);
     event CoverageSlashed(address indexed cdo, uint256 requested, uint256 slashed);
     event InsuranceClaimFundingConfirmed(address indexed cdo, uint256 amount);
+    event SlashedCollateralReturned(address indexed cdo, uint256 amount);
 
 
 
@@ -70,45 +73,11 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     }
 
     // ===============================================
-    // Only Owner functions
+    // Coverage and owner functions
 
-    function slash(address cdo) external onlyOwner {
-        TMarket storage market = markets[cdo];
-        if (!market.enabled) {
-            revert MarketNotEnabled(cdo);
-        }
-
-        // needed amount in vault asset
-        uint256 neededAmount = _getNeededAmount(cdo);
-        if (neededAmount == 0) {
-            revert NoSlashableAmount();
-        }
-
-        // The adapter caps the slash to the currently slashable stake and does not return the
-        // executed amount; derive it from the slashable() delta.
-        uint256 slashableBefore = appAdapter.slashable();
-        appAdapter.slash(neededAmount);
-        uint256 slashed = slashableBefore - appAdapter.slashable();
-
-        market.totalSlashed += slashed;
-        market.pendingInsuranceClaimFunding += slashed;
-        uint256 unslashed = _unslashedClaim(cdo, market);
-        uint256 coveredBase = slashed >= neededAmount
-            ? unslashed
-            : Math.min(unslashed, Math.mulDiv(_toBaseAsset(market, slashed), BPS, BPS + market.bufferBps));
-        slashedClaimBase[cdo] = Math.min(slashedClaimBase[cdo], market.accounting.insuranceAmount()) + coveredBase;
-        emit CoverageSlashed(cdo, neededAmount, slashed);
-    }
-
-    /// @notice Slashes coverage for a Senior-bound loss in the same transaction it is booked.
-    /// @dev Synchronous coverage: the market's accounting calls this from updateAccounting/valuation
-    ///      right after booking the claim, so the slashable() its preview read is the same value
-    ///      slashed here (no cross-block drift). Slashes the buffered vault equivalent of `lossBase`,
-    ///      capped to live slashable(), and returns the base actually covered. Only the market's
-    ///      registered accounting may call.
-    /// @param cdo The CDO address identifying the market in the coverage registry.
-    /// @param lossBase The Senior-bound loss to cover, in the market's base asset.
-    /// @return coveredBase The base actually covered (<= lossBase), i.e. the de-buffered slashed vault.
+    /// @notice Uses funded surplus first, then slashes the remaining new claim.
+    /// @dev Accounting calls before adding lossBase to insuranceAmount, so the vault reserves
+    ///      only existing claims when calculating surplusCoverage().
     function coverAndSlash(address cdo, uint256 lossBase) external returns (uint256 coveredBase) {
         TMarket storage market = markets[cdo];
         if (msg.sender != address(market.accounting)) {
@@ -118,11 +87,20 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
             return 0;
         }
 
-        uint256 neededVault = _bufferedVault(market, lossBase);
+        uint256 reused = Math.min(lossBase, _fundedBase(cdo, market, true));
+        if (reused > 0) {
+            slashedClaimBase[cdo] += reused;
+            emit CoverageReused(cdo, reused);
+        }
+        lossBase -= reused;
+        if (lossBase == 0) return reused;
+
+        // A remainder after reuse can be smaller than one collateral atom.
+        uint256 neededVault = Math.max(1, _bufferedVault(market, lossBase));
         uint256 slashableBefore = appAdapter.slashable();
         uint256 slashVault = Math.min(neededVault, slashableBefore);
         if (slashVault == 0) {
-            return 0;
+            return reused;
         }
 
         appAdapter.slash(slashVault);
@@ -141,6 +119,7 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
             : Math.min(deliverableBase, lossBase);
         // Accounting synchronizes reductions separately; this call always covers a new claim increment.
         slashedClaimBase[cdo] += coveredBase;
+        return reused + coveredBase;
     }
 
     /// @notice Drops backing for claims that have settled through redemption or recovery.
@@ -170,6 +149,28 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         market.pendingInsuranceClaimFunding = Math.saturatingSub(market.pendingInsuranceClaimFunding, _toVaultAsset(market, amount));
 
         emit InsuranceClaimFundingConfirmed(cdo, amount);
+    }
+
+    /// @notice Confirms a manual return of unfunded slash proceeds exceeding the remaining claim.
+    /// @dev Records the owner's confirmation only; does not transfer or verify returned tokens.
+    ///      Cumulative slashes and the adapter's slashable capacity remain unchanged.
+    /// @param amount Returned collateral in Symbiotic vault asset units.
+    function confirmSlashedCollateralReturned(address cdo, uint256 amount) external onlyOwner {
+        TMarket storage market = markets[cdo];
+        uint256 claim = market.accounting.insuranceAmount();
+        uint256 required;
+        if (claim > 0) {
+            uint256 unfunded = Math.saturatingSub(claim, _fundedBase(cdo, market, false));
+            // Retain enough collateral at current prices, including the swap buffer; round up.
+            required = Math.mulDiv(
+                _toVaultAsset(market, unfunded, Math.Rounding.Ceil), BPS + market.bufferBps, BPS, Math.Rounding.Ceil
+            );
+        }
+        uint256 surplus = Math.saturatingSub(market.pendingInsuranceClaimFunding, required);
+        if (amount == 0 || amount > surplus) revert InvalidReturnedAmount();
+
+        market.pendingInsuranceClaimFunding -= amount;
+        emit SlashedCollateralReturned(cdo, amount);
     }
 
     /// @notice Registers or updates a market in the coverage registry.
@@ -217,7 +218,8 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     // IInsurancePool
 
     /// @dev View: returns how much of `lossAmount` (in the market's base asset) the shared pool can
-    ///      currently cover. Capacity is the adapter's slashable stake minus the coverage already
+    ///      currently cover. Funded surplus is used first. Additional capacity is slashable stake minus
+    ///      the coverage already
     ///      committed to every market (their outstanding claims not yet slashed), so simultaneous
     ///      multi-market stress cannot over-commit the shared stake. The available stake is
     ///      de-buffered by the market's bufferBps: covering B base consumes bufferedVault(B) of the
@@ -229,17 +231,19 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         if (!market.enabled || lossAmount == 0) {
             return 0;
         }
+        covered = Math.min(lossAmount, _fundedBase(cdo, market, true));
+        if (covered == lossAmount) return covered;
         uint256 availableVault = Math.saturatingSub(appAdapter.slashable(), _committedVault());
         uint256 availableBase = Math.mulDiv(
             _toBaseAsset(market, availableVault),
             BPS,
             BPS + market.bufferBps
         );
-        covered = Math.min(lossAmount, availableBase);
+        covered += Math.min(lossAmount - covered, availableBase);
     }
 
     /// @notice Total coverage already committed across all markets, in vault asset.
-    /// @dev Only unslashed claims consume live stake. Funding already-slashed claims does not
+    /// @dev Only claims without allocated or funded backing consume live stake. Funding does not
     ///      create a new reservation. Reserve the buffered vault equivalent of the remaining deficit.
     function _committedVault() internal view returns (uint256 total) {
         uint256 len = marketCdos.length;
@@ -248,23 +252,24 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
             if (!market.enabled) {
                 continue;
             }
-            total += _bufferedVault(market, _unslashedClaim(marketCdos[i], market));
+            address cdo = marketCdos[i];
+            uint256 backed = Math.max(slashedClaimBase[cdo], _fundedBase(cdo, market, false));
+            total += _bufferedVault(market, Math.saturatingSub(market.accounting.insuranceAmount(), backed));
         }
     }
 
     // ===============================================
     // Internal functions
 
-    /// @notice Returns the amount to slash for a market, in vault asset terms.
-    /// @dev Both funded and pending backing are excluded so the same claim is not slashed twice.
-    ///      The adapter additionally caps the executed amount to the currently slashable stake.
-    function _getNeededAmount(address cdo) internal view returns (uint256) {
-        TMarket storage market = markets[cdo];
-        return _bufferedVault(market, _unslashedClaim(cdo, market));
-    }
-
-    function _unslashedClaim(address cdo, TMarket storage market) internal view returns (uint256) {
-        return Math.saturatingSub(market.accounting.insuranceAmount(), slashedClaimBase[cdo]);
+    /// @dev Same valuation-price basis as CDO payouts; rounds down when converting funding to base.
+    ///      Pending slashing proceeds are not available funded surplus.
+    function _fundedBase(address cdo, TMarket storage market, bool surplusOnly) internal view returns (uint256) {
+        IInsuranceVault vault = IStrataCDO(cdo).insuranceVault();
+        if (address(vault) == address(0)) return 0;
+        uint256 amount = surplusOnly ? vault.surplusCoverage() : vault.fundedCoverage();
+        if (amount == 0) return 0;
+        uint256 valuedBase = Math.mulDiv(amount, 10 ** IERC20Metadata(market.baseAsset).decimals(), 10 ** vault.coverageTokenDecimals());
+        return Math.mulDiv(valuedBase, 1e18, IAccounting(address(market.accounting)).valuationPrice());
     }
 
     /// @notice Vault asset required to cover a base-asset claim, including the market's swap buffer.
@@ -279,6 +284,10 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     /// @dev Prices both assets in the oracle's common quote currency and adjusts for the
     ///      token decimals on both sides. Rounds down (in favor of the underwriters).
     function _toVaultAsset(TMarket storage market, uint256 baseAssets) internal view returns (uint256) {
+        return _toVaultAsset(market, baseAssets, Math.Rounding.Floor);
+    }
+
+    function _toVaultAsset(TMarket storage market, uint256 baseAssets, Math.Rounding rounding) internal view returns (uint256) {
         if (baseAssets == 0) return 0;
 
         address vaultAsset = appAdapter.asset();
@@ -287,7 +296,8 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         return Math.mulDiv(
             baseAssets,
             basePrice * 10 ** (IERC20Metadata(vaultAsset).decimals() + vaultPriceDecimals),
-            vaultPrice * 10 ** (IERC20Metadata(market.baseAsset).decimals() + basePriceDecimals)
+            vaultPrice * 10 ** (IERC20Metadata(market.baseAsset).decimals() + basePriceDecimals),
+            rounding
         );
     }
 

@@ -7,6 +7,8 @@ import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { PausableUpgradeable } from "@openzeppelin/contracts-upgradeable/utils/PausableUpgradeable.sol";
 
 import { InsuranceMiddleware } from "../../contracts/tranches/symbiotic/InsuranceMiddleware.sol";
+import { InsuranceVault } from "../../contracts/tranches/symbiotic/InsuranceVault.sol";
+import { IStrataCDO } from "../../contracts/tranches/interfaces/IStrataCDO.sol";
 import { IAppAdapter } from "../../contracts/tranches/symbiotic/interfaces/IAppAdapter.sol";
 import { IStrataAccounting } from "../../contracts/tranches/symbiotic/interfaces/IStrataAccounting.sol";
 import { IOracleAdapter } from "../../contracts/tranches/symbiotic/interfaces/IOracleAdapter.sol";
@@ -67,6 +69,8 @@ contract MockAppAdapter {
 contract MockStrataAccounting is IStrataAccounting {
     uint256 public insuranceAmount;
     uint256 public underwriterFeeBps;
+    uint128 public valuationPrice = 1e18;
+    function setValuationPrice(uint128 price) external { valuationPrice = price; }
 
     function setInsuranceAmount(uint256 deficit) external {
         insuranceAmount = deficit;
@@ -82,6 +86,10 @@ contract MockStrataAccounting is IStrataAccounting {
 ///         to its accounting contract; accounting itself only accepts the call from the CDO.
 contract MockStrataCDO {
     MockStrataAccounting public accounting;
+    address public insuranceVault;
+    uint256 public baseAssetDecimals = 18;
+    function setInsuranceVault(address vault) external { insuranceVault = vault; }
+    function setBaseAssetDecimals(uint256 value) external { baseAssetDecimals = value; }
 
     constructor(MockStrataAccounting accounting_) {
         accounting = accounting_;
@@ -98,6 +106,7 @@ contract InsuranceMiddlewareTest is Test {
     event MarketSet(address indexed cdo, address accounting, address baseAsset, uint256 bufferBps, bool enabled);
     event CoverageSlashed(address indexed cdo, uint256 requested, uint256 slashed);
     event InsuranceClaimFundingConfirmed(address indexed cdo, uint256 amount);
+    event SlashedCollateralReturned(address indexed cdo, uint256 amount);
 
     uint256 constant UNIBTC_PRICE = 60_000e18; // $60k, 18 decimals
     uint256 constant SLASHABLE = 100e8;        // 100 uniBTC slashable stake
@@ -211,7 +220,7 @@ contract InsuranceMiddlewareTest is Test {
         // bufferedVault(B) = 1.1 * toVaultAsset(B) from the shared stake when slashed.
         uint256 bufferBps = 1_000; // 10% (BPS = 10_000)
         MockStrataAccounting accountingB = new MockStrataAccounting();
-        address cdoB = makeAddr("cdoBuffered");
+        address cdoB = address(new MockStrataCDO(accountingB));
         vm.prank(owner);
         middleware.setMarket(cdoB, accountingB, address(usde), bufferBps, true);
 
@@ -227,7 +236,7 @@ contract InsuranceMiddlewareTest is Test {
         // the remaining capacity offered to a fresh request drops by that buffered amount.
         uint256 bufferBps = 1_000; // 10%
         MockStrataAccounting accountingB = new MockStrataAccounting();
-        address cdoB = makeAddr("cdoBuffered");
+        address cdoB = address(new MockStrataCDO(accountingB));
         vm.prank(owner);
         middleware.setMarket(cdoB, accountingB, address(usde), bufferBps, true);
 
@@ -242,33 +251,29 @@ contract InsuranceMiddlewareTest is Test {
         assertEq(covered, expectedCapacity);
     }
 
-    function test_slash_appliesBuffer() public {
+    function test_coverAndSlash_appliesBuffer() public {
         // Slash sizes the claim up by the buffer: a 1 uniBTC raw deficit slashes 1.1 uniBTC.
         uint256 bufferBps = 1_000; // 10%
         MockStrataAccounting accountingB = new MockStrataAccounting();
-        address cdoB = makeAddr("cdoBuffered");
+        address cdoB = address(new MockStrataCDO(accountingB));
         vm.prank(owner);
         middleware.setMarket(cdoB, accountingB, address(usde), bufferBps, true);
 
-        accountingB.setInsuranceAmount(60_000e18); // 1 uniBTC raw
-        vm.prank(owner);
-        middleware.slash(cdoB);
+        _coverTo(cdoB, accountingB, 60_000e18);
 
         assertEq(adapter.lastSlashAmount(), 1e8 * (10_000 + bufferBps) / 10_000); // 1.1 uniBTC
         assertEq(middleware.slashedClaimBase(cdoB), 60_000e18);
     }
 
-    function test_slash_convertsDeficitAndBooks() public {
+    function test_coverAndSlash_convertsDeficitAndBooks() public {
         uint256 deficit = 60_000e18; // $60k deficit = 1 uniBTC
-        accounting.setInsuranceAmount(deficit);
 
         uint256 expected = expectedVaultAmount(deficit);
         assertEq(expected, 1e8); // sanity: exactly 1 uniBTC
 
         vm.expectEmit(true, false, false, true);
-        emit CoverageSlashed(cdo, expected, expected);
-        vm.prank(owner);
-        middleware.slash(cdo);
+        emit CoverageSlashed(cdo, deficit, expected);
+        _coverTo(cdo, accounting, deficit);
 
         (,, uint256 totalSlashed, uint256 pendingInsuranceClaimFunding,,) = middleware.markets(cdo);
         assertEq(adapter.lastSlashAmount(), expected);
@@ -307,100 +312,145 @@ contract InsuranceMiddlewareTest is Test {
         assertEq(middleware.slashedClaimBase(cdo), covered);
     }
 
-    function test_slash_decimalConversionFloors() public {
+    function test_coverAndSlash_decimalConversionFloors() public {
         uint256 deficit = 1000e18; // $1000 -> 0.016666.. uniBTC
-        accounting.setInsuranceAmount(deficit);
-
-        vm.prank(owner);
-        middleware.slash(cdo);
+        _coverTo(cdo, accounting, deficit);
 
         // 1000/60000 BTC in 8 decimals, floored
         assertEq(adapter.lastSlashAmount(), 1666666);
     }
 
-    function test_slash_cappedByAdapterSlashable() public {
-        adapter.setSlashable(0.5e8); // only 0.5 uniBTC available
-        accounting.setInsuranceAmount(60_000e18); // wants 1 uniBTC
-
-        vm.prank(owner);
-        middleware.slash(cdo);
-
-        (,, uint256 totalSlashed, uint256 pendingInsuranceClaimFunding,,) = middleware.markets(cdo);
-        // Only the executed amount is booked
-        assertEq(totalSlashed, 0.5e8);
-        assertEq(pendingInsuranceClaimFunding, 0.5e8);
-        assertEq(middleware.slashedClaimBase(cdo), 30_000e18);
-
-        vm.prank(cdo);
-        middleware.confirmInsuranceClaimFunding(cdo, 30_000e18);
-        adapter.setSlashable(1e8);
-        assertEq(middleware.request(cdo, 60_000e18), 30_000e18, "reserve only the unslashed half");
-        vm.prank(owner);
-        middleware.slash(cdo);
-        assertEq(adapter.lastSlashAmount(), 0.5e8);
-        assertEq(middleware.slashedClaimBase(cdo), 60_000e18);
-    }
-
-    function test_slash_noDoubleSlashForSameDeficit() public {
-        accounting.setInsuranceAmount(60_000e18);
-
-        vm.prank(owner);
-        middleware.slash(cdo);
-
-        // Deficit unchanged in accounting (insurance claim funding not done yet): a second slash must revert
-        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
-        vm.prank(owner);
-        middleware.slash(cdo);
-    }
-
-    function test_slash_slashesOnlyNewDeficit() public {
-        accounting.setInsuranceAmount(60_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+    function test_coverAndSlash_slashesOnlyNewDeficit() public {
+        _coverTo(cdo, accounting, 60_000e18);
 
         // Deficit grows by another $30k before any insurance claim funding
-        accounting.setInsuranceAmount(90_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+        _coverTo(cdo, accounting, 90_000e18);
 
         (,, uint256 totalSlashed, uint256 pendingInsuranceClaimFunding,,) = middleware.markets(cdo);
         assertEq(totalSlashed, 1.5e8);
         assertEq(pendingInsuranceClaimFunding, 1.5e8);
     }
 
-    function test_slash_revertsWhenNoDeficit() public {
-        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
-        vm.prank(owner);
-        middleware.slash(cdo);
+    function _coverTo(address marketCdo, MockStrataAccounting acc, uint256 targetClaim) internal {
+        uint256 oldClaim = acc.insuranceAmount();
+        vm.prank(address(acc));
+        uint256 covered = middleware.coverAndSlash(marketCdo, targetClaim - oldClaim);
+        acc.setInsuranceAmount(oldClaim + covered);
     }
 
-    function test_slash_revertsWhenMarketDisabled() public {
-        vm.prank(owner);
-        middleware.setMarket(cdo, accounting, address(usde), 0, false);
-
-        accounting.setInsuranceAmount(60_000e18);
-        vm.expectRevert(abi.encodeWithSelector(InsuranceMiddleware.MarketNotEnabled.selector, cdo));
-        vm.prank(owner);
-        middleware.slash(cdo);
+    function _slashThenRecover() internal {
+        _coverTo(cdo, accounting, 60_000e18);
+        accounting.setInsuranceAmount(0);
+        vm.prank(address(accounting));
+        middleware.syncInsuranceClaim(cdo);
     }
 
-    function test_slash_revertsForUnknownMarket() public {
-        vm.expectRevert(abi.encodeWithSelector(InsuranceMiddleware.MarketNotEnabled.selector, stranger));
+    function test_confirmSlashedCollateralReturned_partialThenFullPreservesHistory() public {
+        _slashThenRecover();
+        uint256 capacity = adapter.slashable();
+        // Confirmation uses collateral units, independent of subsequent oracle changes.
+        oracle.setPrice(address(unibtc), 2 * UNIBTC_PRICE, 18);
+        vm.expectEmit(true, false, false, true, address(middleware));
+        emit SlashedCollateralReturned(cdo, 0.4e8);
         vm.prank(owner);
-        middleware.slash(stranger);
+        middleware.confirmSlashedCollateralReturned(cdo, 0.4e8);
+        (,, uint256 total, uint256 pending,,) = middleware.markets(cdo);
+        assertEq(total, 1e8);
+        assertEq(pending, 0.6e8);
+
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 0.6e8);
+        (,, total, pending,,) = middleware.markets(cdo);
+        assertEq(total, 1e8);
+        assertEq(pending, 0);
+        assertEq(middleware.slashedClaimBase(cdo), 0);
+        assertEq(accounting.insuranceAmount(), 0);
+        assertEq(adapter.slashable(), capacity);
+        vm.expectRevert(InsuranceMiddleware.InvalidReturnedAmount.selector);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 1);
     }
 
-    function test_slash_onlyOwner() public {
-        accounting.setInsuranceAmount(60_000e18);
+    function test_confirmSlashedCollateralReturned_onlyOwner() public {
+        _slashThenRecover();
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vm.prank(stranger);
-        middleware.slash(cdo);
+        middleware.confirmSlashedCollateralReturned(cdo, 1e8);
+    }
+
+    function test_confirmSlashedCollateralReturned_rejectsLiveClaim() public {
+        _slashThenRecover();
+        accounting.setInsuranceAmount(1);
+        vm.expectRevert(InsuranceMiddleware.InvalidReturnedAmount.selector);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 1e8);
+    }
+
+    function test_confirmSlashedCollateralReturned_partialRecoveryReservesBuffer() public {
+        vm.prank(owner);
+        middleware.setMarket(cdo, accounting, address(usde), 1000, true);
+        _coverTo(cdo, accounting, 60_000e18);
+        accounting.setInsuranceAmount(30_000e18);
+        vm.prank(address(accounting));
+        middleware.syncInsuranceClaim(cdo);
+        vm.expectRevert(InsuranceMiddleware.InvalidReturnedAmount.selector);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 0.55e8 + 1);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 0.55e8);
+        (,, uint256 total, uint256 pending,,) = middleware.markets(cdo);
+        assertEq(total, 1.1e8);
+        assertEq(pending, 0.55e8);
+        assertEq(middleware.slashedClaimBase(cdo), 30_000e18);
+    }
+
+    function test_confirmSlashedCollateralReturned_reservesAtCurrentPrice() public {
+        _slashThenRecover();
+        accounting.setInsuranceAmount(30_000e18);
+        oracle.setPrice(address(unibtc), UNIBTC_PRICE / 2, 18);
+        vm.expectRevert(InsuranceMiddleware.InvalidReturnedAmount.selector);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 1);
+    }
+
+    function test_confirmSlashedCollateralReturned_deductsFundedCoverage() public {
+        _slashThenRecover();
+        accounting.setInsuranceAmount(30_000e18);
+        _fundVault(12_000e18);
+        vm.prank(cdo);
+        middleware.confirmInsuranceClaimFunding(cdo, 12_000e18);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 0.5e8);
+        (,,, uint256 pending,,) = middleware.markets(cdo);
+        assertEq(pending, 0.3e8);
+        vm.expectRevert(InsuranceMiddleware.InvalidReturnedAmount.selector);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 1);
+    }
+
+    function test_confirmSlashedCollateralReturned_roundsReserveUp() public {
+        _slashThenRecover();
+        accounting.setInsuranceAmount(1);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 1e8 - 1);
+        (,,, uint256 pending,,) = middleware.markets(cdo);
+        assertEq(pending, 1);
+    }
+
+    function test_confirmSlashedCollateralReturned_rejectsInvalidAmounts() public {
+        _slashThenRecover();
+        vm.expectRevert(InsuranceMiddleware.InvalidReturnedAmount.selector);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 0);
+        vm.expectRevert(InsuranceMiddleware.InvalidReturnedAmount.selector);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 1e8 + 1);
+        (,,, uint256 pending,,) = middleware.markets(cdo);
+        assertEq(pending, 1e8);
     }
 
     function test_confirmInsuranceClaimFunding_byCdoReducesPendingInsuranceClaimFunding() public {
-        accounting.setInsuranceAmount(60_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+        _coverTo(cdo, accounting, 60_000e18);
 
         // CDO reports insurance claim funding of $30k (base assets) = 0.5 uniBTC
         vm.expectEmit(true, false, false, true);
@@ -413,9 +463,7 @@ contract InsuranceMiddlewareTest is Test {
     }
 
     function test_confirmInsuranceClaimFunding_byOwnerAllowed() public {
-        accounting.setInsuranceAmount(60_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+        _coverTo(cdo, accounting, 60_000e18);
 
         vm.prank(owner);
         middleware.confirmInsuranceClaimFunding(cdo, 60_000e18);
@@ -431,9 +479,7 @@ contract InsuranceMiddlewareTest is Test {
     }
 
     function test_confirmInsuranceClaimFunding_saturatesOnOverConfirm() public {
-        accounting.setInsuranceAmount(60_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+        _coverTo(cdo, accounting, 60_000e18);
 
         // Confirm more value than was slashed (price moved); must clamp to zero, not revert
         vm.prank(cdo);
@@ -443,18 +489,13 @@ contract InsuranceMiddlewareTest is Test {
         assertEq(pendingInsuranceClaimFunding, 0);
     }
 
-    function test_fundingDoesNotChangeCapacityOrAllowReslash() public {
-        accounting.setInsuranceAmount(60_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+    function test_fundingDoesNotChangeCapacity() public {
+        _coverTo(cdo, accounting, 60_000e18);
         uint256 available = middleware.request(cdo, type(uint128).max);
         vm.prank(cdo);
         middleware.confirmInsuranceClaimFunding(cdo, 60_000e18);
         assertEq(middleware.slashedClaimBase(cdo), 60_000e18);
         assertEq(middleware.request(cdo, type(uint128).max), available);
-        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
-        vm.prank(owner);
-        middleware.slash(cdo);
     }
 
     function test_syncInsuranceClaim_onlyAccounting() public {
@@ -464,24 +505,18 @@ contract InsuranceMiddlewareTest is Test {
     }
 
     function test_settledBackingCannotHideLaterUnslashedClaim() public {
-        accounting.setInsuranceAmount(60_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+        _coverTo(cdo, accounting, 60_000e18);
         accounting.setInsuranceAmount(20_000e18);
         vm.prank(address(accounting));
         middleware.syncInsuranceClaim(cdo);
         assertEq(middleware.slashedClaimBase(cdo), 20_000e18);
-        accounting.setInsuranceAmount(40_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+        _coverTo(cdo, accounting, 40_000e18);
         assertEq(middleware.slashedClaimBase(cdo), 40_000e18);
         assertEq(adapter.lastSlashAmount(), uint256(20_000e18) * 1e8 / UNIBTC_PRICE);
     }
 
-    function test_confirmInsuranceClaimFunding_reopensSlashCapacity() public {
-        accounting.setInsuranceAmount(60_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+    function test_newClaimAfterRecoverySlashesAgain() public {
+        _coverTo(cdo, accounting, 60_000e18);
 
         // Insurance claim funding completes but the accounting deficit is not yet reduced: still no re-slash
         vm.prank(cdo);
@@ -491,13 +526,8 @@ contract InsuranceMiddlewareTest is Test {
         accounting.setInsuranceAmount(0);
         vm.prank(address(accounting));
         middleware.syncInsuranceClaim(cdo);
-        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
-        vm.prank(owner);
-        middleware.slash(cdo);
 
-        accounting.setInsuranceAmount(30_000e18);
-        vm.prank(owner);
-        middleware.slash(cdo);
+        _coverTo(cdo, accounting, 30_000e18);
 
         (,, uint256 totalSlashed,,,) = middleware.markets(cdo);
         assertEq(totalSlashed, 1.5e8);
@@ -524,5 +554,132 @@ contract InsuranceMiddlewareTest is Test {
     function test_initialize_cannotRunTwice() public {
         vm.expectRevert();
         middleware.initialize(stranger, stranger, address(adapter), address(oracle));
+    }
+
+    function _fundVault(uint256 amount) internal returns (InsuranceVault vault) {
+        vault = InsuranceVault(address(new ERC1967Proxy(address(new InsuranceVault()),
+            abi.encodeCall(InsuranceVault.initialize, (owner, acm, IStrataCDO(cdo), address(usde))))));
+        MockStrataCDO(cdo).setInsuranceVault(address(vault));
+        usde.mint(address(vault), amount);
+        vm.prank(cdo);
+        vault.recordFunding(address(usde), amount);
+    }
+
+    function test_fundedSurplusCoversNewClaimWithoutStakeOrOracle() public {
+        InsuranceVault vault = _fundVault(100e18);
+        adapter.setSlashable(0);
+        vm.mockCallRevert(address(oracle), abi.encodeWithSelector(IOracleAdapter.getPrice.selector), "stale");
+        assertEq(middleware.request(cdo, 80e18), 80e18);
+        vm.prank(address(accounting));
+        assertEq(middleware.coverAndSlash(cdo, 80e18), 80e18);
+        accounting.setInsuranceAmount(80e18);
+        assertEq(middleware.slashedClaimBase(cdo), 80e18);
+        assertEq(vault.fundedCoverage(), 100e18);
+        assertEq(vault.surplusCoverage(), 20e18);
+        assertEq(adapter.lastSlashAmount(), 0);
+    }
+
+    function test_partialSurplusSlashesOnlyRemainderWithBuffer() public {
+        _fundVault(60_000e18);
+        vm.prank(owner);
+        middleware.setMarket(cdo, accounting, address(usde), 1000, true);
+        vm.prank(address(accounting));
+        assertEq(middleware.coverAndSlash(cdo, 120_000e18), 120_000e18);
+        assertEq(adapter.lastSlashAmount(), 1.1e8);
+        assertEq(middleware.slashedClaimBase(cdo), 120_000e18);
+        (,,,uint256 pending,,) = middleware.markets(cdo);
+        assertEq(pending, 1.1e8, "only fresh slashing is pending funding");
+    }
+
+    function test_existingClaimIsReservedBeforeReuse() public {
+        _fundVault(100e18);
+        accounting.setInsuranceAmount(80e18);
+        adapter.setSlashable(0);
+        assertEq(middleware.request(cdo, 100e18), 20e18);
+        vm.prank(address(accounting));
+        assertEq(middleware.coverAndSlash(cdo, 100e18), 20e18);
+    }
+
+    function test_coverAndSlashAllocatesFundedBackingToNewClaim() public {
+        _fundVault(60_000e18);
+        _coverTo(cdo, accounting, 90_000e18);
+        assertEq(adapter.lastSlashAmount(), 0.5e8);
+        assertEq(middleware.slashedClaimBase(cdo), 90_000e18);
+    }
+
+    function test_coverAndSlashFullyFundedNeedsNoStake() public {
+        _fundVault(100e18);
+        adapter.setSlashable(0);
+        _coverTo(cdo, accounting, 100e18);
+        assertEq(middleware.slashedClaimBase(cdo), 100e18);
+        assertEq(adapter.lastSlashAmount(), 0);
+    }
+
+    function test_coverAndSlashDoesNotCountBackingTwice() public {
+        _fundVault(60_000e18);
+        _coverTo(cdo, accounting, 60_000e18);
+        _coverTo(cdo, accounting, 90_000e18);
+        assertEq(adapter.lastSlashAmount(), 0.5e8);
+    }
+
+    function test_fundedForeignClaimDoesNotReserveSharedStake() public {
+        _fundVault(60_000e18);
+        accounting.setInsuranceAmount(60_000e18);
+        MockStrataAccounting other = new MockStrataAccounting();
+        address otherCdo = address(new MockStrataCDO(other));
+        vm.prank(owner);
+        middleware.setMarket(otherCdo, other, address(usde), 0, true);
+        assertEq(middleware.request(otherCdo, type(uint128).max), expectedBaseAmount(SLASHABLE));
+        adapter.setSlashable(0);
+        accounting.setInsuranceAmount(0);
+        assertEq(middleware.request(otherCdo, 60_000e18), 0, "surplus is market-specific");
+    }
+
+    function test_withdrawnSurplusIsNotAvailableForReuse() public {
+        InsuranceVault vault = _fundVault(100e18);
+        vm.prank(owner);
+        vault.withdrawSurplus(100e18, owner);
+        adapter.setSlashable(0);
+        assertEq(middleware.request(cdo, 100e18), 0);
+    }
+
+    function test_reuseValuationAndMixedDecimals() public {
+        MockERC20 base = new MockERC20("BASE6", 6);
+        MockStrataCDO(cdo).setBaseAssetDecimals(6);
+        vm.prank(owner);
+        middleware.setMarket(cdo, accounting, address(base), 0, true);
+        accounting.setValuationPrice(0.5e18);
+        _fundVault(100e18);
+        adapter.setSlashable(0);
+        assertEq(middleware.request(cdo, 300e6), 200e6);
+        vm.prank(address(accounting));
+        assertEq(middleware.coverAndSlash(cdo, 200e6), 200e6);
+    }
+
+    function test_smallRemainderStillCovered() public {
+        _fundVault(100e18 - 1);
+        adapter.setSlashable(1);
+        vm.prank(address(accounting));
+        assertEq(middleware.coverAndSlash(cdo, 100e18), 100e18);
+        assertEq(adapter.lastSlashAmount(), 1);
+    }
+
+    function test_pendingProceedsAreNotReusedAfterCancellation() public {
+        _coverTo(cdo, accounting, 60_000e18);
+        accounting.setInsuranceAmount(0);
+        vm.prank(address(accounting));
+        middleware.syncInsuranceClaim(cdo);
+        adapter.setSlashable(0);
+        assertEq(middleware.request(cdo, 60_000e18), 0);
+    }
+
+    function test_partialSurplusWithLimitedFreshStake() public {
+        _fundVault(60_000e18);
+        adapter.setSlashable(1e8);
+        assertEq(middleware.request(cdo, 180_000e18), 120_000e18);
+        vm.prank(address(accounting));
+        assertEq(middleware.coverAndSlash(cdo, 180_000e18), 120_000e18);
+        assertEq(middleware.slashedClaimBase(cdo), 120_000e18);
+        assertEq(adapter.lastSlashAmount(), 1e8);
     }
 }

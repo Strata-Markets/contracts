@@ -93,6 +93,7 @@ abstract contract ValuationInsuranceFixture is Test {
     function _deployAccounting() internal virtual returns (address);
 
     function setUp() public virtual {
+        vm.mockCall(address(this), abi.encodeWithSignature("insuranceVault()"), abi.encode(address(0)));
         vm.warp(1_750_000_000);
         acm = new AccessControlManager(address(this));
         mockAprBase = 100_000_000_000; // 10% APR, SD7x12

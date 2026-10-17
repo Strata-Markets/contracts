@@ -13,6 +13,12 @@ interface IInsuranceVault {
     /// @notice Funded coverage available to pay redeeming Seniors, in coverage-token units.
     function fundedCoverage() external view returns (uint256);
 
+    /// @notice Funded coverage above the recorded claim, in coverage-token units.
+    function surplusCoverage() external view returns (uint256);
+
+    /// @notice Owner-only withdrawal of surplus after the operator checkpoints accounting.
+    function withdrawSurplus(uint256 amount, address receiver) external;
+
     /// @notice Pays a redeeming Senior its covered slice. Reverts if the claim is not yet funded.
     function payCoverage(uint256 amount, address receiver) external;
 

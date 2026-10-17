@@ -34,6 +34,7 @@ contract SharedStakeAdapter {
 
 /// Second market's CDO: reports its strategy TVL and forwards onlyCDO calls to its Accounting.
 contract PocCdo {
+    address public insuranceVault;
     uint256 public tvl;
     function setTvl(uint256 tvl_) external { tvl = tvl_; }
     function totalStrategyAssets() external view returns (uint256) { return tvl; }
@@ -79,6 +80,7 @@ contract SharedStakeCommittedCapacityTest is Test {
     function _implementation() internal virtual returns (address) { return address(new Accounting(18)); }
 
     function setUp() public {
+        vm.mockCall(address(this), abi.encodeWithSignature("insuranceVault()"), abi.encode(address(0)));
         usde = new MockERC20("USDe", 18);
         unibtc = new MockERC20("uniBTC", 8);
         adapter = new SharedStakeAdapter(address(unibtc));
@@ -193,9 +195,6 @@ contract SharedStakeCommittedCapacityTest is Test {
         accountingA.setValuationPrice(0.4e18);
         assertEq(accountingA.insuranceAmount(), 501e18);
         _assertBacked();
-        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
-        vm.prank(owner);
-        middleware.slash(address(this));
         accountingA.setValuationPrice(1e18);
         _assertBacked();
         assertEq(middleware.slashedClaimBase(address(this)), 0);

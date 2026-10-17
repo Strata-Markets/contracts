@@ -39,6 +39,7 @@ contract AuditorClaimUnwindRegressionTest is Test {
     // ---------------------------------------------------------------- setup
 
     function setUp() public {
+        vm.mockCall(address(this), abi.encodeWithSignature("insuranceVault()"), abi.encode(address(0)));
         acm = new AccessControlManager(address(this));
 
         baseAsset = new MockERC20("BASE", 18);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
 
+import { IInsuranceVault } from "../symbiotic/interfaces/IInsuranceVault.sol";
 import { IStrategy } from "./IStrategy.sol";
 import {IAccounting} from "./IAccounting.sol";
 import { ITranche } from "./ITranche.sol";
@@ -16,6 +17,9 @@ interface IStrataCDO {
         ERC4626
     }
 
+    function baseAssetDecimals() external view returns (uint256);
+
+    function insuranceVault() external view returns (IInsuranceVault);
     function accounting() external view returns (IAccounting);
     function strategy() external view returns (IStrategy);
     function sharesCooldown() external view returns (ISharesCooldown);

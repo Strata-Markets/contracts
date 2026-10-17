@@ -14,9 +14,10 @@ interface IInsurancePool {
     /// @return covered The coverable portion, in the market's base asset (<= lossAmount).
     function request(address cdo, uint256 lossAmount) external view returns (uint256 covered);
 
-    /// @notice Slashes coverage for `lossAmount` and returns the base actually covered.
+    /// @notice Reuses funded surplus, slashes the remaining loss, and returns the total base covered.
     /// @dev State-changing counterpart to {request}, called synchronously in the same transaction the
-    ///      claim is booked, so the slashable stake previewed by request() is the value slashed here.
+    ///      claim is booked. Call before adding the new claim to insuranceAmount so funded surplus
+    ///      can cover it before fresh collateral is slashed.
     ///      Only the market's registered accounting may call.
     /// @param cdo The market requesting coverage.
     /// @param lossAmount The Senior-bound loss to cover, in the market's base asset.

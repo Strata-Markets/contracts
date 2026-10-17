@@ -26,15 +26,12 @@ per-market registry keyed by CDO address and nets shared capacity across markets
   - `request(cdo, lossAmount)`  -  **view**. Returns how much of a loss the pool can currently cover
     for a market, in that market's base asset. Bounded by the adapter's slashable stake minus
     coverage already committed to every other market (`_committedVault()`), so simultaneous
-    multi-market stress cannot over-commit the shared stake. Reserves nothing and slashes nothing.
+    multi-market stress cannot over-commit the shared stake. Adds this market's funded surplus.
+    Reserves nothing and slashes nothing.
   - `coverAndSlash(cdo, lossBase)`  -  **the main path**, called by the market's own accounting in the
-    same transaction the claim is booked. Slashes the buffered vault equivalent of `lossBase` (capped
-    to live `slashable()`) and returns the base actually covered. Because the `request()` preview and
-    this slash read the same `slashable()` in one transaction, what is booked is what is slashed.
-  - `slash(cdo)`  -  owner-gated **backstop**. Reads the market's outstanding `insuranceAmount`,
-    converts it to vault asset (plus `bufferBps`), and slashes the AppAdapter. `pendingInsuranceClaimFunding`
-    excludes what was already slashed, so after synchronous coverage there is normally nothing left
-    and it reverts `NoSlashableAmount`.
+    same transaction the claim is booked, before storing the claim increase. Reuses funded surplus,
+    then slashes the buffered vault equivalent of the remainder (capped to live `slashable()`).
+    Returns the sum of reused and freshly slashed coverage in base assets.
   - `confirmInsuranceClaimFunding(cdo, amount)`  -  called by the CDO during `fundInsuranceClaim` (or the owner as fallback);
     clears the in-flight amount.
   - Registry: `setMarket`. Upgradeable / Ownable2Step / Pausable.
@@ -90,8 +87,7 @@ Inside the NAV split, when a loss overflows Junior + reserve toward Senior:
 1. The Senior-bound remainder is offered to the pool via `_requestInsurance(loss)` ->
    `IInsurancePool.request()`. The covered portion is subtracted from the loss so Senior is **held
    whole**, and booked to `insuranceAmount` (a claim, not tranche capital). `updateAccountingInner`
-   then immediately calls `coverAndSlash` for the newly booked amount, so the claim is slashed in the
-   same transaction it is created. If the pool cannot back it in full, Senior absorbs the remainder.
+   secures coverage through `coverAndSlash` before persisting the claim increase. If the pool cannot back it in full, Senior absorbs the remainder.
 2. The identity `navT1 + insuranceAmount == jrt + srt + reserve + underwriter fee` holds on every path and
    guards the split  -  a threading bug reverts with `InvalidNavSplit`.
 3. A later **recovery gain first unwinds** the outstanding claim (self-healing) before any gain is
@@ -133,8 +129,11 @@ Symbiotic covers only the residual Junior cannot absorb.
    credit itself persists while the de-peg lasts.
 4. On **re-peg**, `_resyncInsuranceFundNav` unwinds the credit: Senior hands it back and the claim is
    cancelled by the same amount, leaving `nav` untouched. Collateral already slashed stays in the
-   vault rather than being credited to a tranche  -  it is released back into Senior's NAV only by the
-   ordinary gain-unwind, which reduces `insuranceAmount` as new PnL arrives.
+   vault as surplus rather than being credited to a tranche. Later claims reuse funded surplus
+   before slashing additional collateral. Both coverage previews and the owner slash path account
+   for this funding; proceeds still awaiting funding are not reusable surplus.
+   The vault owner can return surplus through `withdrawSurplus` after checkpointing accounting,
+   while retaining enough funded coverage for the recorded live claim.
 
 Because the coverage is credited into `srtBaseNav`, `calcEffectiveNav` stays a pure transfer
 (`jrtEffective + srtEffective == jrtFact + srtFact`); it only excludes `srtInsuranceFundNav` when

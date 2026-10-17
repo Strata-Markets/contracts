@@ -328,11 +328,6 @@ contract SymbioticIntegrationTest is Test {
         assertEq(totalSlashed, slashedUniBtc);
         assertEq(pendingInsuranceClaimFunding, slashedUniBtc);
 
-        // The claim was already slashed synchronously, so a manual slash finds nothing to take.
-        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
-        vm.prank(strataOps);
-        middleware.slash(CDO_PROXY);
-
         // Mock CoW swap: the multisig sells the slashed uniBTC for USDC (simulated fill). USDe is at
         // par here, so the claim's dollar value is 1:1; USDC is 6 decimals against USDe's 18.
         uint256 usdcAmount = deficit / 1e12;

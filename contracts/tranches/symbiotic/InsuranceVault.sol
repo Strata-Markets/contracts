@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+import { IAccounting } from "../interfaces/IAccounting.sol";
+import { IStrataAccounting } from "./interfaces/IStrataAccounting.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { SafeERC20 } from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -33,6 +36,7 @@ contract InsuranceVault is IInsuranceVault, CDOComponent {
     event Funded(address indexed from, uint256 amount, uint256 fundedCoverage);
     event CoveragePaid(address indexed receiver, uint256 amount, uint256 fundedCoverage);
     event CoverageTokenSet(address indexed token);
+    event SurplusWithdrawn(address indexed receiver, uint256 amount, uint256 fundedCoverage);
     event Rescued(address indexed token, address indexed receiver, uint256 amount);
 
     function initialize(
@@ -92,6 +96,40 @@ contract InsuranceVault is IInsuranceVault, CDOComponent {
         fundedCoverage -= amount;
         SafeERC20.safeTransfer(IERC20(coverageToken), receiver, amount);
         emit CoveragePaid(receiver, amount, fundedCoverage);
+    }
+
+    /// @notice Funded coverage above the current recorded claim, in coverage-token units.
+    /// @dev Uses the CDO's stablecoin/valuation-price conversion, rounding the claim reserve up.
+    ///      This reads stored accounting; it does not checkpoint pending strategy PnL.
+    function surplusCoverage() public view returns (uint256) {
+        IAccounting accounting = cdo.accounting();
+        uint256 claim = IStrataAccounting(address(accounting)).insuranceAmount();
+        uint256 valuedClaim = Math.mulDiv(claim, accounting.valuationPrice(), 1e18, Math.Rounding.Ceil);
+        uint256 reserved = Math.mulDiv(
+            valuedClaim,
+            10 ** IERC20Metadata(coverageToken).decimals(),
+            10 ** cdo.baseAssetDecimals(),
+            Math.Rounding.Ceil
+        );
+        return Math.saturatingSub(fundedCoverage, reserved);
+    }
+
+    /// @notice Withdraws only funded surplus for manual return to underwriters.
+    /// @dev The owner must checkpoint accounting before calling so pending losses are included.
+    function withdrawSurplus(uint256 amount, address receiver) external onlyOwner nonReentrant {
+        if (receiver == address(0)) {
+            revert ZeroAddress();
+        }
+        if (amount == 0) {
+            revert ZeroAmount();
+        }
+        uint256 available = surplusCoverage();
+        if (amount > available) {
+            revert InsufficientCoverage(amount, available);
+        }
+        fundedCoverage -= amount;
+        SafeERC20.safeTransfer(IERC20(coverageToken), receiver, amount);
+        emit SurplusWithdrawn(receiver, amount, fundedCoverage);
     }
 
     /// @notice Changes the coverage token.

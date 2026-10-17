@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { Test } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import { Ownable } from "@openzeppelin/contracts/access/Ownable.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 import { InsuranceVault } from "../../contracts/tranches/symbiotic/InsuranceVault.sol";
@@ -161,5 +162,97 @@ contract InsuranceVaultTest is Test {
         vault.rescue(address(usdc), receiver, 30e6);
         assertEq(usdc.balanceOf(receiver), 30e6);
         assertEq(vault.fundedCoverage(), 100e6, "backed coverage untouched");
+    }
+
+    function _claim(uint256 amount, uint128 price, uint256 baseDecimals) internal {
+        address accounting = makeAddr("accounting");
+        vm.mockCall(cdo, abi.encodeWithSignature("accounting()"), abi.encode(accounting));
+        vm.mockCall(cdo, abi.encodeWithSignature("baseAssetDecimals()"), abi.encode(baseDecimals));
+        vm.mockCall(accounting, abi.encodeWithSignature("insuranceAmount()"), abi.encode(amount));
+        vm.mockCall(accounting, abi.encodeWithSignature("valuationPrice()"), abi.encode(price));
+    }
+
+    function test_surplusUsesCurrentClaimAndPrice() public {
+        _fund(100e6);
+        _claim(80e18, 1e18, 18);
+        assertEq(vault.surplusCoverage(), 20e6);
+        _claim(80e18, 0.5e18, 18);
+        assertEq(vault.surplusCoverage(), 60e6);
+        _claim(20e18, 0.5e18, 18);
+        assertEq(vault.surplusCoverage(), 90e6);
+        _claim(0, 1e18, 18);
+        assertEq(vault.surplusCoverage(), 100e6);
+    }
+
+    function test_withdrawSurplusPreservesLiveClaim() public {
+        _fund(100e6);
+        _claim(80e18, 0.5e18, 18);
+        vm.expectRevert(abi.encodeWithSelector(InsuranceVault.InsufficientCoverage.selector, 60e6 + 1, 60e6));
+        vm.prank(owner);
+        vault.withdrawSurplus(60e6 + 1, receiver);
+        vm.prank(owner);
+        vault.withdrawSurplus(60e6, receiver);
+        assertEq(vault.fundedCoverage(), 40e6);
+        assertEq(usdc.balanceOf(receiver), 60e6);
+        vm.prank(cdo);
+        vault.payCoverage(40e6, receiver);
+        assertEq(vault.fundedCoverage(), 0);
+    }
+
+    function test_recoveredClaimAllowsWithdrawalAndTokenRotation() public {
+        _fund(100e6);
+        _claim(0, 1e18, 18);
+        vm.prank(owner);
+        vault.withdrawSurplus(100e6, receiver);
+        vm.prank(owner);
+        vault.setCoverageToken(address(other));
+        assertEq(vault.coverageToken(), address(other));
+    }
+
+    function test_underfundedClaimHasNoSurplus() public {
+        _fund(100e6);
+        _claim(300e18, 0.5e18, 18);
+        assertEq(vault.surplusCoverage(), 0);
+        vm.expectRevert(abi.encodeWithSelector(InsuranceVault.InsufficientCoverage.selector, 1, 0));
+        vm.prank(owner);
+        vault.withdrawSurplus(1, receiver);
+    }
+
+    function test_claimReserveRoundsUp() public {
+        _fund(100e6);
+        _claim(1, 0.5e18, 18);
+        assertEq(vault.surplusCoverage(), 100e6 - 1, "retain one coverage atom for claim dust");
+    }
+
+    function test_sixDecimalBaseAndEighteenDecimalCoverage() public {
+        vm.prank(owner);
+        vault.setCoverageToken(address(other));
+        other.mint(address(vault), 100e18);
+        vm.prank(cdo);
+        vault.recordFunding(address(other), 100e18);
+        _claim(80e6, 0.5e18, 6);
+        assertEq(vault.surplusCoverage(), 60e18);
+        vm.prank(owner);
+        vault.withdrawSurplus(60e18, receiver);
+        assertEq(vault.fundedCoverage(), 40e18);
+    }
+
+    function test_surplusExcludesStrayTokens() public {
+        _fund(100e6);
+        usdc.mint(address(vault), 30e6);
+        _claim(80e18, 1e18, 18);
+        assertEq(vault.surplusCoverage(), 20e6);
+    }
+
+    function test_withdrawSurplusAuthorizationAndInputs() public {
+        vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
+        vm.prank(stranger);
+        vault.withdrawSurplus(1, receiver);
+        vm.expectRevert(bytes4(keccak256("ZeroAddress()")));
+        vm.prank(owner);
+        vault.withdrawSurplus(1, address(0));
+        vm.expectRevert(bytes4(keccak256("ZeroAmount()")));
+        vm.prank(owner);
+        vault.withdrawSurplus(0, receiver);
     }
 }

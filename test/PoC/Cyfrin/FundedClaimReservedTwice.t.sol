@@ -294,7 +294,9 @@ contract FundedClaimReservedTwiceTest is SymbioticCoverageStackBase {
         assertEq(_pending(), 0);
         assertEq(accounting.insuranceAmount(), claim);
         assertEq(middleware.slashedClaimBase(address(cdo)), claim);
-        assertEq(middleware.request(address(cdo), type(uint128).max), capacityBefore);
+        // The rounding excess of funded coverage is now reusable.
+        uint256 surplus = vault.fundedCoverage() * 1e12 - claim;
+        assertEq(middleware.request(address(cdo), type(uint128).max), capacityBefore + surplus);
 
         uint256 srtBefore = accounting.srtBaseNav();
         _strategyLoss(SECOND_SRT_BOUND_LOSS);
@@ -311,16 +313,12 @@ contract FundedClaimReservedTwiceTest is SymbioticCoverageStackBase {
         assertEq(accounting.srtBaseNav(), srtBefore);
     }
 
-    function test_ownerCannotReslashAfterFunding() public {
+    function test_fundingPreservesSlashedBacking() public {
         _bookSeniorBoundLoss(FIRST_SRT_BOUND_LOSS);
         uint256 slashed = _totalSlashed();
-        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
-        middleware.slash(address(cdo));
 
-        _fundOutstandingClaim();
         uint256 remainingStake = adapter.slashable();
-        vm.expectRevert(InsuranceMiddleware.NoSlashableAmount.selector);
-        middleware.slash(address(cdo));
+        _fundOutstandingClaim();
         assertEq(adapter.slashable(), remainingStake);
         assertEq(_totalSlashed(), slashed);
         assertEq(_pending(), 0);

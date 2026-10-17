@@ -795,8 +795,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
         return insurancePool.request(address(cdo), loss);
     }
 
-    /// @notice Persists the underwriter fee bucket and insurance claim produced by the split, then slashes
-    ///         any newly booked insurance in the same transaction.
+    /// @notice Persists the split, securing coverage before storing any insurance claim increase.
     /// @dev Split out of checkpointAccountingInner to keep that function under the stack limit.
     function _persistInsuranceClaim(
         uint256 underwriterFeeNavT1,
@@ -810,8 +809,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
             return;
         }
 
-        insuranceAmount = insuranceAmountT1;
         if (insuranceAmountT1 < insuranceAmountT0) {
+            insuranceAmount = insuranceAmountT1;
             _syncInsuranceClaim();
             // Protection not needed
             return;
@@ -821,21 +820,22 @@ contract MTMAccounting is IAccounting, CDOComponent {
         // insuranceAmountT1 is capped by insurancePool.request(), so coverAndSlash()
         // must cover the full new claim in the same transaction.
         require(covered == newClaim, "InsuranceUnderfunded");
+        insuranceAmount = insuranceAmountT1;
         emit InsuranceClaimed(covered, insuranceAmount);
     }
 
     /// @dev Cap the middleware's already-slashed claim counter to the reduced insuranceAmount.
     ///      This updates bookkeeping only; it does not move or return slashed collateral.
-    ///      Sync before any later claim increase so cancelled coverage cannot count toward a new claim.
+    ///      Sync before any later claim increase; reusable funded surplus is accounted for separately.
     function _syncInsuranceClaim() internal {
         if (address(insurancePool) != address(0)) {
             insurancePool.syncInsuranceClaim(address(cdo));
         }
     }
 
-    /// @notice Synchronously slashes freshly-booked coverage in the same transaction it is claimed.
-    /// @dev The preview in the split (via `request()`) sized `newClaim` within the current slashable
-    ///      stake, and this runs in the same tx, so the pool must cover it in full.
+    /// @notice Secures coverage before storing the new insurance claim.
+    /// @dev The preview in the split (via `request()`) sized `newClaim` within the available
+    ///      coverage, and this runs in the same tx, so the pool must cover it in full.
     function _slashNewClaim(uint256 newClaim) internal returns (uint256 covered) {
         if (address(insurancePool) == address(0)) {
             return newClaim;

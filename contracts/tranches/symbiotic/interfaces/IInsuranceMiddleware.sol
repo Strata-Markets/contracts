@@ -9,14 +9,14 @@ interface IInsuranceMiddleware is IInsurancePool {
     /// @notice The AppAdapter this middleware controls.
     function appAdapter() external view returns (IAppAdapter);
 
-    /// @notice Trigger a slash on the adapter to cover the given market's deficit.
-    /// @param cdo The CDO address identifying the market in the coverage registry.
-    function slash(address cdo) external;
-
     /// @notice Marks a completed insurance claim funding for a market, reducing its in-flight slashed amount.
     /// @param cdo The CDO address identifying the market in the coverage registry.
     /// @param amount The funded claim amount.
     function confirmInsuranceClaimFunding(address cdo, uint256 amount) external;
+
+    /// @notice Confirms manually returned, unfunded slash proceeds exceeding the remaining claim.
+    /// @param amount Returned collateral in Symbiotic vault asset units.
+    function confirmSlashedCollateralReturned(address cdo, uint256 amount) external;
 
     /// @notice Release slashable coverage back to the vault.
     function release(uint256 amount) external;
