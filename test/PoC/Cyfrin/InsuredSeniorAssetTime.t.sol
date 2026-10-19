@@ -235,7 +235,7 @@ abstract contract InsuredSeniorAssetTimeRegressionTests is ValuationInsuranceFix
     }
 
     function test_partialCoverageTracksActualClaim() public {
-        adapter.setSlashable(100e18);
+        adapter.setSlashable(40e18); // $40 covers 100 base tokens at $0.40
         accounting.setValuationPrice(0.4e18);
         assertEq(accounting.insuranceAmount(), 100e18);
         vm.warp(block.timestamp + 1 days);

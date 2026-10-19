@@ -43,8 +43,8 @@ interface IDepegNavLossAccounting {
 /// @notice Real accounting variant + real InsuranceMiddleware, with only the Symbiotic AppAdapter and the
 ///         price oracle mocked (both are exogenous: the adapter just tracks slashable stake)
 /// @dev The test contract plays the CDO (as the repo fixtures in test/symbiotic do), so it answers every
-///      strategy/rate read the four accounting variants make. Both assets are priced at $1 with 18 decimals
-///      and bufferBps is 0, so one unit of slashed collateral equals one unit of base asset
+///      strategy/rate read the four accounting variants make. Both assets have 18 decimals; collateral is
+///      priced at $1, base assets use valuationPrice, and bufferBps is 0
 abstract contract DepegNavLossFixture is Test {
     uint256 constant ONE_ASSET = 1e18;
     uint256 constant SLASHABLE = 1_000_000e18;
@@ -106,7 +106,7 @@ abstract contract DepegNavLossFixture is Test {
         collateral = new MockERC20("COLL", 18);
         adapter = new MockAppAdapter(address(collateral));
         adapter.setSlashable(SLASHABLE);
-        oracle = new MockOracleAdapter(); // both assets default to $1
+        oracle = new MockOracleAdapter(); // collateral defaults to $1
 
         middleware = InsuranceMiddleware(
             address(
@@ -168,7 +168,7 @@ abstract contract NavLossDuringDepegTests is DepegNavLossFixture {
         mockStrategyTvl = 1500e18;
         accounting.updateAccounting();
         _assertWhole(0.6e18);
-        assertEq(_totalSlashed(), uint256(1000e18) * 1e18 / 0.6e18 - 1499e18);
+        assertEq(_totalSlashed(), (uint256(1000e18) * 1e18 / 0.6e18 - 1499e18) * 0.6e18 / 1e18);
         uint256 slashed = _totalSlashed();
         accounting.updateAccounting();
         accounting.setValuationPrice(0.6e18);
@@ -187,7 +187,7 @@ abstract contract NavLossDuringDepegTests is DepegNavLossFixture {
         accounting.updateAccounting();
         assertEq(accounting.insuranceAmount(), 675.9e18);
         assertEq(middleware.slashedClaimBase(address(this)), 675.9e18);
-        assertEq(_totalSlashed(), 751e18);
+        assertEq(_totalSlashed(), 751e18 * 0.4e18 / 1e18);
         accounting.setValuationPrice(1e18);
         assertEq(accounting.insuranceAmount(), 0);
         assertEq(accounting.srtBaseNav(), 900e18);
@@ -200,7 +200,7 @@ abstract contract NavLossDuringDepegTests is DepegNavLossFixture {
         assertEq(accounting.srtInsuranceFundNav(), 751e18);
         mockStrategyTvl = 2000e18;
         accounting.updateAccounting();
-        assertEq(_totalSlashed(), 751e18);
+        assertEq(_totalSlashed(), 751e18 * 0.4e18 / 1e18);
         uint256 principal = accounting.srtBaseNav() - accounting.srtInsuranceFundNav();
         accounting.setValuationPrice(1e18);
         assertEq(accounting.insuranceAmount(), 0);
@@ -211,7 +211,7 @@ abstract contract NavLossDuringDepegTests is DepegNavLossFixture {
 
     function test_partialCapacity() public {
         accounting.setValuationPrice(0.4e18);
-        adapter.setSlashable(100e18);
+        adapter.setSlashable(40e18); // $40 covers only 100 base tokens at $0.40
         mockStrategyTvl = 1750e18;
         accounting.updateAccounting();
         (, uint256 senior,) = accounting.totalAssets();

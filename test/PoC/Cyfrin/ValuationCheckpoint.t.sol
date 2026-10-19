@@ -20,11 +20,11 @@ abstract contract ValuationCheckpointTests is DepegNavLossFixture {
         accounting.setValuationPrice(0.5e18);
         assertEq(accounting.nav(), 1500e18);
         assertEq(accounting.insuranceAmount(), 501e18);
-        assertEq(_totalSlashed(), 501e18);
+        assertEq(_totalSlashed(), 250.5e18);
         (, uint256 senior,) = accounting.totalAssets();
         assertEq(senior, 2000e18);
         accounting.setValuationPrice(0.5e18);
-        assertEq(_totalSlashed(), 501e18, "same-block repeat must not slash again");
+        assertEq(_totalSlashed(), 250.5e18, "same-block repeat must not slash again");
     }
 
     function test_pendingGainMatchesExplicitCheckpoint() public {
@@ -44,7 +44,7 @@ abstract contract ValuationCheckpointTests is DepegNavLossFixture {
         assertEq(accounting.jrtBaseNav(), expectedJunior);
         assertEq(accounting.srtBaseNav(), expectedSenior);
         assertEq(accounting.reserveNav(), expectedReserve);
-        assertEq(_totalSlashed(), expectedClaim);
+        assertEq(_totalSlashed(), expectedClaim * 0.4e18 / 1e18);
     }
 
     function test_repegDoesNotSlashPendingValuationShortfall() public {
@@ -55,7 +55,7 @@ abstract contract ValuationCheckpointTests is DepegNavLossFixture {
         assertEq(accounting.jrtBaseNav(), 750e18);
         assertEq(accounting.srtBaseNav(), 1000e18);
         assertEq(accounting.insuranceAmount(), 0);
-        assertEq(_totalSlashed(), 501e18, "must not top up coverage at the old price");
+        assertEq(_totalSlashed(), 200.4e18, "must not top up coverage at the old price");
     }
 
     function test_recoveryUsesNewPriceWithPendingLoss() public {
@@ -64,7 +64,7 @@ abstract contract ValuationCheckpointTests is DepegNavLossFixture {
         accounting.setValuationPrice(0.5e18);
         assertEq(accounting.insuranceAmount(), 251e18);
         assertEq(accounting.srtInsuranceFundNav(), 251e18);
-        assertEq(_totalSlashed(), 501e18);
+        assertEq(_totalSlashed(), 200.4e18);
         assertEq(middleware.slashedClaimBase(address(this)), 251e18);
     }
 
@@ -73,7 +73,8 @@ abstract contract ValuationCheckpointTests is DepegNavLossFixture {
         mockStrategyTvl = 1750e18;
         accounting.setValuationPrice(0.4e18);
         assertEq(accounting.insuranceAmount(), 751e18);
-        assertEq(_totalSlashed(), 751e18);
+        // The first 1-token claim is priced at $0.50; the new 750 at $0.40.
+        assertEq(_totalSlashed(), 0.5e18 + 300e18);
     }
 
     function _navLossFloor() internal pure virtual returns (uint256) {
@@ -88,18 +89,19 @@ abstract contract ValuationCheckpointTests is DepegNavLossFixture {
         assertEq(accounting.srtInsuranceFundNav(), 0);
         assertEq(accounting.jrtBaseNav(), _navLossFloor());
         assertEq(accounting.srtBaseNav(), 1000e18);
-        assertEq(_totalSlashed(), 501e18 + 250e18 + _navLossFloor());
+        // Pending NAV loss is checkpointed at the old $0.40 valuation before repeg.
+        assertEq(_totalSlashed(), (501e18 + 250e18 + _navLossFloor()) * 0.4e18 / 1e18);
     }
 
     function test_pricePushWithPartialCapacity() public {
-        adapter.setSlashable(100e18);
+        adapter.setSlashable(50e18); // $50 covers 100 base tokens at $0.50
         mockStrategyTvl = 1500e18;
         accounting.setValuationPrice(0.5e18);
         assertEq(accounting.nav(), 1500e18);
         assertEq(accounting.insuranceAmount(), 100e18);
-        assertEq(_totalSlashed(), 100e18);
+        assertEq(_totalSlashed(), 50e18);
         accounting.setValuationPrice(0.5e18);
-        assertEq(_totalSlashed(), 100e18);
+        assertEq(_totalSlashed(), 50e18);
     }
 
     function test_pricePushWithoutInsurance() public {
@@ -197,7 +199,7 @@ contract ValuationCheckpointMTMTest is ValuationCheckpointTests {
         assertEq(MTMAccounting(address(accounting)).srtNavTime(), 1000e18 * 1 seconds);
         assertEq(MTMAccounting(address(accounting)).lastAccrual(), block.timestamp);
         assertEq(accounting.insuranceAmount(), 0);
-        assertEq(_totalSlashed(), 501e18, "recursive checkpoint must defer old-price coverage");
+        assertEq(_totalSlashed(), 200.4e18, "recursive checkpoint must defer old-price coverage");
         (uint256 liveJunior,,) = accounting.totalAssets();
         assertEq(liveJunior, 650e18);
         twoSnapshots = false;

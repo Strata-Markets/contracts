@@ -46,7 +46,7 @@ interface ISelfFundAccounting {
 /// @notice Regression adapted from the auditor's stale self-fund resync PoC.
 ///         Recovery must cap self-funding before sizing retained insurance, preserving existing credit.
 /// @dev Real StrataCDO, Tranches, accounting variant, InsuranceMiddleware and InsuranceVault. The strategy,
-///      the Symbiotic AppAdapter and the price oracle ($1 for both assets) are the repo mocks
+///      the Symbiotic AppAdapter and the collateral oracle ($1) are the repo mocks
 abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
     bytes32 constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
     bytes32 constant UPDATER_FEED_ROLE = keccak256("UPDATER_FEED_ROLE");
@@ -55,7 +55,7 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
 
     uint256 constant ONE_ASSET = 1e18;
     uint256 constant SLASHABLE = 1_000_000e18;
-    uint256 constant FIRST_STAKE = 100e18;
+    uint256 constant FIRST_CLAIM = 100e18;
     uint256 constant RESERVE_CREDIT = 1_000e18;
     uint128 constant DEPEG_PRICE = 0.4e18;
     uint128 constant RECOVERY_PRICE = 0.45e18;
@@ -198,11 +198,11 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
         (,, total,,,) = middleware.markets(address(cdo));
     }
 
-    /// @dev De-peg to 0.4 with only 100 of stake, optional reserve credit to Senior at 0.4, stake topped up afterwards
+    /// @dev De-peg to 0.4 with only $40 of stake (100 base tokens of coverage), optional reserve credit to Senior at 0.4, stake topped up afterwards
     function _setupState(bool reserveCredit) internal {
-        adapter.setSlashable(FIRST_STAKE);
+        adapter.setSlashable(FIRST_CLAIM * DEPEG_PRICE / 1e18);
         _push(DEPEG_PRICE);
-        assertEq(accounting.srtInsuranceFundNav(), FIRST_STAKE, "stake caps the first credit at 100");
+        assertEq(accounting.srtInsuranceFundNav(), FIRST_CLAIM, "stake caps the first credit at 100");
 
         if (reserveCredit) {
             // The reserve manager credits 1000 of reserve to Senior at 0.4, it self-funds 1000 x 0.6 / 0.4
@@ -242,13 +242,14 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
 
         uint256 need = _needAtRecovery();
         uint256 slashed = _totalSlashed() - slashedBefore;
-        uint256 correctSlash = need - creditBefore;
+        uint256 newClaim = need - creditBefore;
+        uint256 correctSlash = newClaim * RECOVERY_PRICE / 1e18;
 
         assertApproxEqAbs(accounting.srtFundNav(), 1_222.222222222222222222e18, 1e6, "self-fund capped at recovery price");
         assertApproxEqAbs(accounting.insuranceAmount(), need, 1e6, "final claim equals the need");
-        assertApproxEqAbs(correctSlash, 123.222222222222222222e18, 1e6, "only 123.22 of the need is new");
+        assertApproxEqAbs(newClaim, 123.222222222222222222e18, 1e6, "only 123.22 of the need is new");
         assertApproxEqAbs(slashed, correctSlash, 1e6, "only the additional coverage is slashed");
-        assertApproxEqAbs(accounting.srtInsuranceFundNav(), creditBefore + slashed, 1e6, "existing credit is retained");
+        assertApproxEqAbs(accounting.srtInsuranceFundNav(), creditBefore + newClaim, 1e6, "existing credit is retained");
 
         console.log("need at 0.45         ", need);
         console.log("credit held before   ", creditBefore);
@@ -266,7 +267,7 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
         uint256 slashed = _totalSlashed() - slashedBefore;
 
         assertApproxEqAbs(accounting.insuranceAmount(), need, 1e6, "final claim equals the need");
-        assertApproxEqAbs(slashed, need - creditBefore, 1e6, "only the new 123.22 is slashed");
+        assertApproxEqAbs(slashed, (need - creditBefore) * RECOVERY_PRICE / 1e18, 1e6, "only the new claim is slashed at $0.45");
     }
 }
 

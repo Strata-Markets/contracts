@@ -281,7 +281,7 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     }
 
     /// @notice Converts an amount of the market's base asset into the Symbiotic vault asset.
-    /// @dev Prices both assets in the oracle's common quote currency and adjusts for the
+    /// @dev Uses accounting's valuation price for base assets and the USD oracle for vault assets, adjusting for the
     ///      token decimals on both sides. Rounds down (in favor of the underwriters).
     function _toVaultAsset(TMarket storage market, uint256 baseAssets) internal view returns (uint256) {
         return _toVaultAsset(market, baseAssets, Math.Rounding.Floor);
@@ -291,12 +291,12 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         if (baseAssets == 0) return 0;
 
         address vaultAsset = appAdapter.asset();
-        (uint256 basePrice, uint256 basePriceDecimals) = oracle.getPrice(market.baseAsset);
+        uint256 basePrice = IAccounting(address(market.accounting)).valuationPrice();
         (uint256 vaultPrice, uint256 vaultPriceDecimals) = oracle.getPrice(vaultAsset);
         return Math.mulDiv(
             baseAssets,
             basePrice * 10 ** (IERC20Metadata(vaultAsset).decimals() + vaultPriceDecimals),
-            vaultPrice * 10 ** (IERC20Metadata(market.baseAsset).decimals() + basePriceDecimals),
+            vaultPrice * 10 ** (IERC20Metadata(market.baseAsset).decimals() + 18 /* valuationPrice decimals */),
             rounding
         );
     }
@@ -307,11 +307,11 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         if (vaultAssets == 0) return 0;
 
         address vaultAsset = appAdapter.asset();
-        (uint256 basePrice, uint256 basePriceDecimals) = oracle.getPrice(market.baseAsset);
+        uint256 basePrice = IAccounting(address(market.accounting)).valuationPrice();
         (uint256 vaultPrice, uint256 vaultPriceDecimals) = oracle.getPrice(vaultAsset);
         return Math.mulDiv(
             vaultAssets,
-            vaultPrice * 10 ** (IERC20Metadata(market.baseAsset).decimals() + basePriceDecimals),
+            vaultPrice * 10 ** (IERC20Metadata(market.baseAsset).decimals() + 18 /* valuationPrice decimals */),
             basePrice * 10 ** (IERC20Metadata(vaultAsset).decimals() + vaultPriceDecimals)
         );
     }

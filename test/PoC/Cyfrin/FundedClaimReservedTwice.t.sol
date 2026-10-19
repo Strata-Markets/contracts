@@ -269,9 +269,9 @@ abstract contract SymbioticCoverageStackBase is Test {
         (,, total,,,) = middleware.markets(address(cdo));
     }
 
-    /// @dev Vault asset -> base asset at the oracle prices, same arithmetic as InsuranceMiddleware._toBaseAsset
+    /// @dev Vault asset -> base asset at the valuation and collateral prices, same arithmetic as InsuranceMiddleware._toBaseAsset
     function _vaultToBase(uint256 vaultAmount) internal view returns (uint256) {
-        (uint256 basePrice,) = oracle.getPrice(address(usde));
+        uint256 basePrice = accounting.valuationPrice();
         (uint256 vaultPrice,) = oracle.getPrice(address(unibtc));
         return vaultAmount * vaultPrice * 1e10 / basePrice;
     }

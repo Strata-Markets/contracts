@@ -150,16 +150,16 @@ contract SharedStakeCommittedCapacityTest is Test {
 
     /// Funding A must preserve the capacity available to B.
     function test_fundedClaimDoesNotReserveOtherMarketsCapacity() public {
-        adapter.setSlashable(2_000_000); // 0.02 uniBTC shared stake (~$1,200)
+        adapter.setSlashable(1_248_500); // 0.012485 uniBTC (~$749.10), preserving B's limited capacity
 
-        // A de-pegs to 0.40: 501 claim, buffered 0.012525 uniBTC slashed synchronously.
+        // A de-pegs to 0.40: 501 claim worth $200.40, buffered 0.00501 uniBTC slashed synchronously.
         accountingA.setValuationPrice(0.4e18);
         assertEq(accountingA.insuranceAmount(), 501e18);
-        assertEq(adapter.slashable(), 2_000_000 - 1_252_500);
+        assertEq(adapter.slashable(), 1_248_500 - 501_000);
 
-        // Burner swaps the 0.012525 uniBTC to ~751.5 USDC and funds it. StrataCDO.fundInsuranceClaim converts it
-        // to base at valuationPrice (751.5 / 0.40 = 1878.75) and confirms that to the middleware; pending -> 0.
-        middleware.confirmInsuranceClaimFunding(address(this), 751.5e18 * 1e18 / 0.4e18);
+        // Burner swaps the 0.00501 uniBTC to ~300.6 USDC and funds it. StrataCDO.fundInsuranceClaim converts it
+        // to base at valuationPrice (300.6 / 0.40 = 751.5) and confirms that to the middleware; pending -> 0.
+        middleware.confirmInsuranceClaimFunding(address(this), 300.6e18 * 1e18 / 0.4e18);
         assertEq(_pending(address(this)), 0, "A's slash fully funded");
         // The claim stays open until A's Seniors redeem and are paid from the insurance vault.
         assertEq(accountingA.insuranceAmount(), 501e18);

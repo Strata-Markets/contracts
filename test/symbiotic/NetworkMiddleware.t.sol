@@ -134,7 +134,7 @@ contract InsuranceMiddlewareTest is Test {
 
         oracle = new MockOracleAdapter();
         oracle.setPrice(address(unibtc), UNIBTC_PRICE, 18);
-        // USDe defaults to $1 in the mock oracle
+        // Base assets use accounting.valuationPrice; only uniBTC needs an oracle price.
 
         InsuranceMiddleware impl = new InsuranceMiddleware();
         middleware = InsuranceMiddleware(address(new ERC1967Proxy(
@@ -157,6 +157,49 @@ contract InsuranceMiddlewareTest is Test {
     /// @dev Inverse of {expectedVaultAmount}: uniBTC(8 dec) -> USDe(18 dec, $1).
     function expectedBaseAmount(uint256 vaultAmount) internal pure returns (uint256) {
         return vaultAmount * UNIBTC_PRICE / 1e18 * 1e10;
+    }
+
+    function testFuzz_valuationPriceControlsCapacityAndSlash(bool lowOraclePrice, bool sixDecimals) public {
+        MockERC20 base = sixDecimals ? new MockERC20("BASE6", 6) : usde;
+        uint256 unit = sixDecimals ? 1e6 : 1e18;
+        MockStrataCDO(cdo).setBaseAssetDecimals(sixDecimals ? 6 : 18);
+        vm.prank(owner);
+        middleware.setMarket(cdo, accounting, address(base), 0, true);
+        accounting.setValuationPrice(0.5e18);
+        oracle.setPrice(address(base), lowOraclePrice ? 0.2e18 : 1.4e18, 18);
+        oracle.setPrice(address(unibtc), 60_000e8, 8);
+        adapter.setSlashable(1e8);
+
+        // One BTC covers 120,000 base tokens at the stored $0.50 valuation.
+        assertEq(middleware.request(cdo, 180_000 * unit), 120_000 * unit);
+        vm.prank(address(accounting));
+        assertEq(middleware.coverAndSlash(cdo, 180_000 * unit), 120_000 * unit);
+        assertEq(adapter.lastSlashAmount(), 1e8);
+        assertEq(middleware.slashedClaimBase(cdo), 120_000 * unit);
+    }
+
+    function test_depegFundingAndReturnUseValuationWithoutBaseOracle() public {
+        accounting.setValuationPrice(0.5e18);
+        vm.mockCallRevert(address(oracle), abi.encodeCall(IOracleAdapter.getPrice, (address(usde))), "NoBaseFeed");
+        vm.prank(owner);
+        middleware.setMarket(cdo, accounting, address(usde), 1000, true);
+        _coverTo(cdo, accounting, 60_000e18);
+        assertEq(adapter.lastSlashAmount(), 0.55e8, "$30,000 plus 10% buffer");
+
+        _fundVault(15_000e18);
+        vm.prank(cdo);
+        middleware.confirmInsuranceClaimFunding(cdo, 30_000e18);
+        (,,, uint256 pending,,) = middleware.markets(cdo);
+        assertEq(pending, 0.3e8);
+
+        // The remaining $15,000 claim needs 0.275 BTC including its buffer.
+        vm.expectRevert(InsuranceMiddleware.InvalidReturnedAmount.selector);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 0.025e8 + 1);
+        vm.prank(owner);
+        middleware.confirmSlashedCollateralReturned(cdo, 0.025e8);
+        (,,, pending,,) = middleware.markets(cdo);
+        assertEq(pending, 0.275e8);
     }
 
     function test_setMarket_storesFieldsAndEmits() public {
@@ -430,6 +473,7 @@ contract InsuranceMiddlewareTest is Test {
 
     function test_confirmSlashedCollateralReturned_roundsReserveUp() public {
         _slashThenRecover();
+        accounting.setValuationPrice(0.5e18);
         accounting.setInsuranceAmount(1);
         vm.prank(owner);
         middleware.confirmSlashedCollateralReturned(cdo, 1e8 - 1);
