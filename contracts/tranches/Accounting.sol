@@ -612,6 +612,12 @@ contract Accounting is IAccounting, CDOComponent {
             uint256(srtGainTarget),
             Math.saturatingSub(jrtNavT1, ONE_ASSET)
         );
+        if (valuationPrice < 1e18 && srtGainTargetAbs > 0) {
+            // Junior must fund both the gain and its de-peg protection.
+            (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT1, srtNavT0);
+            uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
+            srtGainTargetAbs = Math.min(srtGainTargetAbs, maxProtectedGain);
+        }
 
         uint256 underwriterFee_dT = 0;
         if (srtGainTargetAbs > 0 && underwriterFeeBps > 0) {

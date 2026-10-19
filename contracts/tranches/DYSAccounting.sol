@@ -1103,6 +1103,12 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256(srtGainTarget),
             Math.saturatingSub(jrtNavT0Real, ONE_ASSET)
         );
+        if (srtGainTargetAbs > 0 && valuationPrice < 1e18) {
+            // Junior must fund both the gain and its de-peg protection.
+            (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT0Real, srtNavT0);
+            uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
+            srtGainTargetAbs = Math.min(srtGainTargetAbs, maxProtectedGain);
+        }
 
         uint256 expectedUnderwriterFee = 0;
         if (srtGainTargetAbs > 0 && underwriterFeeBps > 0) {
@@ -1481,7 +1487,15 @@ contract DYSAccounting is IAccounting, CDOComponent {
                     srtBaseNav, benchmarkIndexT1, benchmarkIndex
                 );
                 if (srtBenchmarkGain > 0) {
-                    srtPnLBenchmark += uint256(srtBenchmarkGain);
+                    uint256 benchmarkGain = uint256(srtBenchmarkGain);
+                    if (valuationPrice < 1e18) {
+                        (uint256 jrtEffective,) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
+                        uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
+                        // Reserve earlier benchmark entitlement not already embedded in Senior NAV.
+                        uint256 unprojectedBenchmark = Math.saturatingSub(srtPnLBenchmark, srtPnLProjected - srtGain);
+                        benchmarkGain = Math.min(benchmarkGain, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
+                    }
+                    srtPnLBenchmark += benchmarkGain;
                 }
             }
         }

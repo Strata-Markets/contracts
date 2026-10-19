@@ -650,6 +650,12 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             uint256(srtGainTarget),
             Math.saturatingSub(jrtNavT1Real, ONE_ASSET)
         );
+        if (srtGainTargetAbs > 0 && valuationPrice < 1e18) {
+            // Junior must fund both the gain and its de-peg protection.
+            (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT1Real, srtNavT0);
+            uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
+            srtGainTargetAbs = Math.min(srtGainTargetAbs, maxProtectedGain);
+        }
 
         uint256 underwriterFee_dT = 0;
         if (srtGainTargetAbs > 0 && underwriterFeeBps > 0) {
@@ -767,6 +773,12 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             uint256(srtGainTarget),
             Math.saturatingSub(jrtNavT0Real, ONE_ASSET)
         );
+        if (srtGainTargetAbs > 0 && valuationPrice < 1e18) {
+            // Junior must fund both the gain and its de-peg protection.
+            (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT0Real, srtNavT0);
+            uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
+            srtGainTargetAbs = Math.min(srtGainTargetAbs, maxProtectedGain);
+        }
 
 
         uint256 expectedUnderwriterFee = 0;
