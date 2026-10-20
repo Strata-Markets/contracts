@@ -1421,14 +1421,14 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     function updateAccountingInner(uint256 navT1) internal {
         checkpointAccountingInner(navT1);
-        // Realized losses can consume Junior NAV backing Senior's de-peg protection.
-        // Cover any resulting valuation shortfall after checkpointing.
+        // Resize existing valuation credit after NAV changes, then cover any remaining shortfall.
         if (valuationPrice < 1e18) {
+            _resyncInsuranceFundNav(valuationPrice);
             _coverValuationLoss(valuationPrice);
         }
     }
 
-    /// @dev Checkpoints PnL and asset-time without topping up valuation coverage.
+    /// @dev Checkpoints PnL and asset-time without resizing valuation coverage.
     ///      Keeping coverage separate lets valuation setters apply the new price first.
     function checkpointAccountingInner(uint256 navT1) internal {
         TNavSplitState memory state = _currentNavSplitState();
