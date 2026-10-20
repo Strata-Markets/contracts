@@ -92,7 +92,7 @@ contract MTMInsuranceClaimFundingTest is Test {
         _deploy();
     }
 
-    function test_valuationGain_preservesCreditAndSplitsNormally() public {
+    function test_valuationGain_resizesCreditAndSplitsNormally() public {
         accounting.setValuationPrice(0.4e18);
         uint256 credit = accounting.srtInsuranceFundNav();
         uint256 seniorBefore = accounting.srtBaseNav();
@@ -101,12 +101,15 @@ contract MTMInsuranceClaimFundingTest is Test {
         mockStrategyTvl += 100e18;
         accounting.updateAccounting();
 
-        assertEq(accounting.insuranceAmount(), credit);
-        assertEq(accounting.srtInsuranceFundNav(), credit);
-        assertGt(accounting.srtBaseNav(), seniorBefore);
+        // Gross Senior gain is 25, less 1.25 underwriter fee; Junior receives 75.
+        uint256 expectedCredit = 1023.75e18 * 15 / 10 - (1075e18 - 1e18);
+        assertEq(accounting.insuranceAmount(), expectedCredit);
+        assertEq(accounting.srtInsuranceFundNav(), expectedCredit);
+        assertLt(expectedCredit, credit);
+        assertGt(accounting.srtBaseNav() - expectedCredit, seniorBefore - credit);
         assertGt(accounting.jrtBaseNav(), juniorBefore);
         assertEq(accounting.srtFundNav(), 0, "earnings use normal protection");
-        uint256 seniorGain = accounting.srtBaseNav() - seniorBefore;
+        uint256 seniorGain = accounting.srtBaseNav() - expectedCredit - (seniorBefore - credit);
         accounting.setValuationPrice(1e18);
         assertEq(accounting.insuranceAmount(), 0);
         assertEq(accounting.srtInsuranceFundNav(), 0);
@@ -121,8 +124,10 @@ contract MTMInsuranceClaimFundingTest is Test {
         accounting.totalAssets();
         accounting.updateAccounting();
         assertEq(accounting.reserveNav(), 10e18);
-        assertEq(accounting.insuranceAmount(), 501e18);
-        assertEq(accounting.srtInsuranceFundNav(), 501e18);
+        // The reserve takes 10 from Junior's gain; Senior still earns 23.75 net.
+        uint256 expectedCredit = 1023.75e18 * 15 / 10 - (1065e18 - 1e18);
+        assertEq(accounting.insuranceAmount(), expectedCredit);
+        assertEq(accounting.srtInsuranceFundNav(), expectedCredit);
     }
 
     function test_mixedClaim_gainRepaysOnlyNavLoss() public {

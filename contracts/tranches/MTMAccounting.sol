@@ -1388,9 +1388,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
             jrtNavT1Projected += srtLoss;
             srtGainTarget = 0;
         }
+        // Bound the gross debit by both Junior balances; projected NAV also excludes expected fees.
         uint256 srtGainTargetAbs = Math.min(
             uint256(srtGainTarget),
-            Math.saturatingSub(jrtNavT0Real, ONE_ASSET)
+            Math.saturatingSub(Math.min(jrtNavT0Real, jrtNavT1Projected), ONE_ASSET)
         );
         if (srtGainTargetAbs > 0 && valuationPrice < 1e18) {
             // Junior must fund both the gain and its de-peg protection.
@@ -1405,7 +1406,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
             expectedUnderwriterFee = srtGainTargetAbs * underwriterFeePct / PERCENTAGE_100;
         }
 
-        // Final Jrt (after srt funding)
+        // Projected Junior excludes the expected fee; real Junior funds only the net Senior gain.
         jrtNavT1Projected = jrtNavT1Projected - srtGainTargetAbs;
         jrtNavT1Real = Math.saturatingSub(jrtNavT0Real, Math.saturatingSub(srtGainTargetAbs, expectedUnderwriterFee));
 

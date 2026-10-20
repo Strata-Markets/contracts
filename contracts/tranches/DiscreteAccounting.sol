@@ -787,9 +787,9 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             expectedUnderwriterFee = srtGainTargetAbs * underwriterFeePct / PERCENTAGE_100;
         }
 
-        // #2 Final new Jrt (after srt funding)
+        // #2 Junior funds both the net Senior gain and the accrued underwriter fee.
         jrtNavT1Projected = jrtNavT1Projected - srtGainTargetAbs;
-        jrtNavT1Real = Math.saturatingSub(jrtNavT0Real, Math.saturatingSub(srtGainTargetAbs, expectedUnderwriterFee));
+        jrtNavT1Real = jrtNavT0Real - srtGainTargetAbs;
 
         // #3 Final new Srt
         srtNavT1 = srtNavT0 + srtGainTargetAbs - expectedUnderwriterFee;
@@ -802,7 +802,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             jrtNavT1Real,
             srtNavT1,
             reserveNavT1,
-            underwriterFeeNavT0,
+            underwriterFeeNavT0 + expectedUnderwriterFee,
             insuranceAmountT0
         );
     }

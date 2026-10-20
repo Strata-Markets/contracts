@@ -22,6 +22,8 @@ interface IFeeSuspensionAccounting {
     function feeWatermarkNav() external view returns (uint256);
     function jrtBaseNav() external view returns (uint256);
     function insuranceAmount() external view returns (uint256);
+    function srtBaseNav() external view returns (uint256);
+    function srtInsuranceFundNav() external view returns (uint256);
 }
 
 contract PerformanceFeeSuspensionTest is Test {
@@ -108,7 +110,16 @@ contract PerformanceFeeSuspensionTest is Test {
             assertEq(accounting.reserveBps(), 0);
             mockStrategyTvl += 100e18;
             accounting.updateAccounting();
-            assertEq(accounting.insuranceAmount(), 501e18, "yield preserves valuation coverage");
+            if (variant < 2) {
+                assertEq(accounting.insuranceAmount(), 501e18, "valuation coverage awaits a price update");
+            } else {
+                // DYS and MTM resize valuation credit after gains restore Junior coverage.
+                uint256 principal = accounting.srtBaseNav() - accounting.srtInsuranceFundNav();
+                uint256 requiredCredit = principal * 15 / 10 - (accounting.jrtBaseNav() - 1e18);
+                assertEq(accounting.insuranceAmount(), requiredCredit);
+                assertEq(accounting.srtInsuranceFundNav(), requiredCredit);
+                assertLt(requiredCredit, 501e18);
+            }
             assertEq(accounting.reserveNav(), 0);
         }
     }
