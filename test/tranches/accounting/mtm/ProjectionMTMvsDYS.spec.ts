@@ -119,27 +119,28 @@ UTest.create({
             { type: 'withdraw', jrt: 35, srt: 0, time: '14days', settled: [545, 520] },
             { type: 'mtm', amount: 45, time: '9days', settled: [545, 520] },
             { type: 'deposit', jrt: 0, srt: 75, time: '15days', settled: [545, 595] },
-            // SRT exits at the projected price, so 0.7332 of the 40 withdrawal is settled from JRT.
-            { type: 'withdraw', jrt: 0, srt: 40, time: '11days', settled: [544.2668, 555.73319] },
-            { type: 'mtm', amount: 90, time: '21days', settled: [544.2668, 555.73319] },
-            { type: 'deposit', jrt: 25, srt: 25, time: '7days', settled: [569.2668, 580.73319] },
-            { type: 'withdraw', jrt: 50, srt: 10, time: '19days', settled: [518.90654, 571.09345] },
-            { type: 'mtm', amount: 30, time: '13days', settled: [518.90654, 571.09345] },
-            { type: 'deposit', jrt: 100, srt: 0, time: '16days', settled: [618.90654, 571.09345] },
-            { type: 'withdraw', jrt: 0, srt: 30, time: '12days', settled: [618.5724, 541.42759] },
-            { type: 'mtm', amount: 150, time: '18days', settled: [618.5724, 541.42759] },
-            { type: 'deposit', jrt: 40, srt: 60, time: '10days', settled: [658.5724, 601.42759] },
-            { type: 'withdraw', jrt: 45, srt: 25, time: '20days', settled: [612.17434, 577.82565] },
-            { type: 'mtm', amount: 70, time: '17days', settled: [612.17434, 577.82565] },
-            { type: 'deposit', jrt: 0, srt: 50, time: '9days', settled: [612.17434, 627.82565] },
-            { type: 'withdraw', jrt: 30, srt: 0, time: '14days', settled: [582.17434, 627.82565] },
-            { type: 'mtm', amount: 110, time: '23days', settled: [582.17434, 627.82565] },
-            { type: 'deposit', jrt: 55, srt: 35, time: '8days', settled: [637.17434, 662.82565] },
+            // Projection purchased by earlier SRT deposits offsets this exit; JRT does not fund it.
+            { type: 'withdraw', jrt: 0, srt: 40, time: '11days', settled: [545, 555] },
+            { type: 'mtm', amount: 90, time: '21days', settled: [545, 555] },
+            { type: 'deposit', jrt: 25, srt: 25, time: '7days', settled: [570, 580] },
+            { type: 'withdraw', jrt: 50, srt: 10, time: '19days', settled: [520, 570] },
+            { type: 'mtm', amount: 30, time: '13days', settled: [520, 570] },
+            { type: 'deposit', jrt: 100, srt: 0, time: '16days', settled: [620, 570] },
+            { type: 'withdraw', jrt: 0, srt: 30, time: '12days', settled: [620, 540] },
+            { type: 'mtm', amount: 150, time: '18days', settled: [620, 540] },
+            { type: 'deposit', jrt: 40, srt: 60, time: '10days', settled: [660, 600] },
+            { type: 'withdraw', jrt: 45, srt: 25, time: '20days', settled: [615, 575] },
+            { type: 'mtm', amount: 70, time: '17days', settled: [615, 575] },
+            { type: 'deposit', jrt: 0, srt: 50, time: '9days', settled: [615, 625] },
+            { type: 'withdraw', jrt: 30, srt: 0, time: '14days', settled: [585, 625] },
+            { type: 'mtm', amount: 110, time: '23days', settled: [585, 625] },
+            { type: 'deposit', jrt: 55, srt: 35, time: '8days', settled: [640, 660] },
         ];
 
         for (let i = 0; i < actions.length; i++) {
             const action = actions[i];
             await testMTM.mine(action.time);
+            let boughtBefore = await testMTM.accounting.srtBoughtProjected();
 
             if (action.type === 'deposit') {
                 await testMTM.deposit(action.jrt, action.srt);
@@ -151,6 +152,16 @@ UTest.create({
                 await testMTM.distributeAbs(action.amount, { reconcile: false });
             }
             await expectMtmSettledEquals(testMTM, action, `${i + 1}: ${formatAction(action)}`);
+            // This sequence retains enough purchased projection to fund every Senior exit.
+            $require.eq(await testMTM.accounting.srtPaidProjected(), 0n,
+                `Deposits should offset paid projection after ${i + 1}: ${formatAction(action)}`);
+            let boughtAfter = await testMTM.accounting.srtBoughtProjected();
+            if (action.type === 'deposit' && action.srt > 0) {
+                $require.gt(boughtAfter, boughtBefore, 'Senior deposits should purchase projection');
+            }
+            if (action.type === 'withdraw' && action.srt > 0) {
+                $require.lt(boughtAfter, boughtBefore, 'Senior exits should consume purchased projection');
+            }
         }
     },
     async 'mtm projection: useConservativePrice = true' () {

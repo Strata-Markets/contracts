@@ -179,7 +179,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
 
     uint256 public srtProjectedPnLTime;
 
-    /// @notice Track paid-out projected amount during the current epoch
+    /// @notice Projection paid during this epoch that is not offset by projection purchased by deposits.
     uint256 public srtPaidProjected;
 
     /// @notice Accumulated benchmark Senior PnL during the current epoch
@@ -233,6 +233,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
     ///      reads whole. It is external capital backed by slashed collateral and tracked in
     ///      insuranceAmount. Booked in setValuationPrice, unwound on re-peg in _resyncsrtFundNav.
     uint256 public srtInsuranceFundNav;
+
+    /// @notice Unmatched projection purchased by live-priced Senior deposits during this epoch.
+    /// @dev Cash-funded credit, excluded from unrealized projection and matched before Junior covers exits.
+    uint256 public srtBoughtProjected;
 
     error InvalidNavSplit(
         uint256 navT1,
@@ -405,7 +409,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
         state.srtProjectedPnLTime = srtProjectedPnLTime;
         state.lastAccrual = lastAccrual;
         state.srtPnLProjected = srtPnLProjected;
-        state.srtPaidProjected = srtPaidProjected;
+        if (!useConservativePrice) {
+            state.srtPaidProjected = srtPaidProjected;
+        }
         state.srtPnLBenchmark = srtPnLBenchmark;
         state.feeWatermarkNav = feeWatermarkNav;
         state.underwriterFeeNav = underwriterFeeNav;
@@ -789,6 +795,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         uint256 srtAssetsOut
     ) external onlyCDO returns (uint256 insuranceBaseOut) {
         _accrueAssetTime();
+        _trackSrtProjectionIn(srtAssetsIn);
         uint256 insuranceBaseOut_;
         bool valuationWithdrawal = valuationPrice < 1e18 && srtAssetsOut > 0;
         if (valuationWithdrawal) {
@@ -810,7 +817,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             srtPnLBenchmark -= Math.min(forfeitedBenchmark, srtPnLBenchmark);
         }
 
-        if (!valuationWithdrawal && srtAssetsOut > 0 && srtPnLProjected > 0) {
+        if (!valuationWithdrawal && srtAssetsOut > 0 && (srtPnLProjected > 0 || (!useConservativePrice && srtBoughtProjected > 0))) {
             if (useConservativePrice) {
                 // Conservative redemptions pay only net Senior assets
                 // Return the unpaid projection to Junior real NAV
@@ -828,12 +835,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 jrtBaseNav += unpaidProjection;
                 jrtNavProjected = Math.max(jrtNavProjected, jrtBaseNav);
             } else {
-                // Paid projection = srtAssetsOut * liveProjection / srtGrossNav
-                srtPaidProjected += Math.mulDiv(
-                    srtAssetsOut,
-                    srtPnLProjected - srtPaidProjected,
-                    srtBaseNav
-                );
+                _trackSrtProjectionOut(Math.mulDiv(srtAssetsOut, _srtFlowProjection(), srtBaseNav));
             }
         }
         if (useConservativePrice && jrtAssetsOut > 0 && jrtNavProjected > jrtBaseNav && jrtBaseNav > 0) {
@@ -885,12 +887,38 @@ contract DYSAccounting is IAccounting, CDOComponent {
         }
     }
 
+    /// @dev Include purchased projection when pricing flows, but not when undoing unrealized gains.
+    ///      This preserves the projection fraction across deposits, including split deposits.
+    function _srtFlowProjection() internal view returns (uint256) {
+        return useConservativePrice
+            ? srtPnLProjected
+            : Math.saturatingSub(srtPnLProjected, srtPaidProjected) + srtBoughtProjected;
+    }
+
+    function _trackSrtProjectionIn(uint256 assetsIn) internal {
+        if (useConservativePrice || assetsIn == 0 || srtBaseNav == 0) return;
+        uint256 seniorNav = srtBaseNav;
+        if (valuationPrice < 1e18) {
+            (, seniorNav) = calcEffectiveNav(jrtBaseNav, seniorNav);
+        }
+        uint256 bought = Math.mulDiv(assetsIn, _srtFlowProjection(), seniorNav);
+        uint256 matched = Math.min(bought, srtPaidProjected);
+        srtPaidProjected -= matched;
+        srtBoughtProjected += bought - matched;
+    }
+
+    function _trackSrtProjectionOut(uint256 projectionOut) internal {
+        uint256 matched = Math.min(projectionOut, srtBoughtProjected);
+        srtBoughtProjected -= matched;
+        srtPaidProjected += projectionOut - matched;
+    }
+
     /// @dev Consume each backing component using the same pre-exit effective Senior NAV.
     ///      Round component payouts down and assign the withdrawal remainder to Senior base NAV.
     function _splitValuationWithdrawal(uint256 assetsOut)
         internal returns (uint256 juniorOut, uint256 seniorStrategyOut, uint256 insuranceOut)
     {
-        uint256 liveProjection = Math.saturatingSub(srtPnLProjected, srtPaidProjected);
+        uint256 liveProjection = _srtFlowProjection();
         uint256 seniorNav = srtBaseNav;
         uint256 juniorNav = jrtBaseNav;
         if (useConservativePrice) {
@@ -918,7 +946,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             jrtBaseNav += projectionOut;
             jrtNavProjected = Math.max(jrtNavProjected, jrtBaseNav);
         } else {
-            srtPaidProjected += projectionOut;
+            _trackSrtProjectionOut(projectionOut);
         }
     }
 
@@ -1450,7 +1478,10 @@ contract DYSAccounting is IAccounting, CDOComponent {
             // At reconciliation, the true-up was already applied, so reset
             srtPnLProjected = 0;
             srtPnLBenchmark = 0;
-            srtPaidProjected = 0;
+            if (!useConservativePrice) {
+                srtPaidProjected = 0;
+                srtBoughtProjected = 0;
+            }
             srtNavTime = 0;
             navTime = 0;
             navTimeNet = 0;
