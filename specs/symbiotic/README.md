@@ -138,3 +138,57 @@ Symbiotic covers only the residual Junior cannot absorb.
 Because the coverage is credited into `srtBaseNav`, `calcEffectiveNav` stays a pure transfer
 (`jrtEffective + srtEffective == jrtFact + srtFact`); it only excludes `srtInsuranceFundNav` when
 sizing Senior's need, so compensation is not itself compensated.
+
+
+### Unrecoverable funding shortfall
+
+A realized-loss claim remains denominated in base assets. If it was funded during a depeg,
+a partial or full recovery can leave the vault short of coverage tokens. Before reopening withdrawals,
+the operator should fund all available slash proceeds and assess whether more funding can be obtained.
+
+If the remainder is unrecoverable, an account with `RESERVE_MANAGER_ROLE` can call
+`StrataCDO.writeDownInsuranceClaim(maxPrincipalLoss)`. The argument is the maximum accepted permanent
+Senior principal loss in base-asset units, not an exact amount to debit. The function:
+
+- Checkpoints accounting and values vault funding at the current valuation price in the same transaction.
+- Calculates the smallest principal loss that closes the funding gap, including any valuation-credit unwind.
+- Reverts atomically if the required loss exceeds the operator's limit, available settled principal, or realized claim.
+- Preserves positive live projection and scales entry self-funding with the remaining principal during a depeg.
+- Reduces the claim and Senior NAV equally, including released valuation credit; strategy and Junior NAV stay unchanged.
+- Synchronizes middleware backing and adjusts the DYS/MTM floor baseline so it cannot restore the loss.
+- Returns the actual principal loss and emits `InsuranceClaimWrittenDown(amount)` when processing a shortfall.
+  An already-funded claim returns zero without a write-down. No tokens move in the write-down itself.
+
+To estimate `maxPrincipalLoss`, read `Accounting::insuranceAmount`, `Accounting::valuationPrice`,
+and `InsuranceVault::fundedCoverage`. With token amounts expressed in whole-token units and the
+valuation price expressed as a decimal (for example, `0.99`):
+
+```text
+shortfallBase =
+    max(0, Accounting::insuranceAmount - InsuranceVault::fundedCoverage / Accounting::valuationPrice)
+```
+
+For raw contract values, normalize token decimals and the price's `1e18` scale. To match the CDO's
+integer rounding, calculate:
+
+```text
+coverageInBaseDecimals = floor(fundedCoverage * 10^baseDecimals / 10^coverageDecimals)
+fundedBase = floor(coverageInBaseDecimals * 1e18 / valuationPrice)
+shortfallBase = max(0, insuranceAmount - fundedBase)
+```
+
+Use `fundedCoverage`, not the vault's raw token balance. The operator can set `maxPrincipalLoss` to
+`shortfallBase` if they accept that much principal loss, passing it in base-asset smallest units.
+The contract still applies only the required loss, which may be smaller when valuation credit unwinds.
+For a tighter limit, simulate `StrataCDO.writeDownInsuranceClaim` and use its returned principal loss.
+The simulation checkpoints accounting; standalone getter values may be stale. The transaction sizes
+the loss again and reverts if the required principal loss exceeds the supplied limit.
+
+For example, a 101-base claim backed by 90.9 coverage tokens at par needs a 10.1 principal loss.
+A limit of 20 accepts that loss but still debits only 10.1; a limit below 10.1 reverts.
+During a depeg at 0.80, a 125-base funding gap may need only 100 of principal loss plus 25 of valuation-credit unwind.
+The limit controls the principal loss, not the combined NAV reduction.
+
+Valuation-only claims cannot be cancelled as principal losses. Existing pending slash proceeds are not
+cleared by this action, and a later valuation change can create a new funding gap. The operator must
+still establish that funding is unrecoverable; automatic sizing does not make that decision.

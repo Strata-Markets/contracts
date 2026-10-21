@@ -391,6 +391,43 @@ contract Accounting is IAccounting, CDOComponent {
         updateAccountingInner(cdo.totalStrategyAssets());
     }
 
+    /// @notice Sizes an unfunded realized-loss claim write-down as a permanent Senior principal loss.
+    /// @dev CDO checkpoints first and supplies the vault funding valued in base assets.
+    ///      The operator must finalize available slash proceeds and confirm that further funding is unavailable.
+    ///      Sizing includes any additional valuation-credit unwind; the whole call reverts if the limit is too low.
+    /// @param fundedBase Available vault funding, in base-asset units at the current valuation price.
+    /// @param maxPrincipalLoss Maximum principal loss the operator accepts, excluding valuation-credit unwind.
+    /// @return amount Principal loss recognized; zero if no principal loss is needed.
+    function writeDownInsuranceClaim(uint256 fundedBase, uint256 maxPrincipalLoss) external onlyCDO returns (uint256 amount) {
+        uint256 seniorAvailable = srtBaseNav;
+        if (fundedBase >= insuranceAmount) {
+            return 0;
+        }
+        amount = AccountingLib.insuranceWriteDown(AccountingLib.InsuranceWriteDownState({
+            claim: insuranceAmount,
+            seniorNav: srtBaseNav,
+            seniorAvailable: seniorAvailable,
+            valuationCredit: srtInsuranceFundNav,
+            fundedGross: srtFundedGrossNav,
+            selfFund: srtFundNav,
+            juniorAvailable: Math.saturatingSub(jrtBaseNav, ONE_ASSET),
+            price: valuationPrice
+        }), fundedBase, maxPrincipalLoss);
+        if (valuationPrice < 1e18) {
+            _scaleSrtFund(seniorAvailable, seniorAvailable - amount);
+        }
+        insuranceAmount -= amount;
+        srtBaseNav -= amount;
+        // Reduced principal can need less valuation credit; release it before checking funding.
+        if (valuationPrice < 1e18) {
+            _resyncInsuranceFundNav(valuationPrice);
+        }
+        require(insuranceAmount <= fundedBase, "InsuranceShortfallUnresolved");
+        _syncInsuranceClaim();
+        updateAprSrt(aprTarget, aprBase);
+        emit InsuranceClaimWrittenDown(amount);
+    }
+
     /// @notice Updates the Net Asset Values (NAVs) after deposits or withdrawals
     /// @dev This method should be called after any deposits or withdrawals are made in the tranches
     /// @dev It adjusts the NAVs for both Junior and Senior tranches, as well as the total NAV

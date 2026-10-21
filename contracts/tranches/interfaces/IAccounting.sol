@@ -7,6 +7,8 @@ import {IInsurancePool} from "../symbiotic/interfaces/IInsurancePool.sol";
 
 interface IAccounting is ICDOComponent, IAprPairFeedListener {
 
+    event InsuranceClaimWrittenDown(uint256 amount);
+
     event ValuationPriceChanged(uint256 valuationPrice);
     event ValuationGracePeriodChanged(uint64 period);
     event Reconciled(
@@ -20,6 +22,8 @@ interface IAccounting is ICDOComponent, IAprPairFeedListener {
     );
 
     function updateAccounting () external;
+    /// @dev CDO checkpoints first; accounting sizes the write-down against funding within the loss limit.
+    function writeDownInsuranceClaim(uint256 fundedBase, uint256 maxPrincipalLoss) external returns (uint256 amount);
     function updateBalanceFlow (
         uint256 jrtAssetsIn,
         uint256 jrtAssetsOut,
