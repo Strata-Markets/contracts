@@ -24,7 +24,7 @@ import {IInsurancePool} from "./symbiotic/interfaces/IInsurancePool.sol";
  *
  * During the epoch (between oracle updates):
  *   - Senior NAV is continuously increased using projected returns (aprSrt-based index)
- *   - srtPnLProjected accumulates the projected gain
+ *   - srtPnLProjected tracks signed projected PnL, including paid projection
  *   - Asset-time is accrued before every deposit/withdrawal
  *
  * At reconciliation (oracle update detected):
@@ -177,9 +177,11 @@ contract MTMAccounting is IAccounting, CDOComponent {
     /// @notice Timestamp of last asset-time accrual
     uint256 public lastAccrual;
 
-    /// @notice Accumulated projected Senior PnL during the current epoch
-    uint256 public srtPnLProjected;
+    /// @notice Signed Senior projection for the epoch, including projection already paid out.
+    int256 public srtPnLProjected;
 
+    /// @notice Asset-time of positive unpaid Senior projection.
+    /// @dev Negative projection is restored directly when accruing srtNavTime.
     uint256 public srtProjectedPnLTime;
 
     /// @notice Projection paid during this epoch that is not offset by projection purchased by deposits.
@@ -238,8 +240,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
     uint256 public srtInsuranceFundNav;
 
     /// @notice Unmatched projection purchased by live-priced Senior deposits during this epoch.
-    /// @dev Cash-funded credit, excluded from unrealized projection and matched before Junior covers exits.
-    uint256 public srtBoughtProjected;
+    /// @dev Signed projection purchased by deposits, excluded from unrealized PnL and matched on exits.
+    int256 public srtBoughtProjected;
 
     error InvalidNavSplit(
         uint256 navT1,
@@ -262,7 +264,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
         uint256 navTimeNet;
         uint256 srtProjectedPnLTime;
         uint256 lastAccrual;
-        uint256 srtPnLProjected;
+        int256 srtPnLProjected;
         uint256 srtPaidProjected;
         uint256 srtPnLBenchmark;
         uint256 epochStart;
@@ -460,10 +462,26 @@ contract MTMAccounting is IAccounting, CDOComponent {
         uint256 systemAssets = srtNavT0 + jrtNavT0Projected + reserveNavT0;
 
         // Insurance backs Senior outside the strategy and does not participate in strategy PnL.
-        srtNavTime_ += Math.saturatingSub(srtNavT0, state.insuranceAmount) * dt;
+        // Restore unrealized losses so a temporary dip does not reduce settled asset-time.
+        srtNavTime_ += Math.saturatingSub(srtNavT0 + _positiveProjection(int256(state.srtPaidProjected) - state.srtPnLProjected), state.insuranceAmount) * dt;
         navTime_ += systemAssets * dt;
         navTimeNet_ += navT0 * dt;
-        srtProjectedPnLTime_ += Math.saturatingSub(state.srtPnLProjected, state.srtPaidProjected) * dt;
+        srtProjectedPnLTime_ += _positiveProjection(state.srtPnLProjected - int256(state.srtPaidProjected)) * dt;
+    }
+
+    /// @dev Remove either sign of Senior projection to recover settled tranche NAVs.
+    function _undoProjection(uint256 seniorLive, uint256 juniorReal)
+        private view returns (uint256 juniorSettled, uint256 seniorSettled)
+    {
+        int256 liveProjection = _srtLiveProjection();
+        seniorSettled = liveProjection >= 0
+            ? Math.saturatingSub(srtBaseNav, uint256(liveProjection))
+            : srtBaseNav + uint256(-liveProjection);
+        if (seniorLive >= seniorSettled) {
+            return (juniorReal + (seniorLive - seniorSettled), seniorSettled);
+        }
+        uint256 lossUndo = Math.min(seniorSettled - seniorLive, juniorReal);
+        return (juniorReal - lossUndo, seniorLive + lossUndo);
     }
 
     function _navAnchor() private view returns (uint256) {
@@ -604,13 +622,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
             return (jrtNavT1Real, srtNavT1, reserveNavT1);
         }
 
-        (uint256 jrtNet, uint256 srtNet) = AccountingLib.undoProjection(
-            srtNavT1,
-            srtBaseNav,
-            srtPnLProjected,
-            srtPaidProjected,
-            jrtNavT1Real
-        );
+        (uint256 jrtNet, uint256 srtNet) = _undoProjection(srtNavT1, jrtNavT1Real);
 
         (jrtNet, srtNet) = calcEffectiveNav(jrtNet, srtNet);
         return (jrtNet, srtNet, reserveNavT1);
@@ -665,13 +677,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
             // Reconciliation already replaces projected NAV with realized NAV.
             (jrtNavSettled, srtNavSettled) = calcEffectiveNav(jrtNavLive, srtNavT1);
         } else {
-            (uint256 jrtNet, uint256 srtNet) = AccountingLib.undoProjection(
-                srtNavT1,
-                srtBaseNav,
-                srtPnLProjected,
-                srtPaidProjected,
-                jrtNavT1Real
-            );
+            (uint256 jrtNet, uint256 srtNet) = _undoProjection(srtNavT1, jrtNavT1Real);
             (jrtNavSettled, srtNavSettled) = calcEffectiveNav(jrtNet, srtNet);
         }
 
@@ -980,36 +986,39 @@ contract MTMAccounting is IAccounting, CDOComponent {
             // Senior base NAV includes both strategy assets and insurance credit.
             srtAssetsOut = seniorStrategyOut + insuranceBaseOut_;
         }
+        if (!valuationWithdrawal && useConservativePrice && srtAssetsOut > 0) {
+            _forfeitSrtLoss(srtAssetsOut, srtBaseNav);
+        }
         // New deposits must not change the funding attributed to an existing Senior withdrawal.
         srtFundNav += _trackSrtFundNavIn(srtAssetsIn);
 
         // Conservative exits forfeit their benchmark entitlement even when no projection is funded.
         // At par, the exit fraction uses net base NAV; valuation exits use effective NAV below.
         if (!valuationWithdrawal && useConservativePrice && useBenchmarkProjection && srtAssetsOut > 0 && srtPnLBenchmark > 0) {
-            uint256 srtNetNav = Math.saturatingSub(srtBaseNav, srtPnLProjected);
+            uint256 srtNetNav = Math.saturatingSub(srtBaseNav, _positiveProjection(srtPnLProjected));
             uint256 forfeitedBenchmark = Math.mulDiv(srtAssetsOut, srtPnLBenchmark, srtNetNav);
             srtPnLBenchmark -= Math.min(forfeitedBenchmark, srtPnLBenchmark);
         }
 
-        if (!valuationWithdrawal && srtAssetsOut > 0 && (srtPnLProjected > 0 || (!useConservativePrice && srtBoughtProjected > 0))) {
+        if (!valuationWithdrawal && srtAssetsOut > 0 && (srtPnLProjected > 0 || !useConservativePrice)) {
             if (useConservativePrice) {
                 // Conservative redemptions pay only net Senior assets
                 // Return the unpaid projection to Junior real NAV
-                uint256 srtNetNav = Math.saturatingSub(srtBaseNav, srtPnLProjected);
+                uint256 srtNetNav = Math.saturatingSub(srtBaseNav, _positiveProjection(srtPnLProjected));
                 uint256 unpaidProjection = Math.mulDiv(
                     srtAssetsOut,
-                    srtPnLProjected,
+                    uint256(srtPnLProjected),
                     srtNetNav
                 );
-                unpaidProjection = Math.min(unpaidProjection, srtPnLProjected);
-                srtPnLProjected -= unpaidProjection;
+                unpaidProjection = Math.min(unpaidProjection, uint256(srtPnLProjected));
+                srtPnLProjected -= int256(unpaidProjection);
                 // srtBaseNav includes Senior projection funded from jrtBaseNav
                 srtBaseNav -= unpaidProjection;
 
                 jrtBaseNav += unpaidProjection;
                 jrtNavProjected = Math.max(jrtNavProjected, jrtBaseNav);
             } else {
-                _trackSrtProjectionOut(Math.mulDiv(srtAssetsOut, _srtFlowProjection(), srtBaseNav));
+                _trackSrtProjectionOut(_scaleProjection(_srtFlowProjection(), srtAssetsOut, srtBaseNav));
             }
         }
         if (useConservativePrice && jrtAssetsOut > 0 && jrtNavProjected > jrtBaseNav && jrtBaseNav > 0) {
@@ -1061,12 +1070,30 @@ contract MTMAccounting is IAccounting, CDOComponent {
         }
     }
 
-    /// @dev Include purchased projection when pricing flows, but not when undoing unrealized gains.
+    /// @dev Paid projection remains in the epoch total; only the unpaid balance is embedded in NAV.
+    function _srtLiveProjection() private view returns (int256) {
+        return srtPnLProjected - int256(useConservativePrice ? 0 : srtPaidProjected);
+    }
+
+    function _positiveProjection(int256 projection) private pure returns (uint256) {
+        return projection > 0 ? uint256(projection) : 0;
+    }
+
+    /// @dev An exit finalizes its share of the live loss; only remaining Seniors recover it.
+    function _forfeitSrtLoss(uint256 assetsOut, uint256 seniorNav) private {
+        int256 liveProjection = _srtLiveProjection();
+        if (liveProjection < 0) {
+            uint256 loss = uint256(-liveProjection);
+            srtPnLProjected += int256(Math.min(Math.mulDiv(assetsOut, loss, seniorNav), loss));
+        }
+    }
+
+    /// @dev Include purchased projection when pricing flows, but not when undoing unrealized PnL.
     ///      This preserves the projection fraction across deposits, including split deposits.
-    function _srtFlowProjection() internal view returns (uint256) {
+    function _srtFlowProjection() internal view returns (int256) {
         return useConservativePrice
-            ? srtPnLProjected
-            : Math.saturatingSub(srtPnLProjected, srtPaidProjected) + srtBoughtProjected;
+            ? int256(_positiveProjection(srtPnLProjected))
+            : _srtLiveProjection() + srtBoughtProjected;
     }
 
     function _trackSrtProjectionIn(uint256 assetsIn) internal {
@@ -1075,16 +1102,31 @@ contract MTMAccounting is IAccounting, CDOComponent {
         if (valuationPrice < 1e18) {
             (, seniorNav) = calcEffectiveNav(jrtBaseNav, seniorNav);
         }
-        uint256 bought = Math.mulDiv(assetsIn, _srtFlowProjection(), seniorNav);
-        uint256 matched = Math.min(bought, srtPaidProjected);
+        int256 bought = _scaleProjection(_srtFlowProjection(), assetsIn, seniorNav);
+        uint256 matched = Math.min(_positiveProjection(bought), srtPaidProjected);
         srtPaidProjected -= matched;
-        srtBoughtProjected += bought - matched;
+        srtBoughtProjected += bought - int256(matched);
     }
 
-    function _trackSrtProjectionOut(uint256 projectionOut) internal {
-        uint256 matched = Math.min(projectionOut, srtBoughtProjected);
-        srtBoughtProjected -= matched;
-        srtPaidProjected += projectionOut - matched;
+    /// @dev Match purchased projection before recording paid gains or forfeited losses.
+    function _trackSrtProjectionOut(int256 projectionOut) internal {
+        if (projectionOut >= 0) {
+            uint256 matched = Math.min(uint256(projectionOut), _positiveProjection(srtBoughtProjected));
+            srtBoughtProjected -= int256(matched);
+            srtPaidProjected += uint256(projectionOut) - matched;
+        } else {
+            uint256 lossOut = uint256(-projectionOut);
+            uint256 matched = Math.min(lossOut, _positiveProjection(-srtBoughtProjected));
+            srtBoughtProjected += int256(matched);
+            srtPnLProjected += int256(lossOut - matched);
+        }
+    }
+
+    /// @dev Scale either sign toward zero, matching the rounding used for positive projection.
+    function _scaleProjection(int256 projection, uint256 assets, uint256 seniorNav) private pure returns (int256) {
+        uint256 magnitude = projection < 0 ? uint256(-projection) : uint256(projection);
+        int256 scaled = int256(Math.mulDiv(assets, magnitude, seniorNav));
+        return projection < 0 ? -scaled : scaled;
     }
 
     /// @dev Consume each backing component using the same pre-exit effective Senior NAV.
@@ -1092,7 +1134,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
     function _splitValuationWithdrawal(uint256 assetsOut)
         internal returns (uint256 juniorOut, uint256 seniorStrategyOut, uint256 insuranceOut)
     {
-        uint256 liveProjection = _srtFlowProjection();
+        int256 flowProjection = _srtFlowProjection();
+        uint256 liveProjection = _positiveProjection(flowProjection);
         uint256 seniorNav = srtBaseNav;
         uint256 juniorNav = jrtBaseNav;
         if (useConservativePrice) {
@@ -1104,23 +1147,27 @@ contract MTMAccounting is IAccounting, CDOComponent {
         (juniorOut, seniorStrategyOut, insuranceOut) = AccountingLib.splitValuatedNavOut(
             seniorNav, seniorEffective, insuranceAmount, assetsOut
         );
+        // Value the exiting loss fraction using the same effective NAV as its backing.
+        if (useConservativePrice) {
+            _forfeitSrtLoss(assetsOut, seniorEffective);
+        }
         srtInsuranceFundNav -= Math.mulDiv(assetsOut, srtInsuranceFundNav, seniorEffective);
         srtFundedGrossNav -= Math.mulDiv(assetsOut, srtFundedGrossNav, seniorEffective);
         srtFundNav -= Math.mulDiv(assetsOut, srtFundNav, seniorEffective);
 
-        uint256 projectionOut = Math.mulDiv(assetsOut, liveProjection, seniorEffective);
         if (useConservativePrice) {
+            uint256 projectionOut = Math.mulDiv(assetsOut, liveProjection, seniorEffective);
             // Use the same pre-exit effective NAV as the projection and coverage payouts.
             if (useBenchmarkProjection && srtPnLBenchmark > 0) {
                 uint256 forfeitedBenchmark = Math.mulDiv(assetsOut, srtPnLBenchmark, seniorEffective);
                 srtPnLBenchmark -= Math.min(forfeitedBenchmark, srtPnLBenchmark);
             }
-            srtPnLProjected -= projectionOut;
+            srtPnLProjected -= int256(projectionOut);
             srtBaseNav -= projectionOut;
             jrtBaseNav += projectionOut;
             jrtNavProjected = Math.max(jrtNavProjected, jrtBaseNav);
         } else {
-            _trackSrtProjectionOut(projectionOut);
+            _trackSrtProjectionOut(_scaleProjection(flowProjection, assetsOut, seniorEffective));
         }
     }
 
@@ -1291,9 +1338,11 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 Math.saturatingSub(jrtNavT0Real, ONE_ASSET)
             );
             if (fundedProjection > 0 && valuationPrice < 1e18) {
-                (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT0Real, srtNavT0);
+                // Restoring a temporary loss is not new gain requiring fresh Junior coverage.
+                uint256 restoredLoss = Math.min(_positiveProjection(int256(state.srtPaidProjected) - state.srtPnLProjected), fundedProjection);
+                (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT0Real - restoredLoss, srtNavT0 + restoredLoss);
                 uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
-                fundedProjection = Math.min(fundedProjection, maxProtectedGain);
+                fundedProjection = Math.min(fundedProjection, restoredLoss + maxProtectedGain);
             }
             jrtNavT1Real = jrtNavT0Real - fundedProjection;
             srtNavT1 = srtNavT0 + fundedProjection;
@@ -1478,16 +1527,17 @@ contract MTMAccounting is IAccounting, CDOComponent {
             state
         );
 
-        // srtNavT0 includes srtPnLProjected added during the epoch
-        // unwind it and rollback to real T0 assets for SRT and JRT
-        // Guard: large Senior withdrawals during the epoch can make srtNavT0 < srtPnLProjected
-        uint256 projUndo = Math.min(state.srtPnLProjected, srtNavT0);
-        srtNavT0 = srtNavT0 - projUndo;
-        jrtNavT0Real = jrtNavT0Real + projUndo;
-
-        // Safe assets for SRT and JRT to move around
-        uint256 srtSafe = Math.saturatingSub(srtNavT0, ONE_ASSET);
-        uint256 jrtSafe = Math.saturatingSub(jrtNavT0Real, ONE_ASSET);
+        // Unwind the signed epoch projection before allocating realized PnL.
+        uint256 projUndo;
+        if (state.srtPnLProjected >= 0) {
+            projUndo = Math.min(uint256(state.srtPnLProjected), srtNavT0);
+            srtNavT0 -= projUndo;
+            jrtNavT0Real += projUndo;
+        } else {
+            uint256 lossUndo = Math.min(uint256(-state.srtPnLProjected), jrtNavT0Real);
+            srtNavT0 += lossUndo;
+            jrtNavT0Real -= lossUndo;
+        }
 
         // True-UP: calculate Senior PnL:
         // 1. Realized based on the RiskPremium (for negative PnL - RiskPremium lowers the loss)
@@ -1553,15 +1603,15 @@ contract MTMAccounting is IAccounting, CDOComponent {
             srtPnLRealized = 0;
         }
 
-        // Make Junior cover paid-out projected Senior assets charged to the remaining Senior NAV.
-        // Cap srtPaidProjected by the paid projection actually included in `projUndo`.
-        if (useJuniorCoversPaidSrtProjection && projUndo > 0) {
-            uint256 paidProjectedUnwound = projUndo == state.srtPnLProjected
-                ? state.srtPaidProjected
-                // Here, pre-unwind srtNavT0' < srtPnLProjected.
-                // Recover pre-unwind srtNavT0' as srtNavT0 + projUndo.
-                : Math.saturatingSub(srtNavT0 + projUndo + state.srtPaidProjected, state.srtPnLProjected);
-
+        // Cover only paid projection that the pre-unwind Senior NAV could absorb.
+        if (useJuniorCoversPaidSrtProjection && state.srtPaidProjected > 0) {
+            uint256 seniorBeforeUnwind = state.srtPnLProjected >= 0
+                ? srtNavT0 + projUndo
+                : Math.saturatingSub(srtNavT0, uint256(-state.srtPnLProjected));
+            uint256 paidProjectedUnwound = Math.min(
+                state.srtPaidProjected,
+                Math.saturatingSub(seniorBeforeUnwind, _positiveProjection(state.srtPnLProjected - int256(state.srtPaidProjected)))
+            );
             if (srtPnLRealized < int256(paidProjectedUnwound)) {
                 // Only adjust if realized PnL does not already cover it
                 if (srtPnLRealized > 0) {
@@ -1571,6 +1621,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 }
             }
         }
+
+        // Safe assets for SRT and JRT to move around
+        uint256 srtSafe = Math.saturatingSub(srtNavT0, ONE_ASSET);
+        uint256 jrtSafe = Math.saturatingSub(jrtNavT0Real, ONE_ASSET);
 
         // Cap Senior loss to available safe assets
         if (srtPnLRealized < -int256(srtSafe)) {
@@ -1803,12 +1857,14 @@ contract MTMAccounting is IAccounting, CDOComponent {
     /// @dev Tracks live projection and benchmark accrual before the new NAVs are stored.
     function _accrueSrtProjection(uint256 srtNavT1, uint256 jrtNavT1Real, uint256 navMTMTime) internal {
         // During epoch, srtBaseNav already includes live Senior projection.
-        // Keep srtPnLProjected equal to the current embedded projection,
+        // Keep unpaid srtPnLProjected equal to the current signed embedded projection,
         // not the sum of all intermediate MTM updates.
-        uint256 liveProjection = Math.saturatingSub(srtPnLProjected, srtPaidProjected);
-        uint256 srtBaseNavReal = srtBaseNav - Math.min(liveProjection, srtBaseNav);
-        uint256 srtGain = srtNavT1 > srtBaseNavReal ? srtNavT1 - srtBaseNavReal : 0;
-        srtPnLProjected = srtPaidProjected + srtGain;
+        int256 liveProjection = _srtLiveProjection();
+        uint256 srtBaseNavReal = liveProjection >= 0
+            ? Math.saturatingSub(srtBaseNav, uint256(liveProjection))
+            : srtBaseNav + uint256(-liveProjection);
+        srtPnLProjected = int256(useConservativePrice ? 0 : srtPaidProjected)
+            + int256(srtNavT1) - int256(srtBaseNavReal);
 
         // Accrue only for intervals where Junior stays above the floor; retain earlier entitlement.
         if (useBenchmarkProjection && jrtNavT1Real > ONE_ASSET && jrtBaseNav > ONE_ASSET) {
@@ -1822,7 +1878,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
                     (uint256 jrtEffective,) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
                     uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
                     // Reserve earlier benchmark entitlement not already embedded in Senior NAV.
-                    uint256 unprojectedBenchmark = Math.saturatingSub(srtPnLBenchmark, liveProjection);
+                    uint256 unprojectedBenchmark = Math.saturatingSub(srtPnLBenchmark, _positiveProjection(liveProjection));
                     benchmarkGain = Math.min(benchmarkGain, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
                 }
                 srtPnLBenchmark += benchmarkGain;

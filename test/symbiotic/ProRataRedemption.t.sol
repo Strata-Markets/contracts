@@ -42,7 +42,7 @@ contract MTMRedemptionHarness is MTMAccounting {
         srtInsuranceFundNav = credit;
         srtFundedGrossNav = fundedGross;
         srtFundNav = fund;
-        srtPnLProjected = projection;
+        srtPnLProjected = int256(projection);
         nav = junior + senior - claim;
         feeWatermarkNav = nav;
         valuationPrice = price;
