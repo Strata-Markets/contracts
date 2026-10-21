@@ -856,8 +856,9 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // nav drops only by what actually leaves the strategy. Both sides of
         // nav + insuranceAmount == jrt + srt + reserve + underwriter fee then move by srtAssetsOut.
         if (!valuationWithdrawal && insuranceAmount > 0 && srtAssetsOut > 0 && srtBaseNav > 0) {
+            // The claim may also back Junior dust; insurance cannot pay more than this exit.
             insuranceBaseOut_ = Math.min(
-                insuranceAmount,
+                Math.min(insuranceAmount, srtAssetsOut),
                 Math.mulDiv(srtAssetsOut, insuranceAmount, srtBaseNav)
             );
             srtInsuranceFundNav = Math.saturatingSub(srtInsuranceFundNav, insuranceBaseOut_);
@@ -1201,7 +1202,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
             uint256 srtNavTimeNet_ = Math.saturatingSub(srtNavTime_, state.srtProjectedPnLTime);
             uint256 navTimeNet_ = state.navTimeNet > 0 ? state.navTimeNet : navT0;
 
-            srtPnLRealized = navTime_ == 0
+            // An insured wipeout can leave gross NAV-time positive with no strategy NAV-time.
+            srtPnLRealized = (navTime_ == 0 || navTimeNet_ == 0)
                 ? int256(0)
                 : (pnl + int256(reserveIncrease)) * int256(srtFactor) * int256(srtNavTimeNet_) / (int256(navTimeNet_) * 1e18);
         }

@@ -25,7 +25,8 @@ library AccountingLib {
             return (0, 0, 0);
         }
         juniorOut = Math.mulDiv(assetsOut, seniorEffective - seniorNav, seniorEffective);
-        insuranceOut = Math.mulDiv(assetsOut, insuranceAmount, seniorEffective);
+        // A claim backing Junior dust can exceed Senior NAV; cap it at the remaining payout.
+        insuranceOut = Math.min(assetsOut - juniorOut, Math.mulDiv(assetsOut, insuranceAmount, seniorEffective));
         seniorStrategyOut = assetsOut - juniorOut - insuranceOut;
     }
 

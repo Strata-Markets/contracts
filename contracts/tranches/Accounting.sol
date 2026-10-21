@@ -425,8 +425,9 @@ contract Accounting is IAccounting, CDOComponent {
         // nav drops only by what actually leaves the strategy. Both sides of
         // nav + insuranceAmount == jrt + srt + reserve + underwriter fee then move by srtAssetsOut.
         if (!valuationWithdrawal && insuranceAmount > 0 && srtAssetsOut > 0 && srtBaseNav > 0) {
+            // The claim may also back Junior dust; insurance cannot pay more than this exit.
             insuranceBaseOut_ = Math.min(
-                insuranceAmount,
+                Math.min(insuranceAmount, srtAssetsOut),
                 Math.mulDiv(srtAssetsOut, insuranceAmount, srtBaseNav)
             );
             srtInsuranceFundNav = Math.saturatingSub(srtInsuranceFundNav, insuranceBaseOut_);

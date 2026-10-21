@@ -153,6 +153,34 @@ abstract contract ProRataRedemptionTestBase is Test {
             a.jrtBaseNav() + a.srtBaseNav() + a.reserveNav() + a.underwriterFeeNav());
     }
 
+    function test_wipeoutFullExitAtPar() public { _wipeoutExits(1e18, false); }
+    function test_wipeoutRepeatedExitsAtPar() public { _wipeoutExits(1e18, true); }
+    function test_wipeoutFullExitDuringDepeg() public { _wipeoutExits(0.8e18, false); }
+    function test_wipeoutRepeatedExitsDuringDepeg() public { _wipeoutExits(0.8e18, true); }
+
+    function _wipeoutExits(uint128 price, bool chunked) internal {
+        for (uint256 mode; mode < 2; ++mode) {
+            _deploy(mode == 1);
+            // Insurance covers all Senior NAV and Junior's protected dust.
+            a.seed(1e18, 1000e18, 1001e18, 0, 0, 0, 0, price);
+            uint256 paid;
+            uint256 count = chunked ? 3 : 1;
+            for (uint256 i; i < count; ++i) {
+                uint256 amount = chunked && i < 2 ? 300e18 : a.srtBaseNav();
+                uint256 insuranceOut = a.updateBalanceFlow(0, 0, 0, amount);
+                assertEq(insuranceOut, amount, "insurance pays exactly the exit");
+                paid += insuranceOut;
+                assertEq(a.nav(), 0, "no strategy assets consumed");
+                assertEq(a.jrtBaseNav(), 1e18, "Junior dust retained");
+                assertEq(a.insuranceAmount(), 1001e18 - paid);
+                _identity();
+            }
+            assertEq(paid, 1000e18);
+            assertEq(a.srtBaseNav(), 0);
+            assertEq(a.insuranceAmount(), 1e18, "only Junior dust claim remains");
+        }
+    }
+
     function test_auditorExample_tenPercentExit() public {
         _covered();
         uint256 insuranceOut = a.updateBalanceFlow(0, 0, 0, 250e18);
