@@ -1405,19 +1405,24 @@ contract DYSAccounting is IAccounting, CDOComponent {
         if (jrtPnLRealized >= 0) {
             jrtNavT1Real = jrtNavT0Real + uint256(jrtPnLRealized);
         } else {
-            // Apply the Loss-Waterfall: Junior -> Reserve -> Senior
-            // Note: This can cancel Senior's benchmark gain if Junior cannot cover it
+            // Loss waterfall: Junior -> reserve -> insurance -> accrued underwriter fees -> Senior.
+            // This can cancel Senior's benchmark gain if Junior cannot cover it.
             uint256 loss = uint256(-jrtPnLRealized);
             uint256 jrtLoss = Math.min(jrtSafe, loss);
             loss -= jrtLoss;
             uint256 reserveLoss = Math.min(reserveNavT1, loss);
             loss -= reserveLoss;
-            // Symbiotic coverage takes the Senior-bound remainder (Srt held whole, booked to insuranceAmount).
+            // Policy: insurance covers the full remainder after Junior and reserve, including
+            // accrued underwriter fees and protected Junior dust, even when no Senior remains.
             uint256 covered = _requestInsurance(loss);
             loss -= covered;
-            // Apply SRT loss to recently accrued balance
+
+            uint256 feeLoss = Math.min(underwriterFeeNavT1, loss);
+            underwriterFeeNavT1 -= feeLoss;
+            loss -= feeLoss;
+
             uint256 srtLoss = Math.min(srtNavT1, loss);
-            // The market is considered abandoned if losses would consume the protected dust NAV
+            // The market is considered abandoned if losses would consume the protected dust NAV.
             require(srtLoss == loss, "NavBelowMinimum");
 
             jrtNavT1Real = jrtNavT0Real - jrtLoss;

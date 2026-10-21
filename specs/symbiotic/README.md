@@ -66,7 +66,12 @@ underwriterFee_dT = srtGain * underwriterFeePct / 1e18
 srtNav            = srtNav + srtGain - underwriterFee_dT
 ```
 
-The deducted amount accrues to the separate `underwriterFeeNav` bucket, which never absorbs losses.
+The deducted amount accrues to the separate `underwriterFeeNav` bucket. The realized-loss waterfall is
+Junior NAV, reserve, Symbiotic coverage, accrued underwriter fees, then Senior NAV. By policy, insurance
+is requested for the full remainder after Junior and reserve, including accrued underwriter fees and
+protected Junior dust, even when no Senior remains. Fees absorb any loss not covered by insurance
+before Senior does. Existing Junior dust protection and `NavBelowMinimum` remain unchanged. Existing
+empty-market shortcuts still cap fees to available assets; MTM also uses that shortcut at zero NAV.
 Since it is a straight transfer from Senior into that bucket, it cancels out of the NAV identity.
 `payUnderwriterFee` sweeps the accrued fee, in the strategy share token, down one of two routes:
 
@@ -82,12 +87,14 @@ Underwriter fee payment is discretionary (Symbiotic gives full flexibility)  -  
 All four accounting variants (`Accounting`, `DiscreteAccounting`, `DYSAccounting`, `MTMAccounting`)
 share one model. The Symbiotic storage block sits at identical slots (143-147) in all four, so a
 proxy can be upgraded between them.
-Inside the NAV split, when a loss overflows Junior + reserve toward Senior:
+Inside the NAV split, when a loss exceeds Junior + reserve:
 
-1. The Senior-bound remainder is offered to the pool via `_requestInsurance(loss)` ->
-   `IInsurancePool.request()`. The covered portion is subtracted from the loss so Senior is **held
-   whole**, and booked to `insuranceAmount` (a claim, not tranche capital). `updateAccountingInner`
-   secures coverage through `coverAndSlash` before persisting the claim increase. If the pool cannot back it in full, Senior absorbs the remainder.
+1. The full remainder, including any unbacked underwriter fees or protected Junior dust, is offered
+   to the pool via `_requestInsurance(loss)` -> `IInsurancePool.request()`. The covered portion is
+   subtracted from the loss and booked to `insuranceAmount` (a claim, not tranche capital).
+   `updateAccountingInner` secures coverage through `coverAndSlash` before persisting the claim increase.
+   Accrued underwriter fees absorb any uncovered loss before Senior does. The existing
+   `NavBelowMinimum` check still rejects a loss that reaches protected Junior dust.
 2. The identity `navT1 + insuranceAmount == jrt + srt + reserve + underwriter fee` holds on every path and
    guards the split  -  a threading bug reverts with `InvalidNavSplit`.
 3. A later **recovery gain first unwinds** the outstanding claim (self-healing) before any gain is

@@ -191,9 +191,10 @@ abstract contract NearTotalLossClaimAboveSeniorBlocksExitsTests is ValuationInsu
 
         uint256 claim = accounting.insuranceAmount();
         srt = accounting.srtBaseNav();
-        // Claim = Senior + Junior floor + underwriter fee - what is left in the strategy
-        assertEq(claim, srt + accounting.jrtBaseNav() + uwFee - 0.5e18, "claim covers Junior floor and fee bucket");
-        assertGt(claim, srt, "claim above Senior NAV");
+        // Fees absorb the uncovered loss before Senior; only funded residual fees remain.
+        uwFee = _fee().underwriterFeeNav();
+        assertEq(claim, srt + accounting.jrtBaseNav() + uwFee - 0.5e18);
+        assertGe(claim, srt, "terminal dust can still leave the claim above remaining Senior NAV");
 
         uint256 snapshot = vm.snapshotState();
         assertEq(accounting.updateBalanceFlow(0, 0, 0, 100e18), 100e18);
@@ -250,7 +251,6 @@ abstract contract NearTotalLossClaimAboveSeniorBlocksExitsTests is ValuationInsu
 
     function test_smallPoolExcessClaimDoesNotBlockExit() public {
         _accrueGain();
-        uint256 uwFee = _fee().underwriterFeeNav();
         // The pool only has 10 units of slashable stake
         adapter.setSlashable(10e18);
 
@@ -258,17 +258,20 @@ abstract contract NearTotalLossClaimAboveSeniorBlocksExitsTests is ValuationInsu
         mockStrategyTvl = 0.5e18;
         accounting.updateAccounting();
 
-        // Senior absorbs what the pool cannot cover, the gap to the claim stays ONE_ASSET + fee - nav
+        // Accrued fees absorb the uncovered loss first. Discrete can retain strategy-backed Senior NAV.
         uint256 claim = accounting.insuranceAmount();
         uint256 srt = accounting.srtBaseNav();
         assertEq(claim, 10e18);
-        assertEq(claim - srt, accounting.jrtBaseNav() + uwFee - 0.5e18);
-        assertEq(accounting.updateBalanceFlow(0, 0, 0, 1e18), 1e18);
-        assertEq(accounting.insuranceAmount(), claim - 1e18);
+        assertEq(_fee().underwriterFeeNav(), 0);
+        assertEq(claim + 0.5e18, srt + accounting.jrtBaseNav());
+        uint256 firstPaid = Math.min(1e18, Math.mulDiv(1e18, claim, srt));
+        assertEq(accounting.updateBalanceFlow(0, 0, 0, 1e18), firstPaid);
+        assertEq(accounting.insuranceAmount(), claim - firstPaid);
+        mockStrategyTvl = accounting.nav();
         _identity();
-        assertEq(accounting.updateBalanceFlow(0, 0, 0, srt - 1e18), srt - 1e18);
-        assertEq(accounting.insuranceAmount(), claim - srt);
-        assertEq(accounting.nav(), 0.5e18);
+        uint256 finalPaid = Math.min(srt - 1e18, claim - firstPaid);
+        assertEq(accounting.updateBalanceFlow(0, 0, 0, srt - 1e18), finalPaid);
+        assertEq(accounting.insuranceAmount(), claim - firstPaid - finalPaid);
         assertEq(accounting.srtBaseNav(), 0);
         _identity();
     }

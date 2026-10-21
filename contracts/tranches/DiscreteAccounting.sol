@@ -622,8 +622,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         int256 gain_dT = int256(navT1) - int256(navT0);
 
         if (gain_dT < 0) {
-            // Loss waterfall: Jrt absorbs first, then the reserve, then the Symbiotic coverage takes
-            // the Senior-bound remainder (Srt held whole, booked to insuranceAmount).
+            // Loss waterfall: Junior -> reserve -> insurance -> accrued underwriter fees -> Senior.
             uint256 loss = uint256(-gain_dT);
 
             uint256 jrtLoss = Math.min(jrtNavT0Real, loss);
@@ -632,12 +631,17 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             uint256 reserveLoss = Math.min(reserveNavT0, loss);
 
             loss -= reserveLoss;
-
+            // Policy: insurance covers the full remainder after Junior and reserve, including
+            // accrued underwriter fees and protected Junior dust, even when no Senior remains.
             uint256 covered = _requestInsurance(loss);
             loss -= covered;
 
+            uint256 feeLoss = Math.min(underwriterFeeNavT0, loss);
+            underwriterFeeNavT0 -= feeLoss;
+            loss -= feeLoss;
+
             uint256 srtLoss = Math.min(srtNavT0, loss);
-            // The market is considered abandoned if losses would consume the protected dust NAV
+            // The market is considered abandoned if losses would consume the protected dust NAV.
             require(srtLoss == loss, "NavBelowMinimum");
 
             jrtNavT0Real -= jrtLoss;

@@ -96,7 +96,7 @@ contract DiscreteInsuranceClaimFundingTest is Test {
         assertEq(accounting.jrtBaseNav(), 0, "Jrt absorbs first");
         assertEq(accounting.srtBaseNav(), 1000e18, "Srt held whole by coverage");
         assertEq(accounting.insuranceAmount(), 50e18, "claim equals the Srt-bound loss");
-        assertEq(accounting.underwriterFeeNav(), 0, "underwriter fee never absorbs losses");
+        assertEq(accounting.underwriterFeeNav(), 0, "no accrued underwriter fee in this scenario");
 
         uint256 reserveBefore = accounting.reserveNav();
 

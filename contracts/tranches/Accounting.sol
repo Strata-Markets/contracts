@@ -574,11 +574,7 @@ contract Accounting is IAccounting, CDOComponent {
         int256 gain_dT = int256(navT1) - int256(navT0);
 
         if (gain_dT < 0) {
-            // Loss waterfall: Jrt absorbs first (down to its dust floor), then the reserve. Only the
-            // remaining Senior-bound loss is requested from the coverage pool: Srt is held whole and
-            // the covered amount is booked to insuranceAmount (the compensation owed for the Senior
-            // loss that would otherwise land on the tranches), settled later. The underwriter fee bucket
-            // never absorbs losses.
+            // Loss waterfall: Junior -> reserve -> insurance -> accrued underwriter fees -> Senior.
             uint256 loss = uint256(-gain_dT);
 
             uint256 jrtLoss = Math.min(
@@ -590,13 +586,17 @@ contract Accounting is IAccounting, CDOComponent {
             uint256 reserveLoss = Math.min(reserveNavT0, loss);
 
             loss -= reserveLoss;
-
-            // Coverage absorbs the Senior-bound remainder so Srt stays whole.
+            // Policy: insurance covers the full remainder after Junior and reserve, including
+            // accrued underwriter fees and protected Junior dust, even when no Senior remains.
             uint256 covered = _requestInsurance(loss);
             loss -= covered;
 
+            uint256 feeLoss = Math.min(underwriterFeeNavT0, loss);
+            underwriterFeeNavT0 -= feeLoss;
+            loss -= feeLoss;
+
             uint256 srtLoss = Math.min(srtNavT0, loss);
-            // The market is considered abandoned if losses would consume the protected dust NAV
+            // The market is considered abandoned if losses would consume the protected dust NAV.
             require(srtLoss == loss, "NavBelowMinimum");
 
             jrtNavT0 -= jrtLoss;
