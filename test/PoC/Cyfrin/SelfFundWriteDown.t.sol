@@ -171,7 +171,8 @@ contract SelfFundWriteDownTest is Test {
             _seed(0, 400e18, 100e18, 100e18, 200e18, 0);
             strategyNav -= 100e18;
             a.updateAccounting();
-            assertEq(a.srtBaseNav(), 300e18);
+            // DYS/MTM also resize excess valuation credit after the loss. Check principal separately.
+            assertEq(a.srtBaseNav() - a.srtInsuranceFundNav(), 200e18);
             _assertFunds(uint256(200e18) * 200 / 300);
         }
     }
@@ -183,7 +184,7 @@ contract SelfFundWriteDownTest is Test {
             a.setValuationPrice(0.7e18);
             assertLt(a.srtInsuranceFundNav(), 100e18);
             assertEq(a.srtFundedGrossNav(), 200e18);
-            assertEq(a.srtFundNav(), uint256(200e18) * 3 / 7);
+            assertEq(a.srtFundNav(), 200e18, "entry self-funding survives claim cancellation");
             a.setValuationPrice(1e18);
             _assertFunds(0);
         }
@@ -260,13 +261,13 @@ contract SelfFundWriteDownTest is Test {
         }
     }
 
-    function test_lossScalesPreviouslyRecappedFundIndependently() public {
+    function test_lossScalesRetainedFundAfterPartialRecovery() public {
         for (uint256 i; i < 4; i++) {
             _deploy(i);
             _seed(0, 100e18, 0, 0, 100e18, 0);
             a.setValuationPrice(0.7e18);
             uint256 fundBefore = a.srtFundNav();
-            assertLt(fundBefore, 100e18);
+            assertEq(fundBefore, 100e18, "partial recovery retains entry self-funding");
             strategyNav = 80e18;
             a.updateAccounting();
             assertEq(a.srtFundedGrossNav(), 80e18);

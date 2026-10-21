@@ -147,7 +147,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
     /// @notice Gross Senior NAV deposited during valuation loss and self-funded by Senior.
     uint256 public srtFundedGrossNav;
 
-    /// @notice Portion of funded Senior NAV that covers its own valuation loss.
+    /// @notice Remaining self-funding recorded at entry, capped at the current valuation loss when used.
     /// @dev Per-entry valuation recovery is not bucketed; small mismatches are socialized through the Senior share price.
     uint256 public srtFundNav;
 
@@ -2251,7 +2251,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
         }
         uint256 srtPrincipal = Math.saturatingSub(srtBaseNav, srtInsuranceFundNav);
         uint256 extraNeeded = Math.saturatingSub(Math.mulDiv(srtPrincipal, 1e18, price), srtBaseNav);
-        extraNeeded = Math.saturatingSub(extraNeeded, srtFundNav);
+        extraNeeded = Math.saturatingSub(extraNeeded, _cappedSrtFundNav(price));
         uint256 juniorAvailable = Math.saturatingSub(jrtBaseNav, ONE_ASSET);
         return Math.saturatingSub(extraNeeded, juniorAvailable);
     }
@@ -2286,19 +2286,18 @@ contract MTMAccounting is IAccounting, CDOComponent {
         srtFundedGrossNav += amount;
     }
 
+    /// @dev Entry self-funding usable at this price, without erasing it on partial recovery.
+    function _cappedSrtFundNav(uint256 price) internal view returns (uint256) {
+        if (price >= 1e18) return 0;
+        return Math.min(srtFundNav, Math.mulDiv(srtFundedGrossNav, 1e18 - price, price));
+    }
+
     function _resyncsrtFundNav(uint128 price) internal {
-        uint256 fundedGrossNav = srtFundedGrossNav;
-        if (fundedGrossNav > 0) {
-            if (price == 1e18) {
-                srtFundedGrossNav = 0;
-                srtFundNav = 0;
-            } else {
-                // Senior deposits self-fund only the valuation loss that existed at deposit time.
-                // On further de-peg, Junior still covers the additional Senior loss.
-                srtFundNav = Math.min(srtFundNav, Math.mulDiv(fundedGrossNav, 1e18 - price, price));
-            }
+        if (price == 1e18 && srtFundedGrossNav > 0) {
+            srtFundedGrossNav = 0;
+            srtFundNav = 0;
         }
-        // Size retained insurance using Senior's self-funded coverage at the new price.
+        // Retain entry self-funding through partial recovery; cap it only when sizing coverage.
         _resyncInsuranceFundNav(price);
     }
 
@@ -2318,7 +2317,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 Math.mulDiv(srtPrincipal, 1e18, price),
                 srtPrincipal
             );
-            insuranceNeeded = Math.saturatingSub(insuranceNeeded, srtFundNav);
+            insuranceNeeded = Math.saturatingSub(insuranceNeeded, _cappedSrtFundNav(price));
             insuranceNeeded = Math.saturatingSub(
                 insuranceNeeded,
                 Math.saturatingSub(jrtBaseNav, ONE_ASSET)
@@ -2374,7 +2373,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
             Math.mulDiv(srtPrincipal, 1e18, valuationPrice),
             srtFact
         );
-        extraNeeded = Math.saturatingSub(extraNeeded, srtFundNav);
+        extraNeeded = Math.saturatingSub(extraNeeded, _cappedSrtFundNav(valuationPrice));
         uint256 extraTaken = Math.min(
             Math.saturatingSub(jrtFact, ONE_ASSET),
             extraNeeded

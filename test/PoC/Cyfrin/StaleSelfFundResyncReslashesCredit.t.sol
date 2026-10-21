@@ -44,7 +44,7 @@ interface ISelfFundAccounting {
 }
 
 /// @notice Regression adapted from the auditor's stale self-fund resync PoC.
-///         Recovery must cap self-funding before sizing retained insurance, preserving existing credit.
+///         Recovery must use capped self-funding when sizing retained insurance, preserving existing credit.
 /// @dev Real StrataCDO, Tranches, accounting variant, InsuranceMiddleware and InsuranceVault. The strategy,
 ///      the Symbiotic AppAdapter and the collateral oracle ($1) are the repo mocks
 abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
@@ -245,7 +245,7 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
         uint256 newClaim = need - creditBefore;
         uint256 correctSlash = newClaim * RECOVERY_PRICE / 1e18;
 
-        assertApproxEqAbs(accounting.srtFundNav(), 1_222.222222222222222222e18, 1e6, "self-fund capped at recovery price");
+        assertEq(accounting.srtFundNav(), fundBefore, "entry self-funding retained; cap applied when sizing coverage");
         assertApproxEqAbs(accounting.insuranceAmount(), need, 1e6, "final claim equals the need");
         assertApproxEqAbs(newClaim, 123.222222222222222222e18, 1e6, "only 123.22 of the need is new");
         assertApproxEqAbs(slashed, correctSlash, 1e6, "only the additional coverage is slashed");
