@@ -1040,6 +1040,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         }
         riskPremiumModel = riskPremiumModel_;
         emit RiskModelChanged(address(riskPremiumModel_));
+        updateAprSrt(aprTarget, aprBase);
     }
 
     /// @notice Sets the APR feed contract for fetching APR target and APR base.
