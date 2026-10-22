@@ -1014,6 +1014,20 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
         TNavSplitState memory state = _currentNavSplitState();
         _accrueAssetTime(block.timestamp, state);
+        if (useConservativePrice && jrtAssetsOut > 0) {
+            // Use pre-flow redemption NAVs; Junior backing paid on a Senior exit is not a Junior redemption.
+            (uint256 jrtSettledNav, uint256 srtSettledNav) = _undoProjection(srtBaseNav, jrtBaseNav);
+            uint256 jrtLiveNav = jrtNavProjected;
+            if (valuationPrice < 1e18) {
+                (jrtSettledNav, ) = calcEffectiveNav(jrtSettledNav, srtSettledNav);
+                (jrtLiveNav, ) = calcEffectiveNav(jrtLiveNav, srtBaseNav);
+            }
+            if (jrtLiveNav > jrtSettledNav && jrtSettledNav > 0) {
+                uint256 jrtProjection = jrtLiveNav - jrtSettledNav;
+                uint256 unpaidProjection = Math.mulDiv(jrtAssetsOut, jrtProjection, jrtSettledNav);
+                jrtNavProjected -= Math.min(unpaidProjection, jrtProjection);
+            }
+        }
         _trackSrtProjectionIn(srtAssetsIn);
         uint256 insuranceBaseOut_;
         bool valuationWithdrawal = valuationPrice < 1e18 && srtAssetsOut > 0;
@@ -1060,19 +1074,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 _trackSrtProjectionOut(_scaleProjection(_srtFlowProjection(), srtAssetsOut, srtBaseNav));
             }
         }
-        if (useConservativePrice && jrtAssetsOut > 0 && jrtNavProjected > jrtBaseNav && jrtBaseNav > 0) {
-            uint256 jrtProjection = jrtNavProjected - jrtBaseNav;
-            uint256 unpaidProjection = Math.mulDiv(
-                jrtAssetsOut,
-                jrtProjection,
-                jrtBaseNav
-            );
-
-            unpaidProjection = Math.min(unpaidProjection, jrtProjection);
-            jrtNavProjected -= unpaidProjection;
-            jrtNavProjected = Math.max(jrtNavProjected, jrtBaseNav);
-        }
-
         // Senior's exit takes its share of the outstanding coverage with it. That slice is paid from
         // the insurance vault rather than the strategy, so srtBaseNav drops by the full outflow while
         // nav drops only by what actually leaves the strategy. Both sides of

@@ -163,6 +163,23 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         assertEq(_identityGap(), 0, "stored NAV conservation");
     }
 
+    function test_JuniorExitWithNegativeSeniorProjection() public {
+        _setUpStack(1000e18);
+        accounting.setFloorRate(0.01e18);
+        mtmStrategy.setTotalAssets(1980e18);
+        _poke();
+        int256 projection = accounting.srtPnLProjected();
+        assertLt(projection, 0, "Senior has a projected loss");
+        uint256 expected = jrt.previewRedeem(100e18);
+        uint256 juniorBefore = accounting.jrtBaseNav();
+        vm.prank(alice);
+        uint256 assets = jrt.redeem(100e18, alice, alice);
+        assertEq(assets, expected, "exit pays the live quote");
+        assertEq(accounting.jrtBaseNav(), juniorBefore - assets, "only payout leaves real Junior NAV");
+        assertEq(accounting.srtPnLProjected(), projection, "Junior exit preserves Senior loss");
+        assertEq(_identityGap(), 0, "stored NAV conservation");
+    }
+
     // Regression for the auditor's repeated-update and full-recovery PoC.
     function test_RepeatedLossDoesNotRatchetAndRecoveryRestoresSenior() public {
         _setUpStack(1000e18);
