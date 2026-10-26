@@ -1568,6 +1568,22 @@ contract MTMAccounting is IAccounting, CDOComponent {
             state
         );
 
+        // Include the final interval before unwinding projection; views and settlement use the same entitlement.
+        if (useBenchmarkProjection && jrtNavT0Real > ONE_ASSET) {
+            int256 benchmarkGain = calculateGain(srtNavT0, getBenchmarkIndexT1(timestamp), benchmarkIndex);
+            if (benchmarkGain > 0) {
+                uint256 pendingBenchmark = uint256(benchmarkGain);
+                if (valuationPrice < 1e18) {
+                    (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT0Real, srtNavT0);
+                    uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
+                    uint256 unprojectedBenchmark = Math.saturatingSub(state.srtPnLBenchmark, _positiveProjection(state.srtPnLProjected));
+                    pendingBenchmark = Math.min(pendingBenchmark, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
+                }
+                // If Junior depletes, the waterfall may fund the final interval from reserve or insurance, or reduce the gain.
+                state.srtPnLBenchmark += pendingBenchmark;
+            }
+        }
+
         // Unwind the signed epoch projection before allocating realized PnL.
         uint256 projUndo;
         if (state.srtPnLProjected >= 0) {
@@ -1875,7 +1891,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 windowEnd = navT1Time + 1 days;
             }
         } else if (nav > 0) {
-            _accrueSrtProjection(srtNavT1, jrtNavT1Real, navMTMTime);
+            _accrueSrtProjection(srtNavT1, jrtNavT1Real, timestamp);
         }
 
         updateIndex(timestamp);
@@ -1902,7 +1918,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
     }
 
     /// @dev Tracks live projection and benchmark accrual before the new NAVs are stored.
-    function _accrueSrtProjection(uint256 srtNavT1, uint256 jrtNavT1Real, uint256 navMTMTime) internal {
+    function _accrueSrtProjection(uint256 srtNavT1, uint256 jrtNavT1Real, uint256 timestamp) internal {
         // During epoch, srtBaseNav already includes live Senior projection.
         // Keep unpaid srtPnLProjected equal to the current signed embedded projection,
         // not the sum of all intermediate MTM updates.
@@ -1915,7 +1931,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
         // Accrue only for intervals where Junior stays above the floor; retain earlier entitlement.
         if (useBenchmarkProjection && jrtNavT1Real > ONE_ASSET && jrtBaseNav > ONE_ASSET) {
-            uint256 benchmarkIndexT1 = getBenchmarkIndexT1(navMTMTime);
+            uint256 benchmarkIndexT1 = getBenchmarkIndexT1(timestamp);
             int256 srtBenchmarkGain = calculateGain(
                 srtBaseNav, benchmarkIndexT1, benchmarkIndex
             );

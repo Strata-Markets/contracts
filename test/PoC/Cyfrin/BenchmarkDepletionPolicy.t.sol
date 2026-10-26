@@ -166,6 +166,51 @@ abstract contract BenchmarkDepletionPolicyTests is ValuationInsuranceFixture {
         assertEq(_totalSlashed(), 501e18);
     }
 
+    function test_reconciliationCapsPendingBenchmarkToEffectiveJuniorHeadroom() public {
+        accounting.setUnderwriterFeeBps(0);
+        accounting.setValuationPrice(0.51e18);
+        (uint256 juniorEffective,,) = accounting.totalAssets();
+        uint256 maxGain = (juniorEffective - ONE_ASSET) * 0.51e18 / 1e18;
+        uint256 seniorBefore = accounting.srtBaseNav();
+        uint256 slashedBefore = _totalSlashed();
+        vm.warp(block.timestamp + 365 days);
+        mockStrategyTvl += 1;
+        accounting.updateAccounting();
+        uint256 gain = accounting.srtBaseNav() - seniorBefore;
+        assertGt(gain, 0, "available headroom funds some pending benchmark");
+        assertLe(gain, maxGain, "pending benchmark is capped by effective Junior headroom");
+        assertEq(_totalSlashed(), slashedBefore, "no insurance for unfunded pending benchmark");
+    }
+
+    function test_reconciliationWithNoEffectiveHeadroomAddsNoBenchmark() public {
+        accounting.setValuationPrice(0.4e18);
+        uint256 seniorBefore = accounting.srtBaseNav();
+        uint256 slashedBefore = _totalSlashed();
+        vm.warp(block.timestamp + 365 days);
+        mockStrategyTvl += 1;
+        accounting.updateAccounting();
+        assertApproxEqAbs(accounting.srtBaseNav(), seniorBefore, 1, "one-wei gain can unwind one wei of valuation credit");
+        assertEq(_totalSlashed(), slashedBefore);
+        assertEq(_srtPnLBenchmark(), 0);
+    }
+
+    function test_reconciliationEndingInDepletionCanInsurePendingBenchmark() public {
+        vm.warp(block.timestamp + 365 days);
+        mockStrategyTvl = 500e18;
+        accounting.updateAccounting();
+        assertEq(accounting.jrtBaseNav(), ONE_ASSET);
+        assertEq(accounting.srtBaseNav(), 1076.8e18);
+        assertEq(_underwriterFeeNav(), 3.2e18);
+        assertEq(_srtPnLBenchmark(), 0, "benchmark resets after settlement");
+        assertEq(_totalSlashed(), 581e18, "insurance covers the final interval benchmark");
+
+        vm.warp(block.timestamp + 365 days);
+        mockStrategyTvl += 1;
+        accounting.updateAccounting();
+        assertEq(_totalSlashed(), 581e18, "no new benchmark after Junior depletion");
+        assertEq(accounting.srtBaseNav(), 1076.8e18);
+    }
+
     function test_depletedYearAccruesNoBenchmarkOrAdditionalSlash() public {
         _wipeOutJunior();
         vm.warp(block.timestamp + 365 days);

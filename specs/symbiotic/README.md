@@ -82,6 +82,33 @@ Since it is a straight transfer from Senior into that bucket, it cancels out of 
 
 Underwriter fee payment is discretionary (Symbiotic gives full flexibility)  -  there is no fixed accrual schedule.
 
+## Senior benchmark coverage policy
+
+In `DYSAccounting` and `MTMAccounting`, Symbiotic coverage can fund accrued Senior benchmark yield,
+not only principal losses. Benchmark already recorded in `srtPnLBenchmark` remains a Senior
+entitlement if Junior later depletes. At reconciliation, the existing waterfall uses Junior and
+reserve first, then requests Symbiotic coverage for the remaining shortfall. Coverage is bounded by
+available capacity; any uncovered remainder continues through the waterfall.
+
+New benchmark accrual follows these rules:
+
+- **Projection updates:** Junior's real NAV must be above `ONE_ASSET` both before and after the
+  projected allocation. Projected Senior gain is capped by available Junior NAV, but at par the
+  benchmark entitlement itself is not capped by that NAV.
+- **Reconciliation:** the final uncheckpointed interval is included when starting real Junior NAV
+  is above `ONE_ASSET`. If Junior depletes at settlement, that interval may still draw on reserve or
+  insurance. Subsequent intervals starting at or below the floor accrue no new benchmark.
+- **During a depeg:** new benchmark accrual is additionally capped by effective Junior headroom,
+  accounting for existing benchmark entitlement not already embedded in projection. This cap does
+  not cancel benchmark accrued earlier.
+
+Operators may set the benchmark APR to zero before Junior depletes. This stops future accrual;
+it does not erase existing benchmark entitlement.
+
+The underwriter fee is calculated on positive allocated Senior gain, including the benchmark uplift,
+before the loss waterfall. It is not recalculated solely on the gain that remains after the waterfall.
+Underwriters therefore accept that coverage may fund accrued benchmark yield and its associated fee.
+
 ## Loss coverage: the `insuranceAmount` model
 
 All four accounting variants (`Accounting`, `DiscreteAccounting`, `DYSAccounting`, `MTMAccounting`)

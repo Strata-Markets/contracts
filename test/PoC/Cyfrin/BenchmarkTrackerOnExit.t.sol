@@ -132,6 +132,7 @@ contract BenchmarkTrackerOnExitTest is Test {
     }
 
     function _reconcileFlat() internal virtual {
+        // Another half-year earns benchmark on the remaining gross Senior NAV.
         vm.warp(vm.getBlockTimestamp() + 15_768_000);
         strategy.setTotalAssets(accounting.nav() + 1);
         _poke();
@@ -144,12 +145,22 @@ contract BenchmarkTrackerOnExitTest is Test {
         received = token.balanceOf(user) - before;
     }
 
+    function test_idleIntervalReconciliationAccruesBenchmark() public {
+        _reconcileFlat();
+        assertApproxEqAbs(accounting.srtBaseNav(), 1040e18, TOL);
+        assertApproxEqAbs(accounting.jrtBaseNav(), 960e18, TOL);
+        assertEq(accounting.srtPnLBenchmark(), 0);
+        uint256 senior = accounting.srtBaseNav();
+        _poke();
+        assertEq(accounting.srtBaseNav(), senior, "repeated checkpoint cannot double accrue");
+    }
+
     function test_control_noExit_juniorPaysOnce() public {
         _project();
         _reconcileFlat();
-        assertApproxEqAbs(accounting.jrtBaseNav(), 960e18, TOL);
-        assertApproxEqAbs(accounting.srtBaseNav(), 1040e18, TOL);
-        assertApproxEqAbs(_redeem(jrt, alice, 500e18), 480e18, TOL);
+        assertApproxEqAbs(accounting.jrtBaseNav(), 918.4e18, TOL);
+        assertApproxEqAbs(accounting.srtBaseNav(), 1081.6e18, TOL);
+        assertApproxEqAbs(_redeem(jrt, alice, 500e18), 459.2e18, TOL);
     }
 
     function test_halfExit_forfeitedBenchmarkStaysWithJunior() public {
@@ -161,11 +172,11 @@ contract BenchmarkTrackerOnExitTest is Test {
         assertApproxEqAbs(accounting.srtPnLBenchmark(), 20e18, TOL);
 
         _reconcileFlat();
-        assertApproxEqAbs(accounting.jrtBaseNav(), 980e18, TOL, "Junior keeps the forfeited benchmark");
-        assertApproxEqAbs(accounting.srtBaseNav(), 520e18, TOL, "remaining Seniors earn only their benchmark");
+        assertApproxEqAbs(accounting.jrtBaseNav(), 959.2e18, TOL, "Junior keeps forfeiture but pays the remaining Senior for the second interval");
+        assertApproxEqAbs(accounting.srtBaseNav(), 540.8e18, TOL, "remaining Seniors earn both intervals on their remaining NAV");
         assertApproxEqAbs(strategy.totalAssets(), accounting.jrtBaseNav() + accounting.srtBaseNav(), TOL);
-        assertApproxEqAbs(_redeem(srt, bob, 400e18), 416e18, TOL);
-        assertApproxEqAbs(_redeem(jrt, alice, 500e18), 490e18, TOL);
+        assertApproxEqAbs(_redeem(srt, bob, 400e18), 432.64e18, TOL);
+        assertApproxEqAbs(_redeem(jrt, alice, 500e18), 479.6e18, TOL);
     }
 
     function test_nearFullExit_dustCannotCollectForfeitedBenchmark() public {
@@ -175,14 +186,14 @@ contract BenchmarkTrackerOnExitTest is Test {
         assertApproxEqAbs(accounting.srtPnLBenchmark(), 0.004e18, TOL);
 
         _reconcileFlat();
-        assertApproxEqAbs(accounting.jrtBaseNav(), 999.996e18, TOL);
-        assertApproxEqAbs(srt.convertToAssets(srt.balanceOf(bob)), 0.104e18, TOL);
+        assertApproxEqAbs(accounting.jrtBaseNav(), 999.99184e18, TOL);
+        assertApproxEqAbs(srt.convertToAssets(srt.balanceOf(bob)), 0.10816e18, TOL);
         assertApproxEqAbs(strategy.totalAssets(), accounting.jrtBaseNav() + accounting.srtBaseNav(), TOL);
         // A second depositor permits Bob to exit without breaching MIN_SHARES.
         _deposit(srt, dave, 100e18);
-        assertApproxEqAbs(_redeem(srt, bob, srt.balanceOf(bob)), 0.104e18, TOL);
-        assertApproxEqAbs(token.balanceOf(bob), 1000.004e18, TOL);
-        assertApproxEqAbs(_redeem(jrt, alice, 500e18), 499.998e18, TOL);
+        assertApproxEqAbs(_redeem(srt, bob, srt.balanceOf(bob)), 0.10816e18, TOL);
+        assertApproxEqAbs(token.balanceOf(bob), 1000.00816e18, TOL);
+        assertApproxEqAbs(_redeem(jrt, alice, 500e18), 499.99592e18, TOL);
     }
 
     function test_nonConservativeExit_keepsBenchmarkForPaidProjection() public {
@@ -193,8 +204,8 @@ contract BenchmarkTrackerOnExitTest is Test {
         assertApproxEqAbs(accounting.srtPnLBenchmark(), BENCHMARK, TOL);
         assertApproxEqAbs(accounting.srtPaidProjected(), 20e18, TOL);
         _reconcileFlat();
-        assertApproxEqAbs(accounting.jrtBaseNav(), 960e18, TOL);
-        assertApproxEqAbs(accounting.srtBaseNav(), 520e18, TOL);
+        assertApproxEqAbs(accounting.jrtBaseNav(), 939.2e18, TOL);
+        assertApproxEqAbs(accounting.srtBaseNav(), 540.8e18, TOL);
     }
 
     function test_repeatedExits_reduceRemainingBenchmarkProportionally() public {
@@ -203,8 +214,8 @@ contract BenchmarkTrackerOnExitTest is Test {
         _redeem(srt, bob, 250e18);
         assertApproxEqAbs(accounting.srtPnLBenchmark(), 10e18, TOL);
         _reconcileFlat();
-        assertApproxEqAbs(accounting.jrtBaseNav(), 990e18, TOL);
-        assertApproxEqAbs(accounting.srtBaseNav(), 260e18, TOL);
+        assertApproxEqAbs(accounting.jrtBaseNav(), 979.6e18, TOL);
+        assertApproxEqAbs(accounting.srtBaseNav(), 270.4e18, TOL);
     }
 
     function _valuationExit(uint256 assets) internal returns (uint256 insuranceOut) {
@@ -228,8 +239,8 @@ contract BenchmarkTrackerOnExitTest is Test {
         vm.prank(address(cdo));
         accounting.setValuationPrice(1e18);
         _reconcileFlat();
-        assertApproxEqAbs(accounting.srtBaseNav(), 260e18, TOL, "recovery cannot restore forfeited benchmark");
-        assertApproxEqAbs(accounting.jrtBaseNav(), 802.5e18, TOL);
+        assertApproxEqAbs(accounting.srtBaseNav(), 270.4e18, TOL, "only remaining NAV earns the second interval after recovery");
+        assertApproxEqAbs(accounting.jrtBaseNav(), 792.1e18, TOL);
     }
 
     function test_insuredValuationExit_usesFullEffectiveNav() public {

@@ -1308,6 +1308,22 @@ contract DYSAccounting is IAccounting, CDOComponent {
             state
         );
 
+        // Include the final interval before unwinding projection; views and settlement use the same entitlement.
+        if (useBenchmarkProjection && jrtNavT0Real > ONE_ASSET) {
+            int256 benchmarkGain = calculateGain(srtNavT0, getBenchmarkIndexT1(), benchmarkIndex);
+            if (benchmarkGain > 0) {
+                uint256 pendingBenchmark = uint256(benchmarkGain);
+                if (valuationPrice < 1e18) {
+                    (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT0Real, srtNavT0);
+                    uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
+                    uint256 unprojectedBenchmark = Math.saturatingSub(state.srtPnLBenchmark, state.srtPnLProjected);
+                    pendingBenchmark = Math.min(pendingBenchmark, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
+                }
+                // If Junior depletes, the waterfall may fund the final interval from reserve or insurance, or reduce the gain.
+                state.srtPnLBenchmark += pendingBenchmark;
+            }
+        }
+
         // srtNavT0 includes srtPnLProjected added during the epoch
         // unwind it and rollback to real T0 assets for SRT and JRT
         // Guard: large Senior withdrawals during the epoch can make srtNavT0 < srtPnLProjected
