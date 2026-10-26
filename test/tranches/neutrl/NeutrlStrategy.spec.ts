@@ -206,7 +206,7 @@ UTest.create({
                 await $tranche.deposit(jrtVault, deployer, NUSD, AMOUNT);
                 let { tx } = await $erc4626.withdrawMeta(jrtVault, NUSD, deployer, AMOUNT);
                 const feeAccrued = accounting.extractLogsFeeAccrued(tx.receipt)[0].params;
-                $require.eq(feeAccrued.amountToReserve, feeAccrued.amountToTranche, `Neutrl 50% retention`);
+                $test.eqDiff(feeAccrued.amountToReserve, feeAccrued.amountToTranche, 1n, `Neutrl 50% retention`);
 
                 const totalFeeFact = $bigint.toEther(feeAccrued.amountToReserve + feeAccrued.amountToTranche);
                 const feeRatio = Tranches.neutrl.jrt.sharesCooldown[2].feeBps / 10000;
@@ -218,7 +218,7 @@ UTest.create({
                 await $tranche.deposit(srtVault, deployer, NUSD, AMOUNT);
                 let { tx } = await $erc4626.withdrawMeta(srtVault, NUSD, deployer, AMOUNT);
                 const feeAccrued = accounting.extractLogsFeeAccrued(tx.receipt)[0].params;
-                $require.eq(feeAccrued.amountToReserve, feeAccrued.amountToTranche, `Neutrl 50% retention`);
+                $test.eqDiff(feeAccrued.amountToReserve, feeAccrued.amountToTranche, 1n, `Neutrl 50% retention`);
 
                 const totalFeeFact = $bigint.toEther(feeAccrued.amountToReserve + feeAccrued.amountToTranche);
                 const feeRatio = Tranches.neutrl.srt.sharesCooldown[2].feeBps / 10000;
@@ -232,10 +232,12 @@ UTest.create({
                 const feeAccrued = accounting.extractLogsFeeAccrued(tx.receipt)[0].params;
 
                 const feeWAD = $bigint.toWei(Tranches.neutrl.jrt.sharesCooldown[2].feeBps / 10000);
-                const fee = AMOUNT_NET * feeWAD / (BigInt(1e18) - feeWAD);
+                let denominator = 10n ** 18n - feeWAD;
+                // Withdrawal fees round up before the retention split.
+                let fee = (AMOUNT_NET * feeWAD + denominator - 1n) / denominator;
 
                 $require.eq(feeAccrued.amountToReserve + feeAccrued.amountToTranche, fee);
-                $require.eq(feeAccrued.amountToReserve, 1n);
+                $require.eq(feeAccrued.amountToReserve, 2n);
                 $require.eq(feeAccrued.amountToTranche, 2n);
             }
         });
@@ -264,7 +266,7 @@ UTest.create({
                 const feeAccrued = accounting.extractLogsFeeAccrued(tx.receipt)[0].params;
                 const feeBPS = Tranches.neutrl.jrt.sharesCooldown[1].feeBps;
 
-                $require.eq(feeAccrued.amountToReserve, feeAccrued.amountToTranche, `Neutrl 50% retention`);
+                $test.eqDiff(feeAccrued.amountToReserve, feeAccrued.amountToTranche, 1n, `Neutrl 50% retention`);
                 $require.eq(feeAccrued.amountToReserve, await accounting.reserveNav());
 
                 const totalFeeFact = $bigint.toEther(feeAccrued.amountToReserve + feeAccrued.amountToTranche);
@@ -274,7 +276,7 @@ UTest.create({
 
 
                 const locked = await sharesCooldown.balanceOf(jrtVault.address, deployer.address);
-                $require.eq(locked.pending, $bigint.toWei(AMOUNT));
+                $test.eqDiff(locked.pending, $bigint.toWei(AMOUNT), 1n, `Locked amount may include one wei from share rounding`);
 
                 await client.debug.mine('10days');
                 await sharesCooldown.$receipt().finalize(deployer, jrtVault.address, deployer.address);
@@ -287,7 +289,7 @@ UTest.create({
                 await $tranche.deposit(srtVault, deployer, NUSD, AMOUNT);
                 let { tx } = await $erc4626.withdrawMeta(srtVault, NUSD, deployer, AMOUNT);
                 const feeAccrued = accounting.extractLogsFeeAccrued(tx.receipt)[0].params;
-                $require.eq(feeAccrued.amountToReserve, feeAccrued.amountToTranche, `Neutrl 50% retention`);
+                $test.eqDiff(feeAccrued.amountToReserve, feeAccrued.amountToTranche, 1n, `Neutrl 50% retention`);
 
                 const totalFeeFact = $bigint.toEther(feeAccrued.amountToReserve + feeAccrued.amountToTranche);
                 const feeRatio = feeBPS / 10000;

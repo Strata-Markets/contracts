@@ -541,14 +541,15 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
 
     /// @dev The calculation can be based on either the gross withdrawal amount (before fees)
     ///      or the net amount a user wishes to receive (after fees).
+    ///      Round fees up so redeem rounds net output down and withdraw rounds required input up.
     /// @param amount The amount to calculate the fee on.
     /// @param isGross If true, `amount` is the gross withdrawal amount.
     ///                If false, `amount` is the net amount to be received.
     /// @return The calculated exit fee amount
     function calculateExitFee (uint256 amount, uint256 fee, bool isGross) internal pure returns (uint256) {
         return isGross
-            ? Math.mulDiv(amount, fee, 1e18, Math.Rounding.Floor)
-            : Math.mulDiv(amount, fee, 1e18 - fee, Math.Rounding.Floor);
+            ? Math.mulDiv(amount, fee, 1e18, Math.Rounding.Ceil)
+            : Math.mulDiv(amount, fee, 1e18 - fee, Math.Rounding.Ceil);
     }
 
 

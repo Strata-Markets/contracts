@@ -95,15 +95,16 @@ UTest.create({
             async 'withdraw 2 step' () {
                 console.log('Alice', await jrtVault.balanceOf(alice.address));
                 let balance = await $erc4626.withdraw(jrtVault, alice, 10);
-                // 1% from 10$ net
-                $require.eq(await accounting.reserveNav(), 101010101010101010n);
+                // Gross up the 10$ net withdrawal; the fee rounds up.
+                $require.eq(await accounting.reserveNav(), 101_010_101_010_101_011n);
                 $require.eq(balance, 10n * 10n**18n);
 
                 let maxWithdraw = await jrtVault.maxWithdraw(alice.address);
-                $require.eq(maxWithdraw, 980000000000000000001n, `1 wei rounding in favor of user`)
-                balance = await $erc4626.withdraw(jrtVault, alice, 980);
-                $require.eq(await accounting.reserveNav(), 9999999999999999999n);
-                $require.eq(await jrtVault.balanceOf(alice.address), 1n, `After fixed (980$) withdrawal, user has 1 wei jrUSDe left`);
+                $require.eq(maxWithdraw, 979_999_999_999_999_999_999n, `Rounded fees leave one wei less than 980$`);
+                balance = await $erc4626.withdraw(jrtVault, alice, maxWithdraw);
+                $require.eq(balance, maxWithdraw);
+                $require.eq(await accounting.reserveNav(), 10_000_000_000_000_000_001n);
+                $require.eq(await jrtVault.balanceOf(alice.address), 0n, `Withdrawing the remaining maximum burns all Alice's shares`);
             },
             async 'redeem' () {
                 let balance = await $erc4626.redeem(jrtVault, alice, '100%');
