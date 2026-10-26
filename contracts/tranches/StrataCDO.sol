@@ -349,9 +349,6 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         if (!enabled) {
             revert WithdrawalsDisabled(tranche);
         }
-        if (baseAssets > strategy.maxWithdraw(tranche, token, tokenAmount)) {
-            revert WithdrawalRejectedByStrategy(tranche, token);
-        }
         bool isSharesLockup = sender == address(sharesCooldown);
         if (baseAssets > accounting.maxWithdraw(isJrt_, isSharesLockup)) {
             revert WithdrawalCapReached(tranche);
@@ -381,6 +378,10 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         }
 
         if (baseAssetsFromStrategy > 0) {
+            // Insurance pays separately; check the strategy limit against its re-quoted remainder.
+            if (baseAssetsFromStrategy > strategy.maxWithdraw(tranche, token, tokenAmount)) {
+                revert WithdrawalRejectedByStrategy(tranche, token);
+            }
             if (strategyOptions.length == 0) {
                 strategy.withdraw(tranche, token, tokenAmount, baseAssetsFromStrategy, sender, receiver, shouldSkipCooldown);
             } else {
