@@ -6,6 +6,7 @@ import { $ethena } from './utils/$ethena';
 import { $erc20 } from './utils/$erc20';
 import { l } from 'dequanto/utils/$logger';
 import { $bigint } from 'dequanto/utils/$bigint';
+import { $test } from './utils/$test';
 
 let test = await $hh.deploy('ethena');
 let { jrtVault, sUSDe,  } = test.tranches;
@@ -50,7 +51,7 @@ UTest.create({
     },
     async 'ERC4626 standard' () {
         return UTest.create({
-            async 'Deposit → Redeem' () {
+            async 'Deposit â†’ Redeem' () {
                 let arr = [21.3e18, .3e9];
                 for (let value of arr) {
                     let assets = BigInt(value);
@@ -60,7 +61,7 @@ UTest.create({
                     $require.lte(assets1, assets);
                 }
             },
-            async 'Mint → Withdraw' () {
+            async 'Mint â†’ Withdraw' () {
                 let arr = [21.3e18, .3e9];
                 for (let value of arr) {
                     let shares = BigInt(value);
@@ -78,10 +79,28 @@ UTest.create({
         await $erc4626.mint(sUSDe, bob, assets);
         await $erc4626.depositMeta(jrtVault, sUSDe.address, bob, assets);
         let assetsPreview = await jrtVault.maxWithdraw(sUSDe.address, bob.address);
-        $require.eq(assetsPreview, $bigint.toWei(assets), `Max withdraw returns incorrect amount of initialy deposited tokens`);
+        // Converting the base cap back to sUSDe rounds down.
+        $require.lte(assetsPreview, $bigint.toWei(assets));
+        $test.eqDiff(assetsPreview, $bigint.toWei(assets), 1n, `Token maximum rounds down within this fixture's exchange rate`);
 
+        let sharesBefore = await jrtVault.balanceOf(bob.address);
+        let sharesPreview = await jrtVault.previewWithdraw(sUSDe.address, assetsPreview);
+        $require.lte(sharesPreview, sharesBefore, `Maximum withdrawal fits the share balance`);
+        let tokensBefore = await sUSDe.balanceOf(bob.address);
+        let { shares: sharesBurned } = await $erc4626.withdrawMeta(jrtVault, sUSDe.address, bob, assetsPreview);
+        $require.eq(sharesBurned, sharesPreview, `Maximum withdrawal burns the previewed shares`);
+        $require.eq(await sUSDe.balanceOf(bob.address) - tokensBefore, assetsPreview, `Maximum withdrawal pays the quoted tokens`);
+    },
+    async 'previewRedeem - full balance' () {
+        let bob = await test.createAccount('bob');
+        let assets = 33;
+        await $erc4626.mint(sUSDe, bob, assets);
+        await $erc4626.depositMeta(jrtVault, sUSDe.address, bob, assets);
+        let shares = await jrtVault.balanceOf(bob.address);
+        let assetsPreview = await jrtVault.previewRedeem(sUSDe.address, shares);
         let assetsFact = await $erc4626.redeemMeta(jrtVault, sUSDe.address, bob, '100%');
-        $require.eq(assetsPreview, assetsFact, `Max redeem returns incorrect amount of initialy deposited tokens`);
+        $require.eq(assetsPreview, assetsFact, `Full redemption pays the previewed tokens`);
+        $require.eq(await jrtVault.balanceOf(bob.address), 0n);
     },
     async 'previewRedeem' () {
         let shares = BigInt(19.9e18);
