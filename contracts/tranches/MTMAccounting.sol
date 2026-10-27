@@ -795,6 +795,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
         }
         underwriterFeeNav -= amount;
         nav -= amount;
+        adjustFeeWatermark(0, amount);
         navTimestamp = block.timestamp;
         emit UnderwriterFeeReduced(amount);
     }

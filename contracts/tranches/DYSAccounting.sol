@@ -688,6 +688,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         }
         underwriterFeeNav -= amount;
         nav -= amount;
+        adjustFeeWatermark(0, amount);
         emit UnderwriterFeeReduced(amount);
     }
 

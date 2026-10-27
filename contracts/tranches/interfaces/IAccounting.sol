@@ -41,6 +41,8 @@ interface IAccounting is ICDOComponent, IAprPairFeedListener {
         uint256 srtNavSettled
     );
     function totalReserve () external view returns (uint256);
+    /// @notice Settled strategy NAV, excluding insurance claims.
+    function nav () external view returns (uint256);
     function totalUnderwriterFeeNav () external view returns (uint256);
     function valuationPrice () external view returns (uint128);
     function reduceReserve (uint256 amount, uint256 jrtAmountIn, uint256 srtAmountIn) external;

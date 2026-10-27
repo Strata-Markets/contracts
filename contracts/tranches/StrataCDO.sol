@@ -514,8 +514,9 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     /// @param token The token to pay the underwriter fee in
     function payUnderwriterFee (address token) external onlyRole(RESERVE_MANAGER_ROLE) {
         address receiver = _underwriterFeeReceiver();
-        // The full accrued underwriter fee bucket, in base assets
-        uint256 baseAssets = accounting.totalUnderwriterFeeNav();
+        accounting.updateAccounting();
+        // Pay only fees backed by settled strategy assets; the unpaid remainder stays in the bucket.
+        uint256 baseAssets = Math.min(accounting.totalUnderwriterFeeNav(), accounting.nav());
         if (baseAssets == 0) {
             revert ZeroAmount();
         }
