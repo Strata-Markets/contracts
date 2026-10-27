@@ -426,6 +426,11 @@ contract MidasStrategy is Strategy {
         uint256 baseAssets
     ) external view {}
 
+    /// @notice Extra deposit tokens are entry-only; exits support only the base asset and mToken.
+    function maxWithdraw(address /*tranche*/, address tokenOut, uint256 /*tokenAmount*/) external view override returns (uint256) {
+        return tokenOut == baseAsset || tokenOut == address(mToken) ? type(uint256).max : 0;
+    }
+
     /**
      * @notice Returns an array of supported tokens: mToken, base asset, and deposit tokens
      */

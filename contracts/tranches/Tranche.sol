@@ -211,9 +211,13 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
 
     /** @dev Overloads {IERC4626-maxWithdraw} to return the withdrawable amount denominated in the specified Meta Token. */
     function maxWithdraw(address token, address owner) public view returns (uint256) {
-        uint256 baseAssets = maxWithdraw(owner);
-        uint256 tokenAssets = cdo.strategy().convertToTokens(token, baseAssets, Math.Rounding.Floor);
-        return tokenAssets;
+        uint256 sharesGross = balanceOf(owner);
+        uint256 assetsNet = Math.min(previewRedeem(sharesGross), cdo.maxWithdraw(address(this), owner, token));
+        if (assetsNet == 0) {
+            return 0;
+        }
+        uint256 tokensNet = cdo.strategy().convertToTokens(token, assetsNet, Math.Rounding.Floor);
+        return tokensNet;
     }
 
     /** @dev Overloads {IERC4626-maxDeposit} to return the maximum deposit amount denominated in the specified Meta Token. */

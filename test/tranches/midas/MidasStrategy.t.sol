@@ -52,6 +52,13 @@ contract MidasStrategyTest is Test {
         );
     }
 
+    function test_withdrawalCapacityOnlyAllowsExitTokens() public view {
+        assertEq(strategy.maxWithdraw(address(this), address(baseAsset), 0), type(uint256).max);
+        assertEq(strategy.maxWithdraw(address(this), address(mToken), 0), type(uint256).max);
+        assertEq(strategy.maxWithdraw(address(this), address(0xDA1), 0), 0);
+        assertEq(strategy.maxWithdraw(address(this), address(0xDA1), 100e18), 0);
+    }
+
     // ========================================
     // Oracle Rate Tests
     // ========================================

@@ -102,6 +102,7 @@ contract CoveredSeniorExitCheckedGrossAgainstStrategyTest is IsolatedVaultDeploy
         assertEq(strategy.totalAssets(), 300_000e18);
         uint256 assets = srtVault.previewRedeem(srtVault.balanceOf(bob));
         assertGt(assets, _strategyCap(assets), "gross exit exceeds available strategy assets");
+        assertLt(srtVault.maxWithdraw(address(baseAsset), bob), assets, "token maximum is deliberately conservative");
         _redeemBob();
     }
 

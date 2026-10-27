@@ -237,6 +237,12 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         return accounting.maxWithdraw(isJrt_, ownerIsSharesCooldown);
     }
 
+    /// @notice Returns the withdrawal limit in base assets for the requested token route.
+    /// @dev Conservatively caps the whole exit by strategy capacity, without adding insurance coverage.
+    function maxWithdraw(address tranche, address owner, address token) external view returns (uint256) {
+        return Math.min(maxWithdraw(tranche, owner), strategy.maxWithdraw(tranche, token, 0));
+    }
+
     /// @notice Determines the exit mode and associated parameters for a withdrawal from a specific tranche.
     /// @dev Checks if shares cooldown is configured and calculates exit parameters based on coverage ratio.
     ///      If the owner is the shares cooldown contract, returns ERC4626 mode with no fees.

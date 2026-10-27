@@ -61,6 +61,8 @@ interface IStrataCDO {
 
     function maxWithdraw(address tranche) external view returns (uint256);
     function maxWithdraw(address tranche, address owner) external view returns (uint256);
+    /// @notice Withdrawal limit in base assets for the requested token route.
+    function maxWithdraw(address tranche, address owner, address token) external view returns (uint256);
     function maxDeposit(address tranche) external view returns (uint256);
 
     // reverts if neither Jrt nor Srt
