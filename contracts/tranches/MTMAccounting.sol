@@ -1617,7 +1617,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
         uint256 srtFactor = 1e18 - riskPremium.unwrap();
 
         int256 srtPnLRealized;
-        if (useRatesForReconciliation) {
+        // Without a starting rate, use proportional allocation until reconciliation seeds the checkpoint.
+        if (useRatesForReconciliation && state.strategyRate > 0) {
             // Rate-based formula: senior earns (senior sub-strategy rate growth) * srtNavTime * srtFactor.
             // Used when the senior sub-strategy has a queryable exchange rate (e.g. IsolatedStrategy);
             // isolates senior returns regardless of junior sub-strategy performance.
