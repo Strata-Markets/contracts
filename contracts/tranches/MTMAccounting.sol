@@ -904,41 +904,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
             return 0;
         }
 
-        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
-        bool isReconciliation = _shouldReconcile(nav, navT1);
-        bool hasMTMAfterReconciliation = isReconciliation && navMTMTime > navT1Time;
-        uint256 timestamp = hasMTMAfterReconciliation ? navT1Time : block.timestamp;
-
-        uint256 jrtNav;
-        uint256 srtNav;
-
-        if (isReconciliation) {
-            TNavSplitState memory state = _currentNavSplitState();
-            (
-                ,
-                jrtNav,
-                srtNav,
-                ,
-                ,
-            ) = calculateNAVSplit(
-                    nav,
-                    jrtNavProjected,
-                    jrtBaseNav,
-                    srtBaseNav,
-                    reserveNav,
-                    navT1,
-                    navT1Time,
-                    navMTM,
-                    navMTMTime,
-                    timestamp,
-                    state
-                );
-        } else {
-            jrtNav = jrtBaseNav;
-            srtNav = srtBaseNav;
-        }
-
-        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(jrtNav, srtNav);
+        (uint256 jrtNavEffective, uint256 srtNavEffective) = _effectiveNavsForLimits();
         if (ownerIsSharesCooldown) {
             return isJrt ? jrtNavEffective : srtNavEffective;
         }
@@ -956,9 +922,52 @@ contract MTMAccounting is IAccounting, CDOComponent {
         if (isJrt) {
             return type(uint256).max;
         }
-        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
+        (uint256 jrtNavEffective, uint256 srtNavEffective) = _effectiveNavsForLimits();
         uint256 maxSrt = (jrtNavEffective * 1e18) / minimumJrtSrtRatioBuffer;
         return Math.saturatingSub(maxSrt, srtNavEffective);
+    }
+
+    /// @dev Preview pending reconciliation; otherwise use stored NAVs, including Junior MTM losses.
+    ///      Deposits and redemptions call updateAccounting first, so stored NAVs are fresh during execution.
+    ///      Standalone previews may use a stale MTM projection until accounting is updated.
+    ///      Applies valuation adjustments to the selected NAVs.
+    function _effectiveNavsForLimits() internal view returns (uint256 jrtNavEffective, uint256 srtNavEffective) {
+        uint256 jrtNavForLimits;
+        uint256 srtNavForLimits;
+        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+        bool isReconciliation = _shouldReconcile(nav, navT1);
+        bool hasMTMAfterReconciliation = isReconciliation && navMTMTime > navT1Time;
+        uint256 timestamp = hasMTMAfterReconciliation ? navT1Time : block.timestamp;
+
+        if (isReconciliation) {
+            TNavSplitState memory state = _currentNavSplitState();
+            (
+                ,
+                jrtNavForLimits,
+                srtNavForLimits,
+                ,
+                ,
+            ) = calculateNAVSplit(
+                    nav,
+                    jrtNavProjected,
+                    jrtBaseNav,
+                    srtBaseNav,
+                    reserveNav,
+                    navT1,
+                    navT1Time,
+                    navMTM,
+                    navMTMTime,
+                    timestamp,
+                    state
+                );
+        } else {
+            // Flows checkpoint first; include stored MTM losses in Junior backing.
+            jrtNavForLimits = useMTMProjection
+                ? Math.min(jrtBaseNav, jrtNavProjected)
+                : jrtBaseNav;
+            srtNavForLimits = srtBaseNav;
+        }
+        return calcEffectiveNav(jrtNavForLimits, srtNavForLimits);
     }
 
     /// @notice Updates the accounting by fetching the current total assets from the strategy
