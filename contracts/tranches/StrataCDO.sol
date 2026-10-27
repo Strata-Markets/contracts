@@ -215,13 +215,18 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         return calculatePricePerShare(assets, supply, baseAssetDecimals);
     }
 
-    function maxDeposit(address tranche) external view returns (uint256) {
+    function maxDeposit(address tranche) public view returns (uint256) {
         bool isJrt_ = isJrt(tranche);
         bool isDepositEnabled = isJrt_ ? actionsJrt.isDepositEnabled : actionsSrt.isDepositEnabled;
         if (isDepositEnabled == false) {
             return 0;
         }
         return accounting.maxDeposit(isJrt_);
+    }
+
+    /// @notice Returns the deposit limit in base assets for the requested token route.
+    function maxDeposit(address tranche, address token) external view returns (uint256) {
+        return Math.min(maxDeposit(tranche), strategy.maxDeposit(tranche, token, 0));
     }
     function maxWithdraw(address tranche) external view returns (uint256) {
         return maxWithdraw(tranche, address(0));

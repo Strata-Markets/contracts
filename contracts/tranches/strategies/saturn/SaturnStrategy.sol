@@ -326,6 +326,14 @@ contract SaturnStrategy is Strategy {
         return isWithdrawalPaused != true;
     }
 
+    /// @notice Paused or unsupported deposit routes have no capacity.
+    function maxDeposit(address tranche, address token, uint256 /*tokenAmount*/) external view override returns (uint256) {
+        if (!supportsToken(token)) {
+            return 0;
+        }
+        return isTokenEnabledForDeposit(tranche, token) ? type(uint256).max : 0;
+    }
+
     /**
      * @notice Checks if deposits are enabled for a specific token and tranche combination
      * @dev Does not validate if the token is supported by the strategy - caller must ensure token validity.
@@ -368,7 +376,7 @@ contract SaturnStrategy is Strategy {
     * @param config The token configuration with pause flags
     */
     function setTokenConfig (address token, TTokenConfig calldata config) external onlyRole(PAUSER_ROLE) {
-        if (token != address(sUSDat) && token != address(USDat)) {
+        if (!supportsToken(token)) {
             revert UnsupportedToken(token);
         }
         tokenConfigs[token] = config;
@@ -399,7 +407,7 @@ contract SaturnStrategy is Strategy {
 
 
 
-    function supportsToken(address token) external view returns (bool) {
+    function supportsToken(address token) public view returns (bool) {
         return token == address(sUSDat) || token == address(USDat);
     }
 }

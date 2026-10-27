@@ -393,7 +393,7 @@ UTest.create({
                 const { error: errDeposit } = await $promise.caught(
                     $erc4626.depositMeta(srtVault, sUSDat, deployer, 50)
                 );
-                $require.match(/TokenDepositPaused/, errDeposit.message);
+                $require.match(/DepositRejectedByStrategy/, errDeposit.message);
 
                 await strategy.$receipt().setTokenConfig(deployer, sUSDat.address, {
                     jrtDepositsPaused: true,

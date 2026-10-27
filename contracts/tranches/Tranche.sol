@@ -96,12 +96,12 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
 
     /** @dev Extends {IERC4626-maxDeposit} to handle the paused state and the TVL ratio */
     function maxDeposit(address) public view override(ERC4626Upgradeable, IERC4626) returns (uint256) {
-        return cdo.maxDeposit(address(this));
+        return cdo.maxDeposit(address(this), asset());
     }
 
     /** @dev Extends {IERC4626-maxMint} to handle the paused state and the TVL ratio */
     function maxMint(address) public view override(ERC4626Upgradeable, IERC4626) returns (uint256) {
-        uint256 assets = cdo.maxDeposit(address(this));
+        uint256 assets = cdo.maxDeposit(address(this), asset());
         if (assets == type(uint256).max) {
             // No mint-cap
             return type(uint256).max;
@@ -221,8 +221,11 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     }
 
     /** @dev Overloads {IERC4626-maxDeposit} to return the maximum deposit amount denominated in the specified Meta Token. */
-    function maxDeposit(address token, address owner) public view returns (uint256) {
-        uint256 baseAssets = maxDeposit(owner);
+    function maxDeposit(address token, address /*owner*/) public view returns (uint256) {
+        uint256 baseAssets = cdo.maxDeposit(address(this), token);
+        if (baseAssets == 0 || baseAssets == type(uint256).max) {
+            return baseAssets;
+        }
         uint256 tokenAssets = cdo.strategy().convertToTokens(token, baseAssets, Math.Rounding.Floor);
         return tokenAssets;
     }
