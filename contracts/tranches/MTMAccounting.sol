@@ -378,7 +378,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
         windowStartSrtNav = 0;
         windowNetFlows = 0;
         floorRate = 0;
-        if (useRatesForReconciliation) {
+        // Fresh CDOs configure the strategy later; their first reconciliation uses proportional allocation.
+        if (useRatesForReconciliation && address(cdo.strategy()) != address(0)) {
             strategyRate = cdo.strategy().getRate();
         }
         migrationBitmap |= MIGRATION_V3;
