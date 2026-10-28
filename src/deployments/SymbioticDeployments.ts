@@ -269,16 +269,15 @@ export class SymbioticDeployments {
         return new SymbioticAppAdapterImpl(appAdapter, this.ds.client);
     }
 
-    /// Deploys the shared InsuranceMiddleware behind a proxy, initialized with the AppAdapter and oracle.
+    /// Deploys an implementation bound to the AppAdapter, then initializes the proxy owner, ACM and oracle.
     private async ensureMiddleware(oracle: OracleAdapter): Promise<InsuranceMiddleware> {
         const appAdapter = this.appAdapter();
         const { contract } = await this.ds.ensureWithProxy(InsuranceMiddleware, {
             id: 'SymbioticInsuranceMiddleware',
-            arguments: [],
+            arguments: [appAdapter],
             initialize: [
                 this.owner.address,
                 this.params.acm,
-                appAdapter,
                 oracle.address,
             ],
         });

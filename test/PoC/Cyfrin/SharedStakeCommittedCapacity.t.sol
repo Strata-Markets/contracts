@@ -90,8 +90,8 @@ contract SharedStakeCommittedCapacityTest is Test {
 
         AccessControlManager acm = new AccessControlManager(address(this));
         middleware = InsuranceMiddleware(address(new ERC1967Proxy(
-            address(new InsuranceMiddleware()),
-            abi.encodeCall(InsuranceMiddleware.initialize, (owner, address(acm), address(adapter), address(oracle)))
+            address(new InsuranceMiddleware(address(adapter))),
+            abi.encodeCall(InsuranceMiddleware.initialize, (owner, address(acm), address(oracle)))
         )));
 
         // Market A: this contract is the CDO.

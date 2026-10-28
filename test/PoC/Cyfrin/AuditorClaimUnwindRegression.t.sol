@@ -49,8 +49,8 @@ contract AuditorClaimUnwindRegressionTest is Test {
         oracle = new MockOracleAdapter(); // both assets default to $1
 
         middleware = InsuranceMiddleware(address(new ERC1967Proxy(
-            address(new InsuranceMiddleware()),
-            abi.encodeCall(InsuranceMiddleware.initialize, (address(this), address(acm), address(adapter), address(oracle)))
+            address(new InsuranceMiddleware(address(adapter))),
+            abi.encodeCall(InsuranceMiddleware.initialize, (address(this), address(acm), address(oracle)))
         )));
 
         accounting = Accounting(address(new ERC1967Proxy(

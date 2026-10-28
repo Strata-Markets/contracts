@@ -149,8 +149,8 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
         adapter.setSlashable(SLASHABLE);
         MockOracleAdapter oracle = new MockOracleAdapter();
         middleware = InsuranceMiddleware(address(new ERC1967Proxy(
-            address(new InsuranceMiddleware()),
-            abi.encodeCall(InsuranceMiddleware.initialize, (address(this), address(acm), address(adapter), address(oracle)))
+            address(new InsuranceMiddleware(address(adapter))),
+            abi.encodeCall(InsuranceMiddleware.initialize, (address(this), address(acm), address(oracle)))
         )));
         middleware.setMarket(address(cdo), IStrataAccounting(address(accounting)), address(token), 0, true);
         vault = InsuranceVault(address(new ERC1967Proxy(

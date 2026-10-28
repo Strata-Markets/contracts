@@ -136,10 +136,10 @@ contract InsuranceMiddlewareTest is Test {
         oracle.setPrice(address(unibtc), UNIBTC_PRICE, 18);
         // Base assets use accounting.valuationPrice; only uniBTC needs an oracle price.
 
-        InsuranceMiddleware impl = new InsuranceMiddleware();
+        InsuranceMiddleware impl = new InsuranceMiddleware(address(adapter));
         middleware = InsuranceMiddleware(address(new ERC1967Proxy(
             address(impl),
-            abi.encodeCall(InsuranceMiddleware.initialize, (owner, acm, address(adapter), address(oracle)))
+            abi.encodeCall(InsuranceMiddleware.initialize, (owner, acm, address(oracle)))
         )));
 
         cdo = address(new MockStrataCDO(accounting));
@@ -595,9 +595,30 @@ contract InsuranceMiddlewareTest is Test {
         assertEq(address(middleware.appAdapter()), address(adapter));
     }
 
+    function test_constructor_rejectsZeroAdapter() public {
+        vm.expectRevert(InsuranceMiddleware.InvalidAppAdapter.selector);
+        new InsuranceMiddleware(address(0));
+    }
+
+    function test_constructor_rejectsCodelessAdapter() public {
+        assertEq(stranger.code.length, 0);
+        vm.expectRevert(InsuranceMiddleware.InvalidAppAdapter.selector);
+        new InsuranceMiddleware(stranger);
+    }
+
+    function test_constructor_setsAdapterBeforeInitialization() public {
+        InsuranceMiddleware impl = new InsuranceMiddleware(address(adapter));
+        assertEq(address(impl.appAdapter()), address(adapter));
+        InsuranceMiddleware proxy = InsuranceMiddleware(address(new ERC1967Proxy(
+            address(impl), abi.encodeCall(InsuranceMiddleware.initialize, (owner, acm, address(oracle)))
+        )));
+        assertEq(address(proxy.appAdapter()), address(adapter));
+        assertEq(proxy.owner(), owner);
+    }
+
     function test_initialize_cannotRunTwice() public {
         vm.expectRevert();
-        middleware.initialize(stranger, stranger, address(adapter), address(oracle));
+        middleware.initialize(stranger, stranger, address(oracle));
     }
 
     function _fundVault(uint256 amount) internal returns (InsuranceVault vault) {

@@ -259,8 +259,8 @@ contract CoveredClaimFreezeTest is Test {
         middleware = InsuranceMiddleware(
             address(
                 new ERC1967Proxy(
-                    address(new InsuranceMiddleware()),
-                    abi.encodeWithSelector(InsuranceMiddleware.initialize.selector, owner, address(acm), address(adapter), address(oracle))
+                    address(new InsuranceMiddleware(address(adapter))),
+                    abi.encodeWithSelector(InsuranceMiddleware.initialize.selector, owner, address(acm), address(oracle))
                 )
             )
         );

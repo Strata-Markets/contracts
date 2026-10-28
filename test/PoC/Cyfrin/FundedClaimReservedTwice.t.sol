@@ -191,8 +191,8 @@ abstract contract SymbioticCoverageStackBase is Test {
         oracle.setFeed(OracleAdapter.Feed(address(unibtc), unibtcBtc, 18, DEFAULT_HEARTBEAT, address(btcUsd)));
 
         middleware = InsuranceMiddleware(address(new ERC1967Proxy(
-            address(new InsuranceMiddleware()),
-            abi.encodeCall(InsuranceMiddleware.initialize, (owner, address(acm), address(adapter), address(oracle)))
+            address(new InsuranceMiddleware(address(adapter))),
+            abi.encodeCall(InsuranceMiddleware.initialize, (owner, address(acm), address(oracle)))
         )));
         middleware.setMarket(address(cdo), IStrataAccounting(address(accounting)), address(usde), 0, true);
 

@@ -35,7 +35,8 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     uint256 constant BPS = 10_000;
     uint256 constant MAX_BUFFER_BPS = 5_000; // 50%
 
-    IAppAdapter public override appAdapter;
+    /// @notice Adapter fixed for this implementation and every proxy using it.
+    IAppAdapter public immutable override appAdapter;
 
     /// @notice Shared, project-wide price source for the deficit -> vault-asset conversion.
     ///         Keyed by asset internally, so a single instance prices every market's base asset
@@ -55,6 +56,7 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     // Events and Errors
 
     error InvalidReturnedAmount();
+    error InvalidAppAdapter();
     error NotAuthorized(address sender);
 
     event MarketSet(address indexed cdo, address accounting, address baseAsset, uint256 bufferBps, bool enabled);
@@ -66,9 +68,16 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
 
 
 
-    function initialize(address owner_, address acm_, address appAdapter_, address oracle_) external initializer {
-        AccessControlled_init(owner_, acm_);
+    constructor(address appAdapter_) {
+        // The adapter must already be deployed; zero and codeless bindings cannot provide coverage.
+        if (appAdapter_.code.length == 0) {
+            revert InvalidAppAdapter();
+        }
         appAdapter = IAppAdapter(appAdapter_);
+    }
+
+    function initialize(address owner_, address acm_, address oracle_) external initializer {
+        AccessControlled_init(owner_, acm_);
         oracle = IOracleAdapter(oracle_);
     }
 

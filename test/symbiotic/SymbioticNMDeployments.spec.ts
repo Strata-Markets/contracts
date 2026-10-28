@@ -9,8 +9,8 @@ import { DeploymentsBase } from '@s/deployments/DeploymentsBase';
 
 await $hh.test.init();
 
-// The AppAdapter lives on the Symbiotic side; the deploy path only stores its address, so a
-// placeholder is enough to exercise oracle + middleware deployment, feed and market registration.
+// Deployment tests do not call adapter methods. Install stub code at this address
+// to satisfy the deployed-contract check; coverage behavior is tested separately.
 const APP_ADAPTER = '0x000000000000000000000000000000000000dEaD';
 const ZERO = '0x0000000000000000000000000000000000000000';
 
@@ -32,6 +32,7 @@ UTest.create({
 
     async $before() {
         forked = await $hh.forked({ cdo: 'ethena' });
+        await forked.client.debug.setCode(APP_ADAPTER, '0x00');
         acm = await forked.get(AccessControlManager);
     },
 

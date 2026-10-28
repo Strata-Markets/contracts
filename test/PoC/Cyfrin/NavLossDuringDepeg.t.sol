@@ -111,10 +111,10 @@ abstract contract DepegNavLossFixture is Test {
         middleware = InsuranceMiddleware(
             address(
                 new ERC1967Proxy(
-                    address(new InsuranceMiddleware()),
+                    address(new InsuranceMiddleware(address(adapter))),
                     abi.encodeCall(
                         InsuranceMiddleware.initialize,
-                        (address(this), address(acm), address(adapter), address(oracle))
+                        (address(this), address(acm), address(oracle))
                     )
                 )
             )

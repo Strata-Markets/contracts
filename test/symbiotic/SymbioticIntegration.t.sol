@@ -235,10 +235,10 @@ contract SymbioticIntegrationTest is Test {
         oracle.setFeed(OracleAdapter.Feed(UNIBTC, UNIBTC_BTC, 18, FEED_HEARTBEAT, address(BTC_USD)));
         vm.stopPrank();
 
-        InsuranceMiddleware impl = new InsuranceMiddleware();
+        InsuranceMiddleware impl = new InsuranceMiddleware(address(adapter));
         middleware = InsuranceMiddleware(address(new ERC1967Proxy(
             address(impl),
-            abi.encodeCall(InsuranceMiddleware.initialize, (strataOps, strataOps, address(adapter), address(oracle)))
+            abi.encodeCall(InsuranceMiddleware.initialize, (strataOps, strataOps, address(oracle)))
         )));
         vm.prank(network);
         MIDDLEWARE_SERVICE.setMiddleware(address(middleware));
