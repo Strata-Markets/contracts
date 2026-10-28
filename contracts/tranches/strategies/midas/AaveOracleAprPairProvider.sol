@@ -76,8 +76,13 @@ contract AaveOracleAprPairProvider is IStrategyAprPairProvider {
             weightedSum += apr * totalSupply;
             totalWeight += totalSupply;
         }
+        if (totalWeight == 0) {
+            return spread;
+        }
         uint256 aprAvg = weightedSum / totalWeight;
-        require(BOUND_MIN <= aprAvg && aprAvg <= BOUND_MAX, "InvalidAprAvg");
+        if (aprAvg > BOUND_MAX) {
+            aprAvg = BOUND_MAX;
+        }
         return int64(int256(aprAvg)) + spread;
     }
 

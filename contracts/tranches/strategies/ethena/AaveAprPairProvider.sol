@@ -51,8 +51,13 @@ contract AaveAprPairProvider is IStrategyAprPairProvider {
             weightedSum += apr * totalSupply;
             totalWeight += totalSupply;
         }
-        uint256 aprAvg = weightedSum  / totalWeight;
-        require(BOUND_MIN <= aprAvg && aprAvg <= BOUND_MAX, "Invalid_Apr_Avg");
+        if (totalWeight == 0) {
+            return 0;
+        }
+        uint256 aprAvg = weightedSum / totalWeight;
+        if (aprAvg > BOUND_MAX) {
+            aprAvg = BOUND_MAX;
+        }
         return int64(int256(aprAvg));
     }
 

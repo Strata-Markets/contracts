@@ -52,5 +52,24 @@ UTest.create({
 
         const pair = await provider.getAprPair();
         $require.eq(pair.aprTarget, apr, `APR target does not match`);
+    },
+
+    async 'aave feed zero weight protection (empty benchmark tokens)' () {
+        const aavePool = '0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2';
+        const sUSDe = Addresses.eth.sUSDe;
+
+        let { contract: provider } = await test.factory.ds.ensure(AaveAprPairProvider, {
+            id: 'AaveAprPairProviderZeroWeight',
+            arguments: [
+                aavePool,
+                [],
+                sUSDe
+            ]
+        });
+
+        const apr = await provider.getAPRtarget();
+        $require.eq(apr, 0n, 'Empty benchmark tokens should return 0 without division by zero');
+        const pair = await provider.getAprPair();
+        $require.eq(pair.aprTarget, 0n);
     }
 })
