@@ -37,7 +37,7 @@ contract OracleAdapter is IOracleAdapter, AccessControlled {
     function setFeed(Feed calldata feed) external onlyOwner {
         require(feed.asset != address(0), "ZeroAsset");
         require(address(feed.aggregator) != address(0), "ZeroAggregator");
-        require(feed.decimals > 0 && feed.decimals <= 36, "InvalidDecimals");
+        require(feed.decimals == feed.aggregator.decimals(), "DecimalsMismatch");
         address quoteAsset = feed.quoteAsset;
         while (quoteAsset != address(0)) {
             if (quoteAsset == feed.asset) {

@@ -35,6 +35,12 @@ import { MockAppAdapter } from "../../symbiotic/NetworkMiddleware.t.sol";
 
 /// @notice Chainlink-style push feed with a settable answer and update time
 contract PocRoundFeed is IRoundDataOracle {
+    uint8 public immutable override decimals;
+
+    constructor(uint8 decimals_) {
+        decimals = decimals_;
+    }
+
     int256 public answer;
     uint256 public updatedAt;
 
@@ -174,9 +180,9 @@ abstract contract SymbioticCoverageStackBase is Test {
             address(new OracleAdapter()),
             abi.encodeCall(OracleAdapter.initialize, (owner, address(acm)))
         )));
-        usdeUsd = new PocRoundFeed();
-        unibtcBtc = new PocRoundFeed();
-        btcUsd = new PocRoundFeed();
+        usdeUsd = new PocRoundFeed(8);
+        unibtcBtc = new PocRoundFeed(18);
+        btcUsd = new PocRoundFeed(8);
         usdeUsd.set(USDE_USD_ANSWER, block.timestamp);
         unibtcBtc.set(UNIBTC_BTC_ANSWER, block.timestamp);
         btcUsd.set(BTC_USD_ANSWER, block.timestamp);

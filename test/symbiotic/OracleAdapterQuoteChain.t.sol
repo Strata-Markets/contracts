@@ -18,12 +18,46 @@ contract OracleAdapterQuoteChainTest is Test {
         vm.warp(10 days);
         oracle = OracleAdapter(address(new ERC1967Proxy(address(new OracleAdapter()),
             abi.encodeCall(OracleAdapter.initialize, (address(this), address(this))))));
+        _decimals(AGG, 18);
+        _decimals(BGG, 8);
+        _decimals(CGG, 6);
         _round(AGG, 2e18, block.timestamp);
         _round(BGG, 3e8, block.timestamp);
         _round(CGG, 4e6, block.timestamp);
         oracle.setFeed(OracleAdapter.Feed(C, CGG, 6, 1 hours, address(0)));
         oracle.setFeed(OracleAdapter.Feed(B, BGG, 8, 2 hours, C));
         oracle.setFeed(OracleAdapter.Feed(A, AGG, 18, 1 days, B));
+    }
+
+    function _decimals(IRoundDataOracle agg, uint8 decimals_) internal {
+        vm.mockCall(address(agg), abi.encodeCall(IRoundDataOracle.decimals, ()), abi.encode(decimals_));
+    }
+
+    function test_mismatchedDecimalsRejectedOnRegistration() public {
+        vm.expectRevert(bytes("DecimalsMismatch"));
+        oracle.setFeed(OracleAdapter.Feed(address(0xD), BGG, 18, 1 hours, address(0)));
+    }
+
+    function test_mismatchedDecimalsRejectedOnReplacement() public {
+        vm.expectRevert(bytes("DecimalsMismatch"));
+        oracle.setFeed(OracleAdapter.Feed(A, BGG, 18, 1 hours, address(0)));
+        (uint256 price,) = oracle.getPrice(A);
+        assertEq(price, 24e18);
+    }
+
+    function test_decimalRangeAndNormalization() public {
+        vm.expectRevert(bytes("InvalidDecimals"));
+        oracle.setFeed(OracleAdapter.Feed(A, AGG, 0, 1 hours, address(0)));
+        vm.expectRevert(bytes("InvalidDecimals"));
+        oracle.setFeed(OracleAdapter.Feed(A, AGG, 37, 1 hours, address(0)));
+        uint8[3] memory scales = [uint8(1), uint8(27), uint8(36)];
+        for (uint256 i; i < scales.length; ++i) {
+            _decimals(AGG, scales[i]);
+            _round(AGG, int256(2 * 10 ** uint256(scales[i])), block.timestamp);
+            oracle.setFeed(OracleAdapter.Feed(A, AGG, scales[i], 1 hours, address(0)));
+            (uint256 price,) = oracle.getPrice(A);
+            assertEq(price, 2e18);
+        }
     }
 
     function _round(IRoundDataOracle agg, int256 answer, uint256 updatedAt) internal {

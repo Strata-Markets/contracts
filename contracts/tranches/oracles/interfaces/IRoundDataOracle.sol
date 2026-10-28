@@ -2,6 +2,8 @@
 pragma solidity ^0.8.28;
 
 interface IRoundDataOracle {
+    function decimals() external view returns (uint8);
+
     function latestRoundData()
         external
         view
