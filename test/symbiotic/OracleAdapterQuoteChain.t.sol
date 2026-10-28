@@ -45,11 +45,7 @@ contract OracleAdapterQuoteChainTest is Test {
         assertEq(price, 24e18);
     }
 
-    function test_decimalRangeAndNormalization() public {
-        vm.expectRevert(bytes("InvalidDecimals"));
-        oracle.setFeed(OracleAdapter.Feed(A, AGG, 0, 1 hours, address(0)));
-        vm.expectRevert(bytes("InvalidDecimals"));
-        oracle.setFeed(OracleAdapter.Feed(A, AGG, 37, 1 hours, address(0)));
+    function test_decimalNormalization() public {
         uint8[3] memory scales = [uint8(1), uint8(27), uint8(36)];
         for (uint256 i; i < scales.length; ++i) {
             _decimals(AGG, scales[i]);
@@ -98,6 +94,48 @@ contract OracleAdapterQuoteChainTest is Test {
         uint256 staleTime = block.timestamp - 3 hours;
         _round(BGG, 3e8, staleTime);
         vm.expectRevert(abi.encodeWithSelector(OracleAdapter.StalePrice.selector, B, staleTime));
+        oracle.getPrice(A);
+    }
+
+    // f-100 regression: malformed timestamps must fail explicitly, regardless of heartbeat.
+    function test_zeroTimestampRejectedWithAndWithoutHeartbeat() public {
+        _round(AGG, 2e18, 0);
+        vm.expectRevert(abi.encodeWithSelector(OracleAdapter.InvalidPrice.selector, A));
+        oracle.getPrice(A);
+        oracle.setFeed(OracleAdapter.Feed(A, AGG, 18, 0, B));
+        vm.expectRevert(abi.encodeWithSelector(OracleAdapter.InvalidPrice.selector, A));
+        oracle.getPrice(A);
+    }
+
+    function test_futureTimestampRejectedWithAndWithoutHeartbeat() public {
+        _round(AGG, 2e18, block.timestamp + 1);
+        vm.expectRevert(abi.encodeWithSelector(OracleAdapter.InvalidPrice.selector, A));
+        oracle.getPrice(A);
+        oracle.setFeed(OracleAdapter.Feed(A, AGG, 18, 0, B));
+        vm.expectRevert(abi.encodeWithSelector(OracleAdapter.InvalidPrice.selector, A));
+        oracle.getPrice(A);
+    }
+
+    function test_invalidQuoteTimestampRejectsEntireChain() public {
+        oracle.setFeed(OracleAdapter.Feed(C, CGG, 6, 0, address(0)));
+        _round(CGG, 4e6, 0);
+        vm.expectRevert(abi.encodeWithSelector(OracleAdapter.InvalidPrice.selector, C));
+        oracle.getPrice(A);
+        _round(CGG, 4e6, block.timestamp + 1);
+        vm.expectRevert(abi.encodeWithSelector(OracleAdapter.InvalidPrice.selector, C));
+        oracle.getPrice(A);
+    }
+
+    function test_timestampAndHeartbeatBoundaries() public {
+        _round(CGG, 4e6, block.timestamp);
+        (uint256 price,) = oracle.getPrice(A);
+        assertEq(price, 24e18);
+        _round(CGG, 4e6, block.timestamp - 1 hours);
+        (price,) = oracle.getPrice(A);
+        assertEq(price, 24e18);
+        uint256 staleTime = block.timestamp - 1 hours - 1;
+        _round(CGG, 4e6, staleTime);
+        vm.expectRevert(abi.encodeWithSelector(OracleAdapter.StalePrice.selector, C, staleTime));
         oracle.getPrice(A);
     }
 

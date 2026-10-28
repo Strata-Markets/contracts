@@ -13,7 +13,7 @@ contract OracleAdapter is IOracleAdapter, AccessControlled {
         address asset;
         IRoundDataOracle aggregator;
         uint256 decimals;
-        // Maximum round age in seconds; zero disables this feed's staleness check.
+        // Maximum round age in seconds; zero disables only the age check.
         uint256 heartbeat;
         // Registered quote asset; zero means the aggregator already quotes USD.
         address quoteAsset;
@@ -76,7 +76,8 @@ contract OracleAdapter is IOracleAdapter, AccessControlled {
     /// @dev Validates this hop using its own heartbeat and normalizes its answer to 18 decimals.
     function _read(Feed storage feed) internal view returns (uint256) {
         (, int256 answer,, uint256 updatedAt,) = feed.aggregator.latestRoundData();
-        if (answer <= 0) {
+        // Timestamp validity is required even when the heartbeat is disabled.
+        if (answer <= 0 || updatedAt == 0 || updatedAt > block.timestamp) {
             revert InvalidPrice(feed.asset);
         }
         if (feed.heartbeat != 0 && block.timestamp - updatedAt > feed.heartbeat) {
