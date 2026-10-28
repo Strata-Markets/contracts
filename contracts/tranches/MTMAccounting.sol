@@ -1285,7 +1285,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
         if (jrtNavT0Projected == 0 && srtNavT0 == 0) {
             // No tranche deposits; everything is reserve, less the underwriter fee already accrued. Underwriter fee
             // is capped to the remaining assets so a wipeout below it cannot underflow.
-            uint256 available = Math.max(navT1, navMTM);
+            // Persist only settled NAV; any live excess is realized at reconciliation.
+            uint256 available = navT1;
             underwriterFeeNavT1 = Math.min(available, state.underwriterFeeNav);
             return (0, 0, 0, available - underwriterFeeNavT1, underwriterFeeNavT1, state.insuranceAmount);
         }
