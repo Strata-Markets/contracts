@@ -336,9 +336,9 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         );
     }
 
-    /// @notice Reduces the accrued underwriter fee by the specified amount
-    /// @dev Called by the CDO when paying underwriter fee to the insurance middleware; the CDO withdraws
-    ///      the corresponding tokens, so nav (which includes the underwriter fee bucket) drops too.
+    /// @notice Reduces accrued underwriter fees and settled NAV by the amount paid out.
+    /// @dev The CDO withdraws the corresponding tokens to its configured underwriter fee receiver.
+    /// @param amount Fee payout in base-asset units.
     function reduceUnderwriterFee (uint256 amount) external onlyCDO {
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         if (amount > underwriterFeeNav) {

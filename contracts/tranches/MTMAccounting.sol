@@ -13,8 +13,8 @@ import {IRiskPremiumModel} from "./accounting/premium/IRiskPremiumModel.sol";
 import {IInsurancePool} from "./symbiotic/interfaces/IInsurancePool.sol";
 
 /**
- * @title CDO::DYSAccounting
- * @dev Dynamic Yield Split (DYS) accounting for volatile strategies like mKRALPHA.
+ * @title CDO::MTMAccounting
+ * @dev Mark-to-market accounting with separate settled and live strategy NAV snapshots.
  *
  * Key differences from DiscreteAccounting:
  * 1. Asset-time tracking: accumulates srtNavTime, jrtNavTime, navTime before every state change
@@ -23,7 +23,7 @@ import {IInsurancePool} from "./symbiotic/interfaces/IInsurancePool.sol";
  * 4. Senior floor: srtFloorPnL = -srtFloorBps * avgSrAssets
  *
  * During the epoch (between oracle updates):
- *   - Senior NAV is continuously increased using projected returns (aprSrt-based index)
+ *   - Senior NAV reflects APR projection or signed live MTM PnL, depending on configuration
  *   - srtPnLProjected tracks signed projected PnL, including paid projection
  *   - Asset-time is accrued before every deposit/withdrawal
  *
@@ -207,7 +207,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
     /// @notice Exchange rate of the senior sub-strategy at the start of the current epoch.
     /// @dev Stored after each reconciliation as T0 for the next epoch's true-up.
-    ///      0 means rate tracking is not enabled; the proportional nav-time formula is used instead.
+    ///      A zero starting rate uses proportional NAV-time allocation for that epoch, even in rate mode.
     uint256 public strategyRate;
 
     /// @notice Optional external risk premium model.
@@ -783,10 +783,9 @@ contract MTMAccounting is IAccounting, CDOComponent {
      *                  State-Mutating Methods (called by CDO)                    *
      *****************************************************************************/
 
-    /// @notice Reduces the reserve by the specified amount
-    /// @notice Reduces the accrued underwriter fee by the specified amount.
-    /// @dev Called by the CDO when paying underwriter fee out to the insurance middleware; the CDO withdraws
-    ///      the corresponding tokens, so nav drops by the same amount.
+    /// @notice Reduces accrued underwriter fees and settled NAV by the amount paid out.
+    /// @dev The CDO withdraws the corresponding tokens to its configured underwriter fee receiver.
+    /// @param amount Fee payout in base-asset units.
     function reduceUnderwriterFee(uint256 amount) external onlyCDO {
         (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
         updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
@@ -2064,10 +2063,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
             return (true, aprTargetT1, aprBaseT1);
         }
         return (false, aprTargetT1, aprBaseT1);
-    }
-
-    function updateIndex() internal {
-        updateIndex(block.timestamp);
     }
 
     function updateIndex(uint256 timestamp) internal {

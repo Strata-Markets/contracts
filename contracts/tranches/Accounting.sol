@@ -325,10 +325,9 @@ contract Accounting is IAccounting, CDOComponent {
     }
 
 
-    /// @notice Reduces the accrued underwriter fee by the specified amount
-    /// @dev This function is called by the CDO contract when paying underwriter fee to the insurance middleware
-    /// @dev The CDO contract is responsible for withdrawing the corresponding tokens to the middleware
-    /// @param amount The amount by which to reduce the underwriter fee NAV
+    /// @notice Reduces accrued underwriter fees and settled NAV by the amount paid out.
+    /// @dev The CDO withdraws the corresponding tokens to its configured underwriter fee receiver.
+    /// @param amount Fee payout in base-asset units.
     function reduceUnderwriterFee (uint256 amount) external onlyCDO {
         updateAccountingInner(cdo.totalStrategyAssets());
 
@@ -947,7 +946,7 @@ contract Accounting is IAccounting, CDOComponent {
 
     /// @notice Sets the portion of fees from each tranche that is returned to its TVL. The remainder goes to the reserve.
     /// @param jrtRetentionBps The percentage of junior fees that is retained by the junior tranche TVL.
-    /// @param srtRetentionBps The percentage of junior fees that is retained by the senior tranche TVL.
+    /// @param srtRetentionBps The percentage of senior fees that is retained by the senior tranche TVL.
     function setFeeRetentionBps (uint256 jrtRetentionBps, uint256 srtRetentionBps) external onlyOwner {
         require(jrtRetentionBps <= PERCENTAGE_100, "InvalidJrtRetention");
         require(srtRetentionBps <= PERCENTAGE_100, "InvalidSrtRetention");
