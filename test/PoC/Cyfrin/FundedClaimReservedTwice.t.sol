@@ -180,8 +180,9 @@ abstract contract SymbioticCoverageStackBase is Test {
         usdeUsd.set(USDE_USD_ANSWER, block.timestamp);
         unibtcBtc.set(UNIBTC_BTC_ANSWER, block.timestamp);
         btcUsd.set(BTC_USD_ANSWER, block.timestamp);
-        oracle.setFeed(address(usde), usdeUsd, 8, IRoundDataOracle(address(0)), 0, DEFAULT_HEARTBEAT);
-        oracle.setFeed(address(unibtc), unibtcBtc, 18, btcUsd, 8, DEFAULT_HEARTBEAT);
+        oracle.setFeed(OracleAdapter.Feed(address(usde), usdeUsd, 8, DEFAULT_HEARTBEAT, address(0)));
+        oracle.setFeed(OracleAdapter.Feed(address(btcUsd), btcUsd, 8, DEFAULT_HEARTBEAT, address(0)));
+        oracle.setFeed(OracleAdapter.Feed(address(unibtc), unibtcBtc, 18, DEFAULT_HEARTBEAT, address(btcUsd)));
 
         middleware = InsuranceMiddleware(address(new ERC1967Proxy(
             address(new InsuranceMiddleware()),

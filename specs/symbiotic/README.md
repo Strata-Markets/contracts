@@ -226,3 +226,7 @@ The limit controls the principal loss, not the combined NAV reduction.
 Valuation-only claims cannot be cancelled as principal losses. Existing pending slash proceeds are not
 cleared by this action, and a later valuation change can create a new funding gap. The operator must
 still establish that funding is unrecoverable; automatic sizing does not make that decision.
+
+### Oracle quote chains
+
+`OracleAdapter` registers each asset with its aggregator, decimals, heartbeat and optional `quoteAsset`. A zero quote asset means USD. Otherwise, register the quote asset first; for example, register BTC/USD before uniBTC/BTC. Chains may contain more than two feeds, and each hop checks its own heartbeat. Circular chains are rejected, including when updating an existing feed. Removing a feed also makes dependent price reads revert until it is registered again.

@@ -43,9 +43,10 @@ contract OracleAdapterForkTest is Test {
         )));
 
         vm.startPrank(owner);
-        oracle.setFeed(USDE, USDE_USD, 8, IRoundDataOracle(address(0)), 0, HEARTBEAT);
-        oracle.setFeed(USDC, USDC_USD, 8, IRoundDataOracle(address(0)), 0, HEARTBEAT);
-        oracle.setFeed(UNIBTC, UNIBTC_BTC, 18, BTC_USD, 8, HEARTBEAT);
+        oracle.setFeed(OracleAdapter.Feed(USDE, USDE_USD, 8, HEARTBEAT, address(0)));
+        oracle.setFeed(OracleAdapter.Feed(USDC, USDC_USD, 8, HEARTBEAT, address(0)));
+        oracle.setFeed(OracleAdapter.Feed(address(BTC_USD), BTC_USD, 8, HEARTBEAT, address(0)));
+        oracle.setFeed(OracleAdapter.Feed(UNIBTC, UNIBTC_BTC, 18, HEARTBEAT, address(BTC_USD)));
         vm.stopPrank();
     }
 
@@ -95,7 +96,7 @@ contract OracleAdapterForkTest is Test {
     function test_getPrice_revertsWhenStale() public {
         // Register with a 1-hour heartbeat, then jump well past it.
         vm.prank(owner);
-        oracle.setFeed(USDE, USDE_USD, 8, IRoundDataOracle(address(0)), 0, 1 hours);
+        oracle.setFeed(OracleAdapter.Feed(USDE, USDE_USD, 8, 1 hours, address(0)));
 
         (,,, uint256 updatedAt,) = USDE_USD.latestRoundData();
         vm.warp(updatedAt + 2 hours);
@@ -108,10 +109,10 @@ contract OracleAdapterForkTest is Test {
         // The staleness guard applies to both hops: stale BTC/USD must revert uniBTC pricing.
         (,,, uint256 quoteUpdatedAt,) = BTC_USD.latestRoundData();
         vm.prank(owner);
-        oracle.setFeed(UNIBTC, UNIBTC_BTC, 18, BTC_USD, 8, 1 hours);
+        oracle.setFeed(OracleAdapter.Feed(address(BTC_USD), BTC_USD, 8, 1 hours, address(0)));
 
         vm.warp(quoteUpdatedAt + 2 hours);
-        // Reverts on one of the two hops (whichever the guard trips first is a StalePrice for UNIBTC).
+        // The quote feed enforces its own heartbeat.
         vm.expectRevert();
         oracle.getPrice(UNIBTC);
     }
@@ -119,13 +120,13 @@ contract OracleAdapterForkTest is Test {
     function test_setFeed_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vm.prank(stranger);
-        oracle.setFeed(USDE, USDE_USD, 8, IRoundDataOracle(address(0)), 0, HEARTBEAT);
+        oracle.setFeed(OracleAdapter.Feed(USDE, USDE_USD, 8, HEARTBEAT, address(0)));
     }
 
     function test_setFeed_zeroBaseReverts() public {
         vm.expectRevert(bytes("ZeroAggregator"));
         vm.prank(owner);
-        oracle.setFeed(USDE, IRoundDataOracle(address(0)), 8, IRoundDataOracle(address(0)), 0, HEARTBEAT);
+        oracle.setFeed(OracleAdapter.Feed(USDE, IRoundDataOracle(address(0)), 8, HEARTBEAT, address(0)));
     }
 
     function test_removeFeed() public {

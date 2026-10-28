@@ -230,8 +230,9 @@ contract SymbioticIntegrationTest is Test {
             abi.encodeCall(OracleAdapter.initialize, (strataOps, strataOps))
         )));
         vm.startPrank(strataOps);
-        oracle.setFeed(USDE, USDE_USD, 8, IRoundDataOracle(address(0)), 0, FEED_HEARTBEAT);
-        oracle.setFeed(UNIBTC, UNIBTC_BTC, 18, BTC_USD, 8, FEED_HEARTBEAT);
+        oracle.setFeed(OracleAdapter.Feed(USDE, USDE_USD, 8, FEED_HEARTBEAT, address(0)));
+        oracle.setFeed(OracleAdapter.Feed(address(BTC_USD), BTC_USD, 8, FEED_HEARTBEAT, address(0)));
+        oracle.setFeed(OracleAdapter.Feed(UNIBTC, UNIBTC_BTC, 18, FEED_HEARTBEAT, address(BTC_USD)));
         vm.stopPrank();
 
         InsuranceMiddleware impl = new InsuranceMiddleware();

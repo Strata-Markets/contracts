@@ -3,7 +3,8 @@ import { $hh } from '../tranches/utils/$hh';
 import { $require } from 'dequanto/utils/$require';
 import { Addresses, ChainlinkFeeds } from '@s/constants';
 import { SymbioticConfig } from '@s/platforms/symbiotic/SymbioticConfig';
-import { SymbioticDeployments } from '@s/deployments/SymbioticDeployments';
+import { SymbioticDeployments, BTC_QUOTE_ASSET } from '@s/deployments/SymbioticDeployments';
+import { AccessControlManager } from '@0xc/hardhat/AccessControlManager/AccessControlManager';
 import { DeploymentsBase } from '@s/deployments/DeploymentsBase';
 
 await $hh.test.init();
@@ -14,6 +15,7 @@ const APP_ADAPTER = '0x000000000000000000000000000000000000dEaD';
 const ZERO = '0x0000000000000000000000000000000000000000';
 
 let forked: DeploymentsBase;
+let acm: AccessControlManager;
 
 function newDeployments() {
     return new SymbioticDeployments({
@@ -21,6 +23,7 @@ function newDeployments() {
         deployer: forked.deployer,
         owner: forked.deployer,
         appAdapter: APP_ADAPTER,
+        acm: acm.address,
         isTest: true,
     });
 }
@@ -29,6 +32,7 @@ UTest.create({
 
     async $before() {
         forked = await $hh.forked({ cdo: 'ethena' });
+        acm = await forked.get(AccessControlManager);
     },
 
     async $after() {
@@ -48,17 +52,22 @@ UTest.create({
 
         // USDe: single-hop (no quote)
         const usde = await oracle.feeds(Addresses.eth.USDe);
-        $require.eq(usde.base.toLowerCase(), F['USDe/USD'].address.toLowerCase(), 'USDe base feed');
-        $require.eq(usde.quote.toLowerCase(), ZERO, 'USDe has no quote hop');
+        $require.eq(usde.aggregator.toLowerCase(), F['USDe/USD'].address.toLowerCase(), 'USDe base feed');
+        $require.eq(usde.quoteAsset.toLowerCase(), ZERO, 'USDe has no quote hop');
 
         // USDC: single-hop
         const usdc = await oracle.feeds(Addresses.eth.USDC);
-        $require.eq(usdc.base.toLowerCase(), F['USDC/USD'].address.toLowerCase(), 'USDC base feed');
+        $require.eq(usdc.aggregator.toLowerCase(), F['USDC/USD'].address.toLowerCase(), 'USDC base feed');
 
         // uniBTC: two-hop uniBTC/BTC x BTC/USD
         const uni = await oracle.feeds(Addresses.eth.uniBTC);
-        $require.eq(uni.base.toLowerCase(), F['uniBTC/BTC'].address.toLowerCase(), 'uniBTC base feed');
-        $require.eq(uni.quote.toLowerCase(), F['BTC/USD'].address.toLowerCase(), 'uniBTC quote feed');
+        $require.eq(uni.aggregator.toLowerCase(), F['uniBTC/BTC'].address.toLowerCase(), 'uniBTC base feed');
+        $require.eq(uni.quoteAsset.toLowerCase(), BTC_QUOTE_ASSET.toLowerCase(), 'uniBTC quote asset');
+
+        const btc = await oracle.feeds(BTC_QUOTE_ASSET);
+        $require.eq(btc.aggregator.toLowerCase(), F['BTC/USD'].address.toLowerCase(), 'BTC feed');
+        $require.eq(btc.heartbeat, 3600n, 'BTC heartbeat');
+        $require.eq(uni.heartbeat, 86400n, 'uniBTC heartbeat');
 
         // The stored feeds are functional: two-hop uniBTC prices in 18-dec USD, BTC-sized.
         const { price, decimals } = await oracle.getPrice(Addresses.eth.uniBTC);

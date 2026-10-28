@@ -3,101 +3,85 @@ pragma solidity ^0.8.28;
 import { AccessControlled } from "../../governance/AccessControlled.sol";
 import { IOracleAdapter } from "./interfaces/IOracleAdapter.sol";
 import { IRoundDataOracle } from "../oracles/interfaces/IRoundDataOracle.sol";
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /// @title OracleAdapter
-/// @notice Shared, project-wide price source for the Symbiotic coverage conversions. Prices are
-///         keyed by asset (not by market), so a feed registered once is reused by every market
-///         whose base asset it prices, plus the shared vault asset. Every price is returned
-///         normalized to 18 decimals of USD.
-/// @dev Supports an optional second hop for assets with no direct USD feed. E.g. uniBTC prices as
-///      uniBTC/BTC (base) x BTC/USD (quote). Single-hop assets (USDC/USD, USDe/USD) leave quote unset.
-///      getPrice() reverts for any asset without a registered feed, so the middleware cannot
-///      onboard or slash a market whose base (or vault) asset is unpriced.
+/// @notice Shared asset price registry returning USD prices with 18 decimals.
+/// @dev Quote assets link registered feeds into chains, with an independent heartbeat at each hop.
 contract OracleAdapter is IOracleAdapter, AccessControlled {
-
     struct Feed {
-        // First-hop Chainlink feed (e.g. USDC/USD, or uniBTC/BTC). address(0) = feed not set.
-        IRoundDataOracle base;
-        uint256 baseDecimals;
-        // Optional second-hop feed to reach USD (e.g. BTC/USD). address(0) = base already quotes USD.
-        IRoundDataOracle quote;
-        uint256 quoteDecimals;
-        // Max age (seconds) of a round before it is rejected as stale, applied to both hops. 0 = no check.
+        address asset;
+        IRoundDataOracle aggregator;
+        uint256 decimals;
+        // Maximum round age in seconds; zero disables this feed's staleness check.
         uint256 heartbeat;
+        // Registered quote asset; zero means the aggregator already quotes USD.
+        address quoteAsset;
     }
 
-    /// @notice Project-wide price registry, keyed by asset address.
     mapping(address asset => Feed) public feeds;
 
     error FeedNotSet(address asset);
     error InvalidPrice(address asset);
     error StalePrice(address asset, uint256 updatedAt);
+    error CircularQuote(address asset);
 
-    event FeedSet(address indexed asset, address base, address quote, uint256 heartbeat);
+    event FeedSet(address indexed asset, address aggregator, uint256 decimals, uint256 heartbeat, address quoteAsset);
     event FeedRemoved(address indexed asset);
-
 
     function initialize(address owner_, address acm_) external initializer {
         AccessControlled_init(owner_, acm_);
     }
 
-    // ===============================================
-    // Only Owner functions
-
-    /// @notice Registers (or replaces) an asset's price feed.
-    /// @param asset The asset to price.
-    /// @param base First-hop Chainlink feed read via latestRoundData().
-    /// @param baseDecimals Decimals of the base feed's answer.
-    /// @param quote Optional second-hop feed to reach USD; pass address(0) if base already quotes USD.
-    /// @param quoteDecimals Decimals of the quote feed's answer (ignored when quote is unset).
-    /// @param heartbeat Max age (seconds) before a round is rejected as stale. 0 disables the check.
-    function setFeed(
-        address asset,
-        IRoundDataOracle base,
-        uint256 baseDecimals,
-        IRoundDataOracle quote,
-        uint256 quoteDecimals,
-        uint256 heartbeat
-    ) external onlyOwner {
-        require(address(base) != address(0), "ZeroAggregator");
-        feeds[asset] = Feed(base, baseDecimals, quote, quoteDecimals, heartbeat);
-        emit FeedSet(asset, address(base), address(quote), heartbeat);
+    /// @notice Registers or replaces a feed. Register its quote chain first.
+    function setFeed(Feed calldata feed) external onlyOwner {
+        require(feed.asset != address(0), "ZeroAsset");
+        require(address(feed.aggregator) != address(0), "ZeroAggregator");
+        require(feed.decimals > 0 && feed.decimals <= 36, "InvalidDecimals");
+        address quoteAsset = feed.quoteAsset;
+        while (quoteAsset != address(0)) {
+            if (quoteAsset == feed.asset) {
+                revert CircularQuote(feed.asset);
+            }
+            Feed storage quote = feeds[quoteAsset];
+            if (address(quote.aggregator) == address(0)) {
+                revert FeedNotSet(quoteAsset);
+            }
+            quoteAsset = quote.quoteAsset;
+        }
+        feeds[feed.asset] = feed;
+        emit FeedSet(feed.asset, address(feed.aggregator), feed.decimals, feed.heartbeat, feed.quoteAsset);
     }
 
-    /// @notice Removes an asset's feed. Subsequent getPrice() calls for it revert.
+    /// @notice Removes a feed. Prices depending on this asset also revert until it is registered again.
     function removeFeed(address asset) external onlyOwner {
         delete feeds[asset];
         emit FeedRemoved(asset);
     }
 
-    // ===============================================
-    // Views
-
     /// @inheritdoc IOracleAdapter
-    /// @dev Always returns an 18-decimal USD price. Two-hop feeds multiply base x quote.
     function getPrice(address asset) external view returns (uint256 price, uint256 decimals) {
-        Feed storage feed = feeds[asset];
-        if (address(feed.base) == address(0)) {
-            revert FeedNotSet(asset);
-        }
-
-        price = _read(asset, feed.base, feed.baseDecimals, feed.heartbeat);
-        if (address(feed.quote) != address(0)) {
-            uint256 quotePrice = _read(asset, feed.quote, feed.quoteDecimals, feed.heartbeat);
-            price = price * quotePrice / 1e18;
-        }
+        price = 1e18;
+        do {
+            Feed storage feed = feeds[asset];
+            if (address(feed.aggregator) == address(0)) {
+                revert FeedNotSet(asset);
+            }
+            price = Math.mulDiv(price, _read(feed), 1e18);
+            asset = feed.quoteAsset;
+        } while (asset != address(0));
         return (price, 18);
     }
 
-    /// @notice Reads one Chainlink hop and normalizes its answer to 18 decimals.
-    function _read(address asset, IRoundDataOracle aggregator, uint256 feedDecimals, uint256 heartbeat) internal view returns (uint256) {
-        (, int256 answer,, uint256 updatedAt,) = aggregator.latestRoundData();
+    /// @dev Validates this hop using its own heartbeat and normalizes its answer to 18 decimals.
+    function _read(Feed storage feed) internal view returns (uint256) {
+        (, int256 answer,, uint256 updatedAt,) = feed.aggregator.latestRoundData();
         if (answer <= 0) {
-            revert InvalidPrice(asset);
+            revert InvalidPrice(feed.asset);
         }
-        if (heartbeat != 0 && block.timestamp - updatedAt > heartbeat) {
-            revert StalePrice(asset, updatedAt);
+        if (feed.heartbeat != 0 && block.timestamp - updatedAt > feed.heartbeat) {
+            revert StalePrice(feed.asset, updatedAt);
         }
-        return uint256(answer) * 1e18 / (10 ** feedDecimals);
+        return Math.mulDiv(uint256(answer), 1e18, 10 ** feed.decimals);
     }
 }

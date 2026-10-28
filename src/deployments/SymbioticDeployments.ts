@@ -21,6 +21,9 @@ import { SymbioticVaultImpl } from '@0xc/eth/SymbioticVaultImpl/SymbioticVaultIm
 import { SymbioticAppAdapterImpl } from '@0xc/eth/SymbioticAppAdapterImpl/SymbioticAppAdapterImpl';
 import { SymbioticUniversalDelegatorImpl } from '@0xc/eth/SymbioticUniversalDelegatorImpl/SymbioticUniversalDelegatorImpl';
 
+// Registry identifier for native BTC (not an ERC20 contract).
+export const BTC_QUOTE_ASSET: TEth.Address = '0xbBbBBBBbbBBBbbbBbbBbbbbBBbBbbbbBbBbbBBbB';
+
 /// Default staleness bound for the registered feeds (seconds). Overridable per-feed.
 const DEFAULT_HEARTBEAT = 86400n; // 24h
 
@@ -37,15 +40,13 @@ export interface ISymbioticMarket {
 }
 
 /// A Chainlink feed to register in the shared OracleAdapter, keyed by the priced asset.
-/// Single-hop assets (e.g. USDC/USD) leave `quote` unset; two-hop assets (e.g. uniBTC priced as
-/// uniBTC/BTC x BTC/USD) set both hops.
+/// Register quote assets before the feeds that reference them; omit quoteAsset for USD feeds.
 export interface ISymbioticFeed {
     asset: TEth.Address;
-    base: TEth.Address;         // first-hop aggregator (e.g. USDC/USD or uniBTC/BTC)
-    baseDecimals: bigint;
-    quote?: TEth.Address;       // optional second-hop aggregator (e.g. BTC/USD)
-    quoteDecimals?: bigint;
-    heartbeat: bigint;          // max round age (seconds) before a price is stale; 0 disables
+    aggregator: TEth.Address;
+    decimals: bigint;
+    heartbeat: bigint;
+    quoteAsset?: TEth.Address;
 }
 
 export interface ISymbioticNMParams {
@@ -296,24 +297,30 @@ export class SymbioticDeployments {
         if (Addr?.USDe && Feeds['USDe/USD']) {
             feeds.push({
                 asset: Addr.USDe,
-                base: Feeds['USDe/USD'].address,
-                baseDecimals: BigInt(Feeds['USDe/USD'].decimals),
+                aggregator: Feeds['USDe/USD'].address,
+                decimals: BigInt(Feeds['USDe/USD'].decimals),
                 heartbeat: DEFAULT_HEARTBEAT
             });
         }
         if (Addr?.USDC && Feeds['USDC/USD']) {
             feeds.push({
                 asset: Addr.USDC,
-                base: Feeds['USDC/USD'].address,
-                baseDecimals: BigInt(Feeds['USDC/USD'].decimals),
+                aggregator: Feeds['USDC/USD'].address,
+                decimals: BigInt(Feeds['USDC/USD'].decimals),
                 heartbeat: DEFAULT_HEARTBEAT
             });
         }
         if (Addr?.uniBTC && Feeds['uniBTC/BTC'] && Feeds['BTC/USD']) {
             feeds.push({
+                asset: BTC_QUOTE_ASSET,
+                aggregator: Feeds['BTC/USD'].address,
+                decimals: BigInt(Feeds['BTC/USD'].decimals),
+                heartbeat: 3600n,
+            });
+            feeds.push({
                 asset: Addr.uniBTC,
-                base: Feeds['uniBTC/BTC'].address, baseDecimals: BigInt(Feeds['uniBTC/BTC'].decimals),
-                quote: Feeds['BTC/USD'].address, quoteDecimals: BigInt(Feeds['BTC/USD'].decimals),
+                aggregator: Feeds['uniBTC/BTC'].address, decimals: BigInt(Feeds['uniBTC/BTC'].decimals),
+                quoteAsset: BTC_QUOTE_ASSET,
                 heartbeat: DEFAULT_HEARTBEAT,
             });
         }
@@ -433,28 +440,18 @@ export class SymbioticDeployments {
 
     /// Registers or updates a single asset feed in the shared OracleAdapter, idempotently.
     private async configureFeed(oracle: OracleAdapter, feed: ISymbioticFeed): Promise<void> {
-        const quote = feed.quote ?? $address.ZERO;
-        const quoteDecimals = feed.quoteDecimals ?? 0n;
+        const quoteAsset = feed.quoteAsset ?? $address.ZERO;
         const current = await oracle.feeds(feed.asset);
         const needsUpdate =
-            $address.eq(current.base, feed.base) === false ||
-            current.baseDecimals !== feed.baseDecimals ||
-            $address.eq(current.quote, quote) === false ||
-            current.quoteDecimals !== quoteDecimals ||
+            $address.eq(current.aggregator, feed.aggregator) === false ||
+            current.decimals !== feed.decimals ||
+            $address.eq(current.quoteAsset, quoteAsset) === false ||
             current.heartbeat !== feed.heartbeat;
 
         await this.ds.configure(oracle, {
             shouldUpdate: () => needsUpdate,
             updater: async () => {
-                await oracle.$receipt().setFeed(
-                    this.owner,
-                    feed.asset,
-                    feed.base,
-                    feed.baseDecimals,
-                    quote,
-                    quoteDecimals,
-                    feed.heartbeat,
-                );
+                await oracle.$receipt().setFeed(this.owner, { ...feed, quoteAsset });
             },
         });
     }
