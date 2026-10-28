@@ -459,21 +459,30 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             jrtNavT1Projected += srtLoss;
             srtGainTarget = 0;
         }
+        uint256 maxJrtFunding = Math.min(
+            Math.saturatingSub(jrtNavT1Projected, ONE_ASSET),
+            Math.saturatingSub(jrtNavT0Real, ONE_ASSET)
+        );
         uint256 srtGainTargetAbs = Math.min(
             uint256(srtGainTarget),
-            Math.saturatingSub(jrtNavT1Projected, ONE_ASSET)
+            maxJrtFunding
         );
 
 
         // #2 Final new Jrt (after srt funding)
         jrtNavT1Projected = jrtNavT1Projected - srtGainTargetAbs;
-        jrtNavT1Real = Math.saturatingSub(jrtNavT0Real, srtGainTargetAbs);
+        jrtNavT1Real = jrtNavT0Real - srtGainTargetAbs;
 
         // #3 Final new Srt
         srtNavT1 = srtNavT0 + srtGainTargetAbs;
 
         // #4 No changes to NAV and reserve on Projection
         reserveNavT1 = reserveNavT0;
+
+        // Invariant: real tranche assets must strictly conserve navT0 on projection
+        if (navT0 != (jrtNavT1Real + srtNavT1 + reserveNavT1)) {
+            revert InvalidNavSplit(navT0, jrtNavT1Real, srtNavT1, reserveNavT1);
+        }
 
         return (
             jrtNavT1Projected,
