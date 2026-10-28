@@ -11,12 +11,15 @@ import {IStrataCDO} from "../../interfaces/IStrataCDO.sol";
 /// @dev For each target CDO, this contract must be granted `PAUSER_ROLE` in that CDO's AccessControlManager and
 ///      set as that CDO's valuation keeper.
 contract AccountablePushOracle is Ownable {
+    // Matches the minimum valuation price accepted by all accounting variants.
+    uint128 public constant MIN_PRICE = 0.0001e18;
     uint128 public constant MAX_PRICE = 1e18;
 
     address public observer;
     uint256 public nonce;
 
     event ObserverSet(address observer);
+    /// @notice Reports the observed price; sub-minimum observations do not update accounting valuation.
     event ProofOfReservePushed(address indexed cdo, uint128 price);
 
     error InvalidPrice();
@@ -32,9 +35,10 @@ contract AccountablePushOracle is Ownable {
         _setObserver(observer_);
     }
 
-    /// @notice Pushes Accountable proof-of-reserve values and updates the CDO valuation price.
+    /// @notice Pushes proof-of-reserve values; sub-minimum prices only pause the market.
     /// @dev The observer signs `abi.encode(nonce, address(cdo), totalSupply, totalReserveUsd)`.
-    ///      The price is capped at 1e18; unchanged prices revert before signature validation.
+    ///      The price is capped at 1e18; unchanged supported prices revert before signature validation.
+    ///      Sub-minimum prices, including zero reserves, pause both tranches without updating valuation.
     /// @param cdo The CDO that receives the updated valuation price.
     /// @param totalSupply Accountable total supply, scaled to 18 decimals.
     /// @param totalReserveUsd Accountable total reserve value in USD, scaled to 18 decimals.
@@ -48,7 +52,7 @@ contract AccountablePushOracle is Ownable {
         if (address(cdo) == address(0)) {
             revert ZeroAddress();
         }
-        if (totalSupply == 0 || totalReserveUsd == 0) {
+        if (totalSupply == 0) {
             revert InvalidPrice();
         }
 
@@ -59,7 +63,7 @@ contract AccountablePushOracle is Ownable {
 
         uint128 cappedPrice = uint128(price);
         uint128 currentPrice = cdo.accounting().valuationPrice();
-        if (cappedPrice == currentPrice) {
+        if (cappedPrice >= MIN_PRICE && cappedPrice == currentPrice) {
             revert ValuationPriceUnchanged();
         }
 
@@ -69,9 +73,11 @@ contract AccountablePushOracle is Ownable {
             revert InvalidSignature();
         }
 
-        cdo.setValuationPrice(cappedPrice);
-        if (cappedPrice < currentPrice) {
-            // Price drops pause actions; price recoveries keep the current action states
+        if (cappedPrice >= MIN_PRICE) {
+            cdo.setValuationPrice(cappedPrice);
+        }
+        if (cappedPrice < MIN_PRICE || cappedPrice < currentPrice) {
+            // Sub-minimum proofs always pause; supported recoveries keep the current action states
             cdo.setActionStates(address(cdo.jrtVault()), false, false);
             cdo.setActionStates(address(cdo.srtVault()), false, false);
         }
