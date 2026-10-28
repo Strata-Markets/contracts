@@ -356,6 +356,70 @@ UTest.create({
                     ]
                 });
             },
+        },
+        '🛡️ Issue #5: projected NAV split bounds senior gains by real junior assets': {
+            async 'preserves conservation invariant and prevents saturation mismatch' () {
+                let exec = new AccountingExecutor(test);
+                await exec.run({
+                    steps: [
+                        { balanceFlow: [50, 0, 1950, 0] },
+                        { aprs: [ 0.20, 0.10 ] },
+                        { eqNav: 2000 },
+                        { time: '0.5year' },
+                        // 1. Initial projection cycle: Senior target (195) capped by JRT settled (50 - 1 = 49)
+                        { totalAssets: 2000 },
+                        { eqProjectedAvg: [
+                            101,  // JRT projected: 50 + 100 (base yield) - 49 (SRT cap)
+                            1999  // SRT projected: 1950 + 49
+                        ]},
+                        { eqAvg: [
+                            1,    // JRT real floored at ONE_ASSET (50 - 49)
+                            1999  // SRT real credited with capped accrual (1950 + 49)
+                        ]},
+
+                        // 2. Second projection cycle: JRT real is already at ONE_ASSET (1), SRT gets 0 additional real yield
+                        { time: '0.5year', updateAccounting: true },
+                        { eqProjectedAvg: [
+                            201,  // JRT projected continues accumulating projected protocol gain (101 + 100)
+                            1999  // SRT capped, no further real junior collateral to absorb
+                        ]},
+                        { eqAvg: [
+                            1,    // JRT real remains preserved at ONE_ASSET
+                            1999  // SRT remains 1999
+                        ]},
+
+                        // 3. True-up with real strategy yield: executes cleanly without InvalidNavSplit
+                        { totalAssets: 2100 },
+                        { eqAvg: [
+                            101,  // JRT absorbs remaining realized strategy gain (1 + 100)
+                            1999  // SRT remains consistent
+                        ]}
+                    ]
+                });
+            },
+
+            async 'handles dust / minimum JRT collateral without underflow or phantom accrual' () {
+                let exec = new AccountingExecutor(test);
+                await exec.run({
+                    steps: [
+                        // JRT initialized at exact floor ONE_ASSET (1), SRT at 1999
+                        { balanceFlow: [1, 0, 1999, 0] },
+                        { aprs: [ 0.20, 0.10 ] },
+                        { eqNav: 2000 },
+                        { time: '0.5year' },
+                        { totalAssets: 2000 },
+                        { eqAvg: [
+                            1,    // saturatingSub(1, 1) = 0 cap; JRT real cannot be depleted below ONE_ASSET
+                            1999  // SRT receives 0 real accrual from JRT
+                        ]},
+                        { totalAssets: 2100 },
+                        { eqAvg: [
+                            101,
+                            1999
+                        ]}
+                    ]
+                });
+            }
         }
     }
 });
