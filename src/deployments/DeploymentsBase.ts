@@ -348,11 +348,15 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
 
 
     async ensureTranches(cdo: StrataCDO) {
-        const { base } = await this.ensureUnderlying();
-
-        const acm = await this.ensureACM();
         const info = this.cdoInfo;
         const useConservativePrice = info.ContractVersions?.accountingOptions?.useConservativePrice ?? false;
+        const accountingType = info.ContractVersions?.accounting ?? 'discrete';
+        // DiscreteAccounting's settled views include projection, so they cannot provide conservative pricing.
+        if (useConservativePrice && (accountingType === 'discrete' || accountingType === 'isolated')) {
+            throw new Error(`useConservativePrice is not supported with ${accountingType} accounting`);
+        }
+        const { base } = await this.ensureUnderlying();
+        const acm = await this.ensureACM();
         let { contract: jrtVault } = await this.ds.ensureWithProxy(Tranche, {
             id: `${this.pfx}Jrt`,
             arguments: [useConservativePrice],

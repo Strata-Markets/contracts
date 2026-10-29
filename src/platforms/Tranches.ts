@@ -109,7 +109,8 @@ export interface ICDO {
             useNavAtReconciliation?: boolean;
             // When true, Junior covers paid-out projected Senior assets if realized PnL is underestimated.
             useJuniorCoversPaidSrtProjection?: boolean
-            // When true, redemptions exclude unreconciled projected gains.
+            // When true, redemptions exclude unreconciled projected gains (DYS/MTM).
+            // Unsupported for discrete/isolated accounting; continuous accounting has no projection.
             useConservativePrice?: boolean
             // When true, DYSAccounting uses current strategy MTM NAV during projection.
             useMTMProjection?: boolean
