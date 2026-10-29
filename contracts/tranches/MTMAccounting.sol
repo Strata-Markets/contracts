@@ -1688,6 +1688,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
         }
 
         // Cover only paid projection that the pre-unwind Senior NAV could absorb.
+        uint256 juniorCover;
         if (useJuniorCoversPaidSrtProjection && state.srtPaidProjected > 0) {
             uint256 seniorBeforeUnwind = state.srtPnLProjected >= 0
                 ? srtNavT0 + projUndo
@@ -1699,8 +1700,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
             if (srtPnLRealized < int256(paidProjectedUnwound)) {
                 // Only adjust if realized PnL does not already cover it
                 if (srtPnLRealized > 0) {
+                    juniorCover = paidProjectedUnwound - uint256(srtPnLRealized);
                     srtPnLRealized = int256(paidProjectedUnwound);
                 } else {
+                    juniorCover = paidProjectedUnwound;
                     srtPnLRealized += int256(paidProjectedUnwound);
                 }
             }
@@ -1729,9 +1732,13 @@ contract MTMAccounting is IAccounting, CDOComponent {
             }
         }
 
-        if (srtPnLRealized > 0 && underwriterFeeBps > 0) {
+        // Junior's reimbursement of paid projection restores principal; it is not feeable yield.
+        uint256 srtFeeBase = srtPnLRealized > 0
+            ? Math.saturatingSub(uint256(srtPnLRealized), juniorCover)
+            : 0;
+        if (srtFeeBase > 0 && underwriterFeeBps > 0) {
             uint256 underwriterFeePct = riskPremium.unwrap() * underwriterFeeBps / PERCENTAGE_100;
-            uint256 underwriterFee_dT = uint256(srtPnLRealized) * underwriterFeePct / PERCENTAGE_100;
+            uint256 underwriterFee_dT = srtFeeBase * underwriterFeePct / PERCENTAGE_100;
             srtPnLRealized -= int256(underwriterFee_dT);
             srtNavT1 -= underwriterFee_dT;
             pnl -= int256(underwriterFee_dT);
