@@ -193,6 +193,15 @@ abstract contract ValuationFloorBaselineTests is ValuationInsuranceFixture {
         assertEq(_floor().underwriterFeeNav(), 0, "no fee on fictitious gain");
     }
 
+    function test_FloorResetPreservesValuationCredit() public {
+        accounting.setValuationPrice(0.4e18);
+        assertGt(accounting.srtInsuranceFundNav(), 0);
+        uint256 seniorBefore = accounting.srtBaseNav();
+        _floor().setFloorRate(0.009e18);
+        assertEq(_floor().windowStartSrtNav(), seniorBefore);
+        assertEq(_floor().windowNetFlows(), 0);
+    }
+
     function test_RepegThenSmallLoss() public {
         _rollDuringDepeg(0.4e18);
         _recoverAndLose(10e18);

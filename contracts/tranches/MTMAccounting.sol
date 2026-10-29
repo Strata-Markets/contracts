@@ -2218,7 +2218,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
         updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         floorRate = rate;
 
-        windowStartSrtNav = srtBaseNav;
+        // Anchor settled Senior NAV, retaining valuation credit but excluding unrealized PnL.
+        (, windowStartSrtNav) = _undoProjection(srtBaseNav, jrtBaseNav);
         windowNetFlows = 0;
         windowEnd = block.timestamp + 1 days;
         emit FloorRateChanged(rate);

@@ -1909,7 +1909,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         floorRate = rate;
 
-        windowStartSrtNav = srtBaseNav;
+        // Anchor settled Senior NAV, retaining valuation credit but excluding unpaid projection.
+        uint256 liveProjection = useConservativePrice
+            ? srtPnLProjected
+            : Math.saturatingSub(srtPnLProjected, srtPaidProjected);
+        windowStartSrtNav = Math.saturatingSub(srtBaseNav, liveProjection);
         windowNetFlows = 0;
         windowEnd = block.timestamp + 1 days;
         emit FloorRateChanged(rate);
