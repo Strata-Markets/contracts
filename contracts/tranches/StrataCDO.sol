@@ -86,6 +86,7 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     ///      redeeming Senior its covered slice. Never part of the strategy, so never part of nav.
     IInsuranceVault public insuranceVault;
 
+    /// @dev Supports only base assets with <= 18 decimals.
     uint256 public immutable baseAssetDecimals;
 
     event DepositsStateChanged(address indexed tranche, bool enabled);

@@ -525,6 +525,8 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
     async ensureStrataCdo() {
         const acm = await this.ensureACM();
         const { base } = await this.ensureUnderlying();
+        const decimals = await base.decimals();
+        $require.True(0 < decimals && decimals <= 18, `Expected 0 < decimals <= 18; got ${decimals}`);
         const sharesCooldown = await this.get(SharesCooldown);
         const { contract: cdo } = await this.ds.ensureWithProxy(StrataCDO, {
             id: `${this.pfx}CDO`,
