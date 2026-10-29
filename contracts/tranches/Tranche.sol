@@ -29,6 +29,7 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     event OnMetaWithdraw(address indexed receiver, address indexed token, uint256 tokenAssets, uint256 shares);
     event OnExit(
         address indexed owner,
+        address indexed receiver,
         address indexed token,
         uint256 tokenAssets,
         uint256 shares,
@@ -447,7 +448,7 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
             _spendAllowance(owner, caller, sharesGross);
         }
 
-        emit OnExit(receiver, token, tokenAssets, sharesGross, params.exitMode, params.exitFee, params.cooldownSeconds);
+        emit OnExit(owner, receiver, token, tokenAssets, sharesGross, params.exitMode, params.exitFee, params.cooldownSeconds);
 
         if (params.exitMode == IStrataCDO.TExitMode.SharesLock) {
             _transfer(owner, address(cdo.sharesCooldown()), sharesGross);
