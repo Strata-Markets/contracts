@@ -1262,7 +1262,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             // An insured wipeout can leave gross NAV-time positive with no strategy NAV-time.
             srtPnLRealized = (navTime_ == 0 || navTimeNet_ == 0)
                 ? int256(0)
-                : (pnl + int256(reserveIncrease)) * int256(srtFactor) * int256(srtNavTimeNet_) / (int256(navTimeNet_) * 1e18);
+                : AccountingLib.proportionalPnL(pnl + int256(reserveIncrease), srtFactor, srtNavTimeNet_, navTimeNet_);
         }
     }
 

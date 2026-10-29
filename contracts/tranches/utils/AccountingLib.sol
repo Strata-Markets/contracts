@@ -8,6 +8,18 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
  */
 library AccountingLib {
 
+    /// @dev Full-precision proportional PnL, rounded toward zero for both gains and losses.
+    ///      Assumes input/output magnitudes fit int256 and totalTime > 0.
+    ///      Scaled asset-time products must fit uint256; the PnL product may exceed it.
+    function proportionalPnL(int256 pnl, uint256 factor, uint256 seniorTime, uint256 totalTime)
+        internal pure returns (int256)
+    {
+        uint256 magnitude = uint256(pnl < 0 ? -pnl : pnl);
+        magnitude = Math.mulDiv(magnitude, factor * seniorTime, totalTime * 1e18);
+        int256 result = int256(magnitude);
+        return pnl < 0 ? -result : result;
+    }
+
     struct InsuranceWriteDownState {
         uint256 claim;
         uint256 seniorNav;
