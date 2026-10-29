@@ -210,15 +210,14 @@ $$
 
 ### 9.3 Request Spam Prevention
 
-To prevent request spamming:
+To prevent request spamming, limits apply to active request slots **per tranche and receiver**:
 
-* A maximum of **N** simultaneous lock-up requests per user is enforced (currently **50**)
-* Once the limit is reached:
+* Up to **70** slots are available when the receiver is the caller or the share owner.
+* At 70 slots, an eligible new request merges into the last request: its shares are added, and the unlock timestamp becomes the later of the existing and new timestamps. Non-empty strategy options must match the last request's options; otherwise the request reverts.
+* If the receiver is neither the caller nor the share owner, a new request reverts with `ExternalReceiverRequestLimitReached` once that receiver already has **40** active slots. This check counts all of the receiver's active requests, not only third-party requests, and applies before merging.
 
-  * Any new request:
+The lower third-party limit prevents others from filling a receiver's slots and forcing their later requests into the merge path. Compatible requests with the same unlock timestamp may also merge below the 70-slot limit.
 
-    * Increases the share amount of the last request
-    * Extends the lock-up end timestamp of that request
 
 ---
 
