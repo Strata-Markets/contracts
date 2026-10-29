@@ -213,12 +213,14 @@ contract SelfFundWriteDownTest is Test {
         }
     }
 
-    function test_feeIncludesRemainingProjectionInRatio() public {
+    function test_feeUsesEffectiveNavIncludingRemainingProjection() public {
         for (uint256 i = 2; i < 4; i++) {
             _deploy(i);
             _seed(100e18, 120e18, 0, 0, 100e18, 20e18);
             a.accrueFee(false, 10e18);
-            _assertFunds(uint256(100e18) * 110 / 120);
+            // Effective Senior NAV is 120 / 0.5 - 100 = 140; the fee consumes 10 / 140.
+            _assertFunds(100e18 - uint256(100e18) * 10 / 140);
+            assertEq(a.reserveNav(), 10e18);
         }
     }
 

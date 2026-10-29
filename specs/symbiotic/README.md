@@ -54,6 +54,23 @@ and hold `insuranceMiddleware`; `StrataCDO` exposes `payUnderwriterFee`, `fundIn
 Coverage is **synchronous**: the accounting slashes in the same transaction it books a claim, from
 two places  -  the loss waterfall in `updateAccounting`, and a de-peg in `setValuationPrice`.
 
+## Tranche exit and share-burn fees after a depeg or Junior depletion
+
+Every valuation update below $1, or accounting update that reduces Junior NAV to `ONE_ASSET`
+or below, sets `feeJrtRetentionBps` and `feeSrtRetentionBps` to 100%,
+alongside disabling performance fees. Exit and share-burn fees remain payable by users, but
+stay entirely in their respective tranche; none accrues to reserve. This avoids debiting
+factual NAV for a fee priced using effective valuation NAV.
+
+Recovery does not restore the previous retention rates. Only the owner can change them through
+`setFeeRetentionBps`. If reserve accrual is explicitly re-enabled during a depeg without an open
+claim, Senior fees use the proportional valuation-withdrawal split, including its tracker updates.
+
+While `insuranceAmount > 0`, Senior fees are always fully retained regardless of the configured
+retention rate, both at par and during a depeg. This avoids moving insurance backing into reserve.
+The depletion trigger also applies at par, but requires a decrease so an empty market does not
+disable reserve accrual. Underwriter fees remain separate.
+
 ## Underwriter Fee
 
 The fee is charged to **Senior**, the tranche being insured, out of its own realized gain - not out of

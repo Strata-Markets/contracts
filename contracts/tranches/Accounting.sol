@@ -508,16 +508,24 @@ contract Accounting is IAccounting, CDOComponent {
     /// @notice Called by the CDO to account for a fee by moving NAV from a tranche to the reserve.
     function accrueFee (bool isJrt, uint256 amount) external onlyCDO {
         uint256 retentionBps = isJrt ? feeJrtRetentionBps : feeSrtRetentionBps;
-        uint256 amountToReserve = amount * (1e18 - retentionBps) / 1e18;
-        reserveNav += amountToReserve;
+        uint256 amountToReserve = (amount * (1e18 - retentionBps)) / 1e18;
+        if (!isJrt && insuranceAmount > 0) {
+            // Retain the whole Senior fee while a claim is open: reserve cannot hold insurance backing.
+            amountToReserve = 0;
+        }
         if (isJrt) {
             jrtBaseNav -= amountToReserve;
-        } else {
+        } else if (amountToReserve > 0) {
+            uint256 seniorOut = amountToReserve;
             if (valuationPrice < 1e18) {
-                _scaleSrtFund(srtBaseNav, srtBaseNav - amountToReserve);
+                // The fee is priced in effective NAV; consume its backing just like a Senior exit.
+                uint256 juniorOut;
+                (juniorOut, seniorOut,) = _splitValuationWithdrawal(amountToReserve);
+                jrtBaseNav -= juniorOut;
             }
-            srtBaseNav -= amountToReserve;
+            srtBaseNav -= seniorOut;
         }
+        reserveNav += amountToReserve;
         emit FeeAccrued(isJrt, amountToReserve, amount - amountToReserve);
     }
 
@@ -716,6 +724,7 @@ contract Accounting is IAccounting, CDOComponent {
         // Require a decrease to the floor or below so an empty market does not suspend fees.
         if (jrtNavT1 <= ONE_ASSET && jrtNavT1 < jrtBaseNav) {
             _disablePerformanceFee();
+            _disableFeeReserveAccrual();
         }
         if (valuationPrice < 1e18) {
             _scaleSrtFund(srtBaseNav, srtNavT1);
@@ -981,6 +990,16 @@ contract Accounting is IAccounting, CDOComponent {
         emit ReservePercentageChanged(0);
     }
 
+    /// @dev Retain all tranche fees after a depeg or Junior depletion; only setFeeRetentionBps can restore reserve accrual.
+    function _disableFeeReserveAccrual() internal {
+        if (feeJrtRetentionBps == PERCENTAGE_100 && feeSrtRetentionBps == PERCENTAGE_100) {
+            return;
+        }
+        feeJrtRetentionBps = PERCENTAGE_100;
+        feeSrtRetentionBps = PERCENTAGE_100;
+        emit FeeRetentionChanged(PERCENTAGE_100, PERCENTAGE_100);
+    }
+
     /// @notice Sets the valuation price for the base asset.
     function setValuationPrice (uint128 price) external onlyCDO returns (bool){
         bool isValuationLossPeriod = valuationPrice < 1e18;
@@ -991,6 +1010,7 @@ contract Accounting is IAccounting, CDOComponent {
         checkpointAccountingInner(cdo.totalStrategyAssets());
         if (price < 1e18) {
             _disablePerformanceFee();
+            _disableFeeReserveAccrual();
         }
         _resyncSrtFundNav(price);
         valuationPrice = price;

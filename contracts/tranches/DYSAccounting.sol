@@ -1000,18 +1000,26 @@ contract DYSAccounting is IAccounting, CDOComponent {
         _accrueAssetTime();
         uint256 retentionBps = isJrt ? feeJrtRetentionBps : feeSrtRetentionBps;
         uint256 amountToReserve = (amount * (1e18 - retentionBps)) / 1e18;
-        reserveNav += amountToReserve;
+        if (!isJrt && insuranceAmount > 0) {
+            // Retain the whole Senior fee while a claim is open: reserve cannot hold insurance backing.
+            amountToReserve = 0;
+        }
         if (isJrt) {
             jrtBaseNav -= amountToReserve;
             jrtNavProjected -= amountToReserve;
-        } else {
+        } else if (amountToReserve > 0) {
+            uint256 seniorOut = amountToReserve;
             if (valuationPrice < 1e18) {
-                // Remaining projection is assumed negligible
-                _scaleSrtFund(srtBaseNav, srtBaseNav - amountToReserve);
+                // The fee is priced in effective NAV; consume its backing just like a Senior exit.
+                uint256 juniorOut;
+                (juniorOut, seniorOut,) = _splitValuationWithdrawal(amountToReserve);
+                jrtBaseNav -= juniorOut;
+                jrtNavProjected -= juniorOut;
             }
-            srtBaseNav -= amountToReserve;
-            windowNetFlows -= int256(amountToReserve);
+            srtBaseNav -= seniorOut;
+            windowNetFlows -= int256(seniorOut);
         }
+        reserveNav += amountToReserve;
         emit FeeAccrued(isJrt, amountToReserve, amount - amountToReserve);
     }
 
@@ -1613,6 +1621,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         // Require a decrease to the floor or below so an empty market does not suspend fees.
         if (jrtNavT1Real <= ONE_ASSET && jrtNavT1Real < jrtBaseNav) {
             _disablePerformanceFee();
+            _disableFeeReserveAccrual();
         }
         jrtBaseNav = jrtNavT1Real;
         reserveNav = reserveNavT1;
@@ -1945,6 +1954,16 @@ contract DYSAccounting is IAccounting, CDOComponent {
         emit ReservePercentageChanged(0);
     }
 
+    /// @dev Retain all tranche fees after a depeg or Junior depletion; only setFeeRetentionBps can restore reserve accrual.
+    function _disableFeeReserveAccrual() internal {
+        if (feeJrtRetentionBps == PERCENTAGE_100 && feeSrtRetentionBps == PERCENTAGE_100) {
+            return;
+        }
+        feeJrtRetentionBps = PERCENTAGE_100;
+        feeSrtRetentionBps = PERCENTAGE_100;
+        emit FeeRetentionChanged(PERCENTAGE_100, PERCENTAGE_100);
+    }
+
     /// @notice Sets the valuation price for the base asset.
     function setValuationPrice (uint128 price) external onlyCDO returns (bool){
         bool isValuationLossPeriod = valuationPrice < 1e18;
@@ -1955,6 +1974,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
         checkpointAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         if (price < 1e18) {
             _disablePerformanceFee();
+            _disableFeeReserveAccrual();
         }
         _resyncsrtFundNav(price);
         valuationPrice = price;
