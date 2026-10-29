@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -51,7 +52,7 @@ contract DiscreteProjectionUnderwriterFeeTest is Test {
         cdo = StrataCDO(
             address(
                 new ERC1967Proxy(
-                    address(new StrataCDO(token)),
+                    address(new StrataCDO(token, ISharesCooldown(address(0)))),
                     abi.encodeWithSelector(
                         StrataCDO.initialize.selector, address(this), address(acm)
                     )

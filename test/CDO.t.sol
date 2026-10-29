@@ -1,5 +1,6 @@
 pragma solidity 0.8.28;
 
+import {ISharesCooldown} from "../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC4626} from "@openzeppelin/contracts/interfaces/IERC4626.sol";
@@ -72,6 +73,10 @@ contract CDOTest is Test {
 
     address account;
 
+    function _createSharesCooldown() internal virtual returns (ISharesCooldown) {
+        return ISharesCooldown(address(0));
+    }
+
     function setUp() public {
         address owner = msg.sender;
 
@@ -89,7 +94,7 @@ contract CDOTest is Test {
         cdo = StrataCDO(
             address(
                 new ERC1967Proxy(
-                    address(new StrataCDO(USDe)),
+                    address(new StrataCDO(USDe, _createSharesCooldown())),
                     abi.encodeWithSelector(StrataCDO.initialize.selector, owner, address(acm))
                 )
             )

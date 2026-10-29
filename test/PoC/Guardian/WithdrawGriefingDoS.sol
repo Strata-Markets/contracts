@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.28;
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import { Test } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -73,7 +74,7 @@ contract WithdrawGriefingDoS is Test {
         vm.startPrank(owner);
         acm = new AccessControlManager(owner);
         vm.label(address(acm), "AccessControlManager");
-        StrataCDO cdoImpl = new StrataCDO(IERC20Metadata(USDE));
+        StrataCDO cdoImpl = new StrataCDO(IERC20Metadata(USDE), ISharesCooldown(address(0)));
         vm.label(address(cdoImpl), "StrataCDO_Impl");
         cdo = StrataCDO(
             address(

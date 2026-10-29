@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 // Adapted from Cyfrin f-65: original exploit assertions replaced by regression expectations.
 
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import { console } from "forge-std/console.sol";
 import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { Test } from "forge-std/Test.sol";
@@ -63,7 +64,7 @@ contract Issue65StackBase is Test {
     function _deployCore(IERC20Metadata asset, uint256 navDecimals, AccFlags memory f) internal {
         acm = new AccessControlManager(address(this));
         cdo = StrataCDO(address(new ERC1967Proxy(
-            address(new StrataCDO(asset)),
+            address(new StrataCDO(asset, ISharesCooldown(address(0)))),
             abi.encodeWithSelector(StrataCDO.initialize.selector, address(this), address(acm))
         )));
         jrt = _tranche(asset, "JRT");

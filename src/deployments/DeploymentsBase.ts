@@ -426,7 +426,7 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
     }
 
     @memd.deco.memoize({ perInstance: true })
-    async ensureCooldowns(cdo?: StrataCDO) {
+    async ensureCooldowns() {
         const acm = await this.ensureACM();
         const { contract: erc20Cooldown } = await this.ds.ensureWithProxy(ERC20Cooldown, {
             id: this.getContractId('ERC20Cooldown'),
@@ -464,14 +464,14 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             }
         });
 
-        if (cdo != null) {
-            await this.ds.configure(cdo, {
-                shouldUpdate: $address.eq(await cdo.sharesCooldown(), sharesCooldown.address) === false,
-                updater: async () => {
-                    await cdo.$receipt().setSharesCooldown(this.owner, sharesCooldown.address);
-                }
-            });
-        }
+        // if (cdo != null) {
+        //     await this.ds.configure(cdo, {
+        //         shouldUpdate: $address.eq(await cdo.sharesCooldown(), sharesCooldown.address) === false,
+        //         updater: async () => {
+        //             await cdo.$receipt().setSharesCooldown(this.owner, sharesCooldown.address);
+        //         }
+        //     });
+        // }
 
         return {
             erc20Cooldown,
@@ -520,10 +520,14 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
 
     async ensureStrataCdo() {
         const acm = await this.ensureACM();
-         const { base } = await this.ensureUnderlying();
+        const { base } = await this.ensureUnderlying();
+        const sharesCooldown = await this.get(SharesCooldown);
         const { contract: cdo } = await this.ds.ensureWithProxy(StrataCDO, {
             id: `${this.pfx}CDO`,
-            arguments: [ $require.Address(base.address) ],
+            arguments: [
+                $require.Address(base.address),
+                $require.Address(sharesCooldown?.address, `SharesCooldown should be deployed before CDO`)
+            ],
             initialize: [
                 this.owner.address,
                 acm.address,
@@ -538,9 +542,14 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         const { base, ...tokens } = await this.ensureUnderlying();
 
         const acm = await this.ensureACM();
+        const {
+            erc20Cooldown,
+            unstakeCooldown,
+            sharesCooldown
+        } = await this.ensureCooldowns();
+
         const cdo = await this.ensureStrataCdo();
 
-        const { erc20Cooldown, unstakeCooldown, sharesCooldown } = await this.ensureCooldowns(cdo);
         const { strategy } = await this.ensureStrategy(cdo, acm, erc20Cooldown, unstakeCooldown);
         await this.ensureRole(this.ROLES.COOLDOWN_WORKER_ROLE, strategy.address);
 

@@ -56,8 +56,8 @@ contract SIP2Test is NeutrlDeploy {
         // Deploy the Strata stack
         _deployStrataStack();
 
-        // Deploy and configure SharesCooldown
-        _deploySharesCooldown();
+        // Configure the cooldown deployed before the CDO.
+        _configureSharesCooldown();
 
         // Mint NUSD to test users
         _mintNUSD(alice, INITIAL_BALANCE);
@@ -450,8 +450,7 @@ contract SIP2Test is NeutrlDeploy {
                              HELPERS
     //////////////////////////////////////////////////////////////*/
 
-    function _deploySharesCooldown() internal {
-        vm.startPrank(owner);
+    function _createSharesCooldown() internal override returns (ISharesCooldown) {
 
         // Deploy SharesCooldown
         SharesCooldown sharesCooldownImpl = new SharesCooldown();
@@ -467,8 +466,11 @@ contract SIP2Test is NeutrlDeploy {
         );
         vm.label(address(sharesCooldown), "SharesCooldown");
 
-        // Set shares cooldown in CDO
-        cdo.setSharesCooldown(ISharesCooldown(address(sharesCooldown)));
+        return sharesCooldown;
+    }
+
+    function _configureSharesCooldown() internal {
+        vm.startPrank(owner);
 
         // Grant COOLDOWN_WORKER_ROLE to CDO
         bytes32 cooldownWorkerRole = sharesCooldown.COOLDOWN_WORKER_ROLE();

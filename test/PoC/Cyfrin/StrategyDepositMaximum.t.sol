@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import { console } from "forge-std/console.sol";
 import { IErrors } from "../../../contracts/tranches/interfaces/IErrors.sol";
 import { SaturnStrategy } from "../../../contracts/tranches/strategies/saturn/SaturnStrategy.sol";
@@ -65,7 +66,7 @@ contract MTMStackBase is Test {
     function _deployCore(IERC20Metadata asset, uint256 navDecimals, AccFlags memory f) internal {
         acm = new AccessControlManager(address(this));
         cdo = StrataCDO(address(new ERC1967Proxy(
-            address(new StrataCDO(asset)),
+            address(new StrataCDO(asset, ISharesCooldown(address(0)))),
             abi.encodeWithSelector(StrataCDO.initialize.selector, address(this), address(acm))
         )));
         jrt = _tranche(asset, "JRT");

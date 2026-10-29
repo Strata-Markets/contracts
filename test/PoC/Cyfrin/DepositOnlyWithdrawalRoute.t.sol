@@ -6,6 +6,7 @@ import {IStrategy} from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import {IErrors} from "../../../contracts/tranches/interfaces/IErrors.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {SharesCooldown} from "../../../contracts/tranches/base/cooldown/SharesCooldown.sol";
 import {CooldownBase} from "../../../contracts/tranches/base/cooldown/CooldownBase.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -14,6 +15,13 @@ import {stdStorage, StdStorage} from "forge-std/StdStorage.sol";
 
 contract DepositOnlyWithdrawalRouteTest is CDOTest {
     using stdStorage for StdStorage;
+    function _createSharesCooldown() internal override returns (ISharesCooldown) {
+        return ISharesCooldown(address(new ERC1967Proxy(
+            address(new SharesCooldown()),
+            abi.encodeCall(CooldownBase.initialize, (address(this), address(acm)))
+        )));
+    }
+
     function _prepare(uint256 capacity) internal {
         vm.stopPrank();
         USDe.mint(address(this), 1000e18);
@@ -59,12 +67,7 @@ contract DepositOnlyWithdrawalRouteTest is CDOTest {
         vm.mockCall(address(sUSDeStrategy),
             abi.encodeWithSelector(IStrategy.maxWithdraw.selector, address(jrtVault), address(USDe)),
             abi.encode(uint256(0)));
-        SharesCooldown cooldown = SharesCooldown(address(new ERC1967Proxy(
-            address(new SharesCooldown()),
-            abi.encodeCall(CooldownBase.initialize, (address(this), address(acm)))
-        )));
-        vm.prank(cdo.owner());
-        cdo.setSharesCooldown(cooldown);
+        SharesCooldown cooldown = SharesCooldown(address(cdo.sharesCooldown()));
         bytes32 workerRole = cooldown.COOLDOWN_WORKER_ROLE();
         vm.prank(cdo.owner());
         acm.grantRole(workerRole, address(cdo));

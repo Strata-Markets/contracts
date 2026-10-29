@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import { Test, console } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -110,7 +111,7 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
         token = new MockERC20("BASE", 18);
         acm = new AccessControlManager(address(this));
         cdo = StrataCDO(address(new ERC1967Proxy(
-            address(new StrataCDO(IERC20Metadata(address(token)))),
+            address(new StrataCDO(IERC20Metadata(address(token)), ISharesCooldown(address(0)))),
             abi.encodeWithSelector(StrataCDO.initialize.selector, address(this), address(acm))
         )));
         jrt = _tranche("JRT");

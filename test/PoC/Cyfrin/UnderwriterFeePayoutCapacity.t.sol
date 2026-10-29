@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
@@ -14,7 +15,7 @@ import {IInsurancePool} from "../../../contracts/tranches/symbiotic/interfaces/I
 import {ITerminalLossAccounting, TerminalAccounting, TerminalDiscrete, TerminalDYS, TerminalMTM} from "./ProtectedFeesTerminalLoss.t.sol";
 
 contract FeePayoutCDO is StrataCDO {
-    constructor(MockERC20 token) StrataCDO(token) {}
+    constructor(MockERC20 token) StrataCDO(token, ISharesCooldown(address(0))) {}
     // Wire real accounting to a controlled strategy without unrelated tranche setup.
     function setup(IAccounting accounting_, IStrategy strategy_, address receiver) external {
         accounting = accounting_;

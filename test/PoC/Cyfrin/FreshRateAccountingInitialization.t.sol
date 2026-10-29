@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -46,7 +47,7 @@ contract FreshRateAccountingInitializationTest is Test {
         AccessControlManager acm = new AccessControlManager(address(this));
         acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
         acm.grantRole(keccak256("PAUSER_ROLE"), address(this));
-        cdo = StrataCDO(address(new ERC1967Proxy(address(new StrataCDO(token)),
+        cdo = StrataCDO(address(new ERC1967Proxy(address(new StrataCDO(token, ISharesCooldown(address(0)))),
             abi.encodeCall(StrataCDO.initialize, (address(this), address(acm))))));
         assertEq(address(cdo.strategy()), address(0));
         address implementation = mode == 0

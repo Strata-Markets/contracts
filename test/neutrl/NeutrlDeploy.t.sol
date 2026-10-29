@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.28;
 
+import {ISharesCooldown} from "../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -58,6 +59,10 @@ contract NeutrlDeploy is Test {
     sNUSDAprPairProvider internal provider;
     AprPairFeed internal feed;
     Accounting internal accounting;
+
+    function _createSharesCooldown() internal virtual returns (ISharesCooldown) {
+        return ISharesCooldown(address(0));
+    }
 
     function setUp() public virtual {
         string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
@@ -124,7 +129,7 @@ contract NeutrlDeploy is Test {
         vm.label(address(acm), "AccessControlManager");
 
         // 2. Deploy StrataCDO
-        StrataCDO cdoImpl = new StrataCDO(IERC20Metadata(NUSD));
+        StrataCDO cdoImpl = new StrataCDO(IERC20Metadata(NUSD), _createSharesCooldown());
         vm.label(address(cdoImpl), "StrataCDO_Impl");
         cdo = StrataCDO(
             address(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import { InsuranceMiddleware } from "../../../contracts/tranches/symbiotic/InsuranceMiddleware.sol";
 import { Test } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -121,7 +122,7 @@ abstract contract SymbioticCoverageStackBase is Test {
         acm = new AccessControlManager(owner);
 
         cdo = StrataCDO(address(new ERC1967Proxy(
-            address(new StrataCDO(usde)),
+            address(new StrataCDO(usde, ISharesCooldown(address(0)))),
             abi.encodeWithSelector(StrataCDO.initialize.selector, owner, address(acm))
         )));
         jrt = _tranche("jrtUSDe");

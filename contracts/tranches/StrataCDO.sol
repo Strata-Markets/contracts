@@ -67,7 +67,9 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     /// @dev Withdrawal fees for the Senior Tranche
     uint256 public exitFeeSrt;
 
-    ISharesCooldown public sharesCooldown;
+    ISharesCooldown immutable public sharesCooldown;
+    /// @dev Preserves the former sharesCooldown storage slot for proxy upgrades
+    ISharesCooldown private sharesCooldown__;
 
     /// @dev The Symbiotic insurance middleware receiving underwriter fee payments
     IInsuranceMiddleware public insuranceMiddleware;
@@ -99,7 +101,6 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     event TreasurySet(address treasury);
     event JrtShortfallPausePriceSet(uint256 pricePerShare);
     event ExitFeesSet(uint256 jrt, uint256 srt);
-    event SharesCooldownSet(address sharesCooldown);
 
     error Shortfall(uint256 jrtPrice);
 
@@ -112,8 +113,9 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         _;
     }
 
-    constructor (IERC20Metadata baseAsset) {
+    constructor (IERC20Metadata baseAsset, ISharesCooldown sharesCooldown_) {
         baseAssetDecimals = baseAsset.decimals();
+        sharesCooldown = sharesCooldown_;
     }
 
     function initialize(
@@ -683,13 +685,6 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         require(jrtShortfallPausePrice_ <= pricePerShare(address(jrtVault)), "ShortfallPriceTooLarge");
         jrtShortfallPausePrice = jrtShortfallPausePrice_;
         emit JrtShortfallPausePriceSet(jrtShortfallPausePrice_);
-    }
-
-    /// @notice Sets the shares cooldown contract address
-    /// @param sharesCooldown_ The new shares cooldown contract address
-    function setSharesCooldown (ISharesCooldown sharesCooldown_) external onlyOwner {
-        sharesCooldown = sharesCooldown_;
-        emit SharesCooldownSet(address(sharesCooldown_));
     }
 
     /// @notice Updates the valuation price and pauses activities if valuation loss is detected

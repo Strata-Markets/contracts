@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {ISharesCooldown} from "../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import { Test } from "forge-std/Test.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
@@ -144,7 +145,8 @@ contract SymbioticIntegrationTest is Test {
     ///      (which include the underwriter fee / coverage-deficit / insurance claim funding logic).
     function _upgradeStrataContracts() internal {
         address newAccountingImpl = address(new Accounting(18));
-        address newCdoImpl = address(new StrataCDO(IERC20Metadata(USDE)));
+        // The live CDO predates SharesCooldown and has no cooldown getter.
+        address newCdoImpl = address(new StrataCDO(IERC20Metadata(USDE), ISharesCooldown(address(0))));
         // The live strategy predates shareToken(), which fundInsuranceClaim() relies on: the production
         // rollout must upgrade the strategy implementation together with the CDO and Accounting.
         address newStrategyImpl = address(new sUSDeStrategy(IERC4626(SUSDE)));

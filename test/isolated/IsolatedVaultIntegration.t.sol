@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {ISharesCooldown} from "../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -91,7 +92,7 @@ contract IsolatedIntegrationDeploy is Test {
         vm.label(address(acm), "ACM");
 
         // 3. CDO
-        StrataCDO cdoImpl = new StrataCDO(IERC20Metadata(address(baseAsset)));
+        StrataCDO cdoImpl = new StrataCDO(IERC20Metadata(address(baseAsset)), ISharesCooldown(address(0)));
         cdo = StrataCDO(address(new ERC1967Proxy(
             address(cdoImpl),
             abi.encodeWithSelector(StrataCDO.initialize.selector, owner, address(acm))
