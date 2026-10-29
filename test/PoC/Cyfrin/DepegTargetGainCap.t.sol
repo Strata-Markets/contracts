@@ -71,12 +71,22 @@ abstract contract DepegTargetGainCapTests is ValuationInsuranceFixture {
         accounting.setValuationPrice(0.4e18);
         vm.warp(block.timestamp + 365 days);
         accounting.updateAccounting();
-        uint256 senior = accounting.srtBaseNav();
+        uint256 creditBefore = accounting.srtInsuranceFundNav();
+        uint256 principalBefore = accounting.srtBaseNav() - creditBefore;
+        (, uint256 effectiveBefore,) = accounting.totalAssets();
+        uint256 claimBefore = accounting.insuranceAmount();
         uint256 slashed = _totalSlashed();
         mockStrategyTvl += 1000e18;
         accounting.updateBalanceFlow(1000e18, 0, 0, 0);
         accounting.updateAccounting();
-        assertEq(accounting.srtBaseNav(), senior, "no retroactive gain on replenishment");
+        // Replenishment can release valuation credit as Junior replaces insurance backing.
+        // Compare principal and effective NAV, rather than stored NAV including that credit.
+        uint256 creditAfter = accounting.srtInsuranceFundNav();
+        assertEq(accounting.srtBaseNav() - creditAfter, principalBefore, "no retroactive gain on replenishment");
+        (, uint256 effectiveAfter,) = accounting.totalAssets();
+        assertEq(effectiveAfter, effectiveBefore, "Senior protection is unchanged");
+        assertLe(creditAfter, creditBefore, "replenishment needs no additional valuation credit");
+        assertEq(claimBefore - accounting.insuranceAmount(), creditBefore - creditAfter, "released credit cancels the same claim");
         assertEq(_benchmark(), 0);
         assertEq(_totalSlashed(), slashed);
     }
