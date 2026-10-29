@@ -609,12 +609,16 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     ) {
         underwriterFeeNavT1 = underwriterFeeNavT0;
         insuranceAmountT1 = insuranceAmountT0;
-        if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 > 0) {
-            // No deposits yet, however Strategy reports gain, move all to reserve; keep the underwriter fee
-            // capped to the remaining assets so a wipeout below the accrued underwriter fee cannot underflow.
-            uint256 underwriterFeeKept = Math.min(navT1, underwriterFeeNavT0);
-            return (0, 0, 0, navT1 - underwriterFeeKept, underwriterFeeKept, insuranceAmountT0);
+        if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 >= navT0) {
+            // Recovery repays realized claims before excess assets become reserve.
+            uint256 realizedClaim = Math.saturatingSub(insuranceAmountT0, srtInsuranceFundNav);
+            insuranceAmountT1 -= Math.min(navT1 - navT0, realizedClaim);
+            // Empty tranches can still have fees backed by insurance; preserve that backing.
+            uint256 totalNav = navT1 + insuranceAmountT1;
+            uint256 underwriterFeeKept = Math.min(totalNav, underwriterFeeNavT0);
+            return (0, 0, 0, totalNav - underwriterFeeKept, underwriterFeeKept, insuranceAmountT1);
         }
+        // Further losses follow the waterfall even when both tranches are empty.
 
         if (navT0 == navT1) {
             // Still no realized gain; process using the projection.
@@ -751,8 +755,8 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         underwriterFeeNavT1 = underwriterFeeNavT0;
         insuranceAmountT1 = insuranceAmountT0;
         if (jrtNavT0Projected == 0 && srtNavT0 == 0) {
-            // No deposits yet, the projected NAV remain 0.
-            return (0, 0, 0, 0, underwriterFeeNavT0, insuranceAmountT0);
+            // No tranche NAV to project; preserve reserve, fees and claims.
+            return (0, 0, 0, reserveNavT0, underwriterFeeNavT0, insuranceAmountT0);
         }
 
         uint256 navTargetIndexT1 = getNavTargetIndexT1();
