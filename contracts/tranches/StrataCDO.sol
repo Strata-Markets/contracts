@@ -614,6 +614,12 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         IInsuranceMiddleware insuranceMiddleware_,
         IInsuranceVault insuranceVault_
     ) external onlyOwner {
+        // Stop future fees before disconnecting coverage; checkpoint using the old configuration.
+        // Already accrued underwriter fees remain booked.
+        if (address(insuranceMiddleware_) == address(0) && accounting.underwriterFeeBps() != 0) {
+            accounting.setUnderwriterFeeBps(0);
+            emit UnderwriterFeePercentageChanged(0);
+        }
         insuranceMiddleware = insuranceMiddleware_;
         insuranceVault = insuranceVault_;
         accounting.setInsurancePool(insuranceMiddleware_);

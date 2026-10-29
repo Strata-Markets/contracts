@@ -56,4 +56,5 @@ interface IAccounting is ICDOComponent, IAprPairFeedListener {
     function setValuationPrice(uint128 valuationPrice) external returns (bool valuationLossEntered);
     function setInsurancePool(IInsurancePool pool) external;
     function setUnderwriterFeeBps(uint256 fee) external;
+    function underwriterFeeBps() external view returns (uint256);
 }
