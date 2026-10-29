@@ -131,26 +131,40 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         return calculatePricePerShare(assets, supply, baseAssetDecimals);
     }
 
-    function maxDeposit(address tranche) external view returns (uint256) {
+    function maxDeposit(address tranche) public view returns (uint256) {
         bool isJrt_ = isJrt(tranche);
         bool isDepositEnabled = isJrt_ ? actionsJrt.isDepositEnabled : actionsSrt.isDepositEnabled;
         if (isDepositEnabled == false) {
             return 0;
         }
+        if (!isJrt_) {
+            (uint256 jrtNavUnlocked, ) = totalAssetsUnlocked();
+            (, uint256 srtNav, ) = accounting.totalAssetsT0();
+            uint256 buffer = accounting.minimumJrtSrtRatioBuffer();
+            uint256 maxSrt = buffer > 0 ? Math.mulDiv(jrtNavUnlocked, 1e18, buffer) : type(uint256).max;
+            return Math.saturatingSub(maxSrt, srtNav);
+        }
         return accounting.maxDeposit(isJrt_);
     }
     function maxWithdraw(address tranche) external view returns (uint256) {
-        return maxWithdraw(tranche, address(0));
+        return maxWithdraw(tranche, msg.sender);
     }
 
-    function maxWithdraw(address tranche, address owner) public view returns (uint256) {
+    function maxWithdraw(address tranche, address owner) public view returns (uint256 maxAssets) {
         bool isJrt_ = isJrt(tranche);
         bool isWithdrawEnabled = isJrt_ ? actionsJrt.isWithdrawEnabled : actionsSrt.isWithdrawEnabled;
         if (isWithdrawEnabled == false) {
             return 0;
         }
-        bool ownerIsSharesCooldown = owner != address(0) && owner == address(sharesCooldown);
-        return accounting.maxWithdraw(isJrt_, ownerIsSharesCooldown);
+        bool ownerIsSharesCooldown = (owner != address(0) && owner == address(sharesCooldown)) || (msg.sender == address(sharesCooldown));
+        maxAssets = accounting.maxWithdraw(isJrt_, ownerIsSharesCooldown);
+        if (isJrt_ && !ownerIsSharesCooldown && address(sharesCooldown) != address(0)) {
+            uint256 lockedShares = jrtVault.balanceOf(address(sharesCooldown));
+            if (lockedShares > 0) {
+                uint256 lockedAssets = jrtVault.convertToAssets(lockedShares);
+                maxAssets = Math.saturatingSub(maxAssets, lockedAssets);
+            }
+        }
     }
 
     /// @notice Determines the exit mode and associated parameters for a withdrawal from a specific tranche.
@@ -231,7 +245,7 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         if (!enabled) {
             revert DepositsDisabled(tranche);
         }
-        if (baseAssets > accounting.maxDeposit(isJrt_)) {
+        if (baseAssets > maxDeposit(tranche)) {
             revert DepositCapReached(tranche);
         }
         if (tokenAmount == 0 || baseAssets == 0) {
@@ -261,7 +275,7 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
             revert WithdrawalsDisabled(tranche);
         }
         bool isSharesLockup = sender == address(sharesCooldown);
-        if (baseAssets > accounting.maxWithdraw(isJrt_, isSharesLockup)) {
+        if (baseAssets > maxWithdraw(tranche, sender)) {
             revert WithdrawalCapReached(tranche);
         }
         // When the sender is the shares lockup contract, we should skip any cooldown on our side,
