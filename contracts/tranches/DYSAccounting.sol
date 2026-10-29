@@ -877,6 +877,7 @@ contract DYSAccounting is IAccounting, CDOComponent {
             if (useConservativePrice) {
                 // Conservative redemptions pay only net Senior assets
                 // Return the unpaid projection to Junior real NAV
+                // Historical Senior asset-time remains pooled; realized epoch PnL goes to remaining holders.
                 uint256 srtNetNav = Math.saturatingSub(srtBaseNav, srtPnLProjected);
                 uint256 unpaidProjection = Math.mulDiv(
                     srtAssetsOut,

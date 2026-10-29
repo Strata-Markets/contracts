@@ -56,7 +56,9 @@ assetsOut = sharesIn * redeemableNAV / totalSupply
 
 The difference between `grossNAV` and `redeemableNAV` represents projected yield that has not yet been realized.
 
-During an epoch, a redemption also removes the projected gain attached to the redeemed shares. This prevents the unpaid projection from being redistributed to the remaining holders as an artificial price increase. In `DYSAccounting`, Senior conservative redemptions reduce `srtPnLProjected` and `srtBaseNav` by the redeemed share of unreconciled Senior projection and return that amount to Junior real NAV. Junior conservative redemptions reduce `jrtNavProjected` by the redeemed share of unreconciled Junior projection, without reducing it below Junior real NAV.
+During an epoch, a redemption also removes the projected gain attached to the redeemed shares. This prevents an immediate artificial price increase for remaining holders at redemption. In `DYSAccounting` and `MTMAccounting`, Senior conservative redemptions reduce `srtPnLProjected` and `srtBaseNav` by the redeemed share of unreconciled Senior projection and return that amount to Junior real NAV. Junior conservative redemptions reduce `jrtNavProjected` by the redeemed share of unreconciled Junior projection, without reducing it below Junior real NAV.
+
+Senior redemptions do not remove the redeemed capital's historical asset-time from the pooled Senior trackers. At reconciliation, realized Senior PnL is allocated using that history and credited to the Senior holders remaining then. Returning projection to Junior at redemption does not permanently assign the corresponding realized yield to Junior. A holder retaining a residual Senior position participates in that later allocation.
 
 ---
 
@@ -88,7 +90,8 @@ If realized yield is lower than projected yield, redeemers who exited before rec
 This mechanism is simple and robust, but it is conservative for redeemers:
 
 * Accurate projected yield is not paid to users who exit before reconciliation.
-* Remaining holders do not receive the redeemed share of unreconciled projection.
+* Remaining holders do not receive the redeemed projection at redemption, but do receive the Senior tranche's realized epoch PnL at reconciliation, including the contribution of exited capital.
+* A user who redeems most of their shares can still receive that realized yield through a residual position.
 * The protocol avoids paying projected yield to exited users before reconciliation.
 
 Markets SHOULD document this behavior before enabling it.
