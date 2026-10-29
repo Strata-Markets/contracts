@@ -293,16 +293,24 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     /// @notice Returns tranche NAVs excluding assets locked in the shares cooldown (silo).
     /// @dev Reads accounting totals and subtracts locked assets to compute available TVLs and coverage.
     function totalAssetsUnlocked() public view returns (uint256 jrtNav, uint256 srtNav) {
-        // Saved Junior and Senior TVLs (not projected).
+        // Use the same stored effective NAV for totals and locked shares.
         (jrtNav, srtNav, ) = accounting.totalAssetsT0();
 
-        // Potentially projected Junior and Senior assets.
-        uint256 jrtNavLocked = jrtVault.convertToAssets(jrtVault.balanceOf(address(sharesCooldown)));
-        uint256 srtNavLocked = srtVault.convertToAssets(srtVault.balanceOf(address(sharesCooldown)));
+        // Value silo shares pro rata without fetching a different live NAV.
+        uint256 jrtNavLocked = _lockedSharesValue(jrtVault, jrtNav);
+        uint256 srtNavLocked = _lockedSharesValue(srtVault, srtNav);
 
         jrtNav = jrtNav > jrtNavLocked ? jrtNav - jrtNavLocked : 0;
         srtNav = srtNav > srtNavLocked ? srtNav - srtNavLocked : 0;
         return (jrtNav, srtNav);
+    }
+
+    function _lockedSharesValue(ITranche vault, uint256 trancheNav) internal view returns (uint256) {
+        uint256 supply = vault.totalSupply();
+        if (supply == 0) {
+            return 0;
+        }
+        return Math.mulDiv(trancheNav, vault.balanceOf(address(sharesCooldown)), supply);
     }
 
     /// @notice Returns the coverage ratio using available TVLs (assets not locked in the silo).

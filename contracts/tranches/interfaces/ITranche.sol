@@ -34,6 +34,9 @@ interface ITranche is ICDOComponent, IMetaVault {
 
     error RedemptionParamsMismatch(TRedemptionParams requested, TRedemptionExitParams current);
 
+    /// @notice Quotes redeemable assets using the supplied exit fee.
+    function quoteRedeem(uint256 sharesGross, uint256 fee) external view returns (uint256 assetsNet);
+
     function configure () external;
     function burnSharesAsFee(uint256 shares, address owner) external returns (uint256);
 

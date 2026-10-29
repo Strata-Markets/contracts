@@ -293,9 +293,9 @@ contract SharesCooldown is ISharesCooldown, CooldownBase {
 
         (uint256 sharesUser, uint256 sharesFee) = accrueFee(vault, shares, fee * daysLeft);
 
+        // Early exits still enforce the ratio limit; price post-fee shares as the silo redeems them.
         uint256 maxAssets = IStrataCDO(vault.getCDOAddress()).maxWithdraw(address(vault));
-        uint256 maxShares = vault.convertToShares(maxAssets);
-        require(maxShares >= sharesUser, "MaxRedemptionLimitReached");
+        require(vault.quoteRedeem(sharesUser, 0) <= maxAssets, "MaxRedemptionLimitReached");
 
         address tokenToRedeem = token != address(0) ? token : req.token;
 
