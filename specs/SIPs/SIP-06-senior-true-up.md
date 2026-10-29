@@ -158,110 +158,103 @@ This formulation:
 
 # Daily Loss Floor (Senior Tranche)
 
-The Accounting contract must enforce a configurable **daily loss floor** for the Senior tranche (e.g. `-0.1%` per day).
+The Accounting contract enforces a configurable **daily loss floor** for the Senior tranche (e.g. `-0.1%` per day). A zero `floorRate` disables the floor.
 
-To ensure deterministic and path-independent behavior, the floor is implemented using a **rolling 24h window with a fixed NAV anchor**.
+The floor uses a **rolling 24h window with a fixed starting NAV and a flow-adjusted baseline**. The loss allowance scales with that baseline rather than remaining a fixed amount throughout the window.
 
 ### Definitions
 
-At the beginning of each window, store:
-
-- `windowStartSrtNav` — Senior NAV at window start (anchor)
-- `windowNetFlows` — cumulative net Senior deposits and withdrawals during the window
-- `windowEnd` — end timestamp of the current window
+- `windowStartSrtNav` - Senior NAV at window start (anchor)
+- `windowNetFlows` - cumulative net Senior flows and adjustments to the protected position during the window
+- `windowEnd` - end timestamp of the current window
 
 ### Core formulas
 
-Daily allowed loss:
+For an enabled floor, using fractional rates (`floorRate = 0.001` for a 0.1% allowance):
 
 ```
-allowedLoss = windowStartSrtNav * floorRate
+baseline = max(0, windowStartSrtNav + windowNetFlows)
+allowedLoss = baseline * min(1, floorRate)
+srtNavFloor = baseline * max(0, 1 - floorRate)
 ```
 
-Where:
-
-- `floorRate = 0.001` (for -0.1%)
-
-Senior NAV floor:
-
-```
-srtNavFloor = windowStartSrtNav + windowNetFlows - allowedLoss
-```
-
-Net flows are tracked as:
+Ordinary deposits and withdrawals update net flows as:
 
 ```
 windowNetFlows = windowNetFlows + srtAssetsIn - srtAssetsOut
 ```
 
-This ensures deposits and withdrawals are excluded from PnL.
+Deposits increase the absolute loss allowance; withdrawals reduce it. Neither is treated as PnL, and neither unconditionally restarts the window.
+
+Valuation insurance credit is part of the protected Senior position. Credit additions increase `windowNetFlows`, and credit unwinds decrease it. Senior fees transferred to the reserve and explicitly accepted insurance claim write-downs also reduce the baseline.
+
+For a window-start NAV of 1,000 and a 1% allowance:
+
+| Net Senior flows | Baseline | Allowed loss | Senior floor |
+| --- | ---: | ---: | ---: |
+| 0 | 1,000 | 10 | 990 |
+| +500 | 1,500 | 15 | 1,485 |
+| -900 | 100 | 1 | 99 |
 
 ### Accounting during the window
 
-At each accounting step:
+The floor sets the Senior target before the loss waterfall:
 
 ```
 srtNavRealized = srtNav + realizedPnL
-
-srtNav = max(srtNavRealized, srtNavFloor)
+srtNavTarget = max(srtNavRealized, srtNavFloor)
 ```
+
+Actual protection remains subject to the available backing and the accounting contract's loss waterfall.
 
 Properties:
 
-- `allowedLoss` is **constant within the window**
-- `srtNavFloor` changes only due to `windowNetFlows`
-- any loss below the floor is absorbed by Junior NAV
-- gains are unrestricted
+- The starting NAV stays fixed within the window, but the baseline and absolute loss allowance change with net flows.
+- Withdrawals do not leave the remaining Senior capital with the original, larger absolute loss allowance.
+- Deposits increase the absolute loss allowance in proportion to the added capital.
+- Gains are unrestricted by the floor.
 
 ### Window rollover
 
-When:
+At reconciliation, when its accounting timestamp reaches or exceeds `windowEnd`, apply the existing window's floor before starting a new window. DYS uses `block.timestamp`; MTM uses the timestamp of the accounting checkpoint.
+
+#### Step 1 - extend the rate for inactivity
+
+If the accounting timestamp is later than `windowEnd`, extend the rate proportionally:
 
 ```
-block.timestamp >= windowEnd
+dT = timestamp - windowEnd
+extendedRate = floorRate * (24 hours + dT) / 24 hours
 ```
 
-#### Step 1 — extend allowed loss for inactivity
-
-If no interaction occurred exactly at `windowEnd`, additional loss allowance must be granted for the elapsed time:
+The extended allowance uses the **flow-adjusted baseline**, not the window-start NAV alone:
 
 ```
-dT = block.timestamp - windowEnd
+allowedLoss = baseline * min(1, extendedRate)
+srtNavFloor = baseline * max(0, 1 - extendedRate)
 ```
 
-Then recompute the total allowed loss from the original **window-start Senior NAV anchor**:
+The floor is bounded at zero once the extended rate reaches 100%.
 
-```
-allowedLoss = windowStartSrtNav * floorRate
+#### Step 2 - apply accounting using the extended floor
 
-extraLossFromOverflow = windowStartSrtNav * floorRate * dT / 24 hours
-allowedLoss += extraLossFromOverflow
-```
+Apply the Senior target and loss waterfall using `srtNavFloor`.
 
-Equivalent one-line form:
+#### Step 3 - start a new window
 
-```
-allowedLoss = windowStartSrtNav * floorRate * (24 hours + dT) / 24 hours
-```
-
-#### Step 2 — apply accounting with updated allowedLoss
-
-```
-srtNavFloor = windowStartSrtNav + windowNetFlows - allowedLoss
-srtNav = max(srtNavRealized, srtNavFloor)
-```
-
-#### Step 3 — start a new window
+After reconciliation:
 
 ```
 windowStartSrtNav = srtNav
 windowNetFlows = 0
-windowEnd = block.timestamp + 24 hours
+windowEnd = timestamp + 24 hours
 ```
+
+Changing the configured floor rate explicitly resets the window as well.
 
 #### Key properties
 
-- Floor is enforced relative to a **fixed NAV anchor**
-- Floor is **sticky within each window**
-- Loss allowance **accumulates over time** during inactivity
-- No dependency on calendar timestamps (e.g. midnight)
+- The floor is relative to a fixed starting NAV adjusted for net flows.
+- The loss allowance scales with the protected position and extends proportionally during inactivity.
+- Ordinary flows do not unconditionally reset the window.
+- There is no dependency on calendar timestamps such as midnight.
