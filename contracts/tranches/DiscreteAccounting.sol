@@ -786,13 +786,17 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
 
         uint256 gain_dTAbs = uint256(gain_dT);
         // Decrease projected gain by the expected performance fee only above the high-water mark.
-        if (reserveBps > 0 && navT0 + gain_dTAbs > feeWatermarkNav) {
-            uint256 feeableGain = Math.min(
-                gain_dTAbs,
-                navT0 + gain_dTAbs - feeWatermarkNav
-            );
-            uint256 reserve_dT = (feeableGain * reserveBps) / PERCENTAGE_100;
-            gain_dTAbs -= reserve_dT;
+        if (reserveBps > 0) {
+            // Estimate prior projected gain without a separate tracker; fees and forfeitures can reduce it.
+            uint256 navProjectedT0 = navT0 + Math.saturatingSub(jrtNavT0Projected, jrtNavT0Real);
+            if (navProjectedT0 + gain_dTAbs > feeWatermarkNav) {
+                uint256 feeableGain = Math.min(
+                    gain_dTAbs,
+                    navProjectedT0 + gain_dTAbs - feeWatermarkNav
+                );
+                uint256 reserve_dT = (feeableGain * reserveBps) / PERCENTAGE_100;
+                gain_dTAbs -= reserve_dT;
+            }
         }
 
         // Allocate the full gain to Junior first; later, subtract Senior's gross target gain from Junior.

@@ -75,4 +75,23 @@ Simulate the exact deposit, including its accounting update, and adjust the amou
 
 Derive the maximum from the same prospective Junior/Senior state that execution would establish, without mutating storage. Keep its fee, projection, valuation, and insurance treatment consistent with execution.
 
+## KT-003: Projected reserve fees use an approximate cumulative gain
 
+**Status:** Accepted approximation after mitigation
+**Reference:** Cyfrin f-115, projected reserve fees below the high-water mark
+
+### Behavior and conditions
+
+DiscreteAccounting and the APR-projection paths in DYSAccounting and MTMAccounting estimate prior projected gain as `max(0, jrtNavProjected - jrtBaseNav)`. Adding this to settled NAV lets the projected reserve-fee calculation recognize progress toward the high-water mark across accounting updates, without a new storage tracker.
+
+This is not cumulative gross strategy gain: previously projected reserve fees, expected underwriter fees, and projection forfeitures can reduce the estimate. Residual fee underestimation and update-frequency differences remain possible. Reconciliation continues to calculate the actual fee from realized NAV.
+
+### Impact and mitigation
+
+Projected Junior NAV can still be overstated relative to the eventual fee. Depositors may overpay and live-priced exits may benefit at remaining holders' expense. Conservative redemption pricing limits the exit exposure but does not correct deposit pricing. Reconciliation corrects remaining NAV, not completed flows.
+
+In the tested 10-million-unit market, the original approximately 915.89-unit fee-related cadence gap becomes negligible without flows or underwriter fees. Flow cases and expected underwriter fees retain smaller discrepancies; these scenario results are not universal bounds.
+
+### Possible fix and validation
+
+Track cumulative gross projected gain with consistent treatment of flows, fees, forfeitures, and reconciliation resets. The current policy regressions are in `test/PoC/Cyfrin/ProjectedReserveFeeCadence.t.sol`, covering the auditor scenario, deposits, exits, underwriter fees, and conservative DYS/MTM exits. Their cadence tolerances apply only to those fixtures and do not guarantee exact fee amounts.
