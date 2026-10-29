@@ -175,9 +175,15 @@ If early-exit is disabled:
 
 ## 8. Junior Tranche Redemption Limits
 
-The protocol enforces a maximum redeemable amount to preserve the MINIMUM Junior / Senior ratio.
+Accounting checks Senior admission against `minimumJrtSrtRatioBuffer` and ordinary Junior withdrawals against `minimumJrtSrtRatio`, using the applicable accounting NAVs at the time of each action. These checks do not track which Junior holder supplied the backing or how long it remains.
 
-With the new lock-up mechanism, shares that are already locked in the Silo contract are not included in the ratio formula, meaning the Net Asset Value for a Tranche is changed to:
+The admission buffer is not a permanent capital commitment or a guarantee of withdrawal capacity for other Junior holders. Junior capital that enabled a Senior deposit may subsequently exit under the applicable exit rules. For example, ignoring fees and NAV changes, Junior 300 and Senior 5,000 meet a 6% admission buffer. Adding 60 Junior permits another 1,000 Senior; withdrawing those 60 Junior leaves a 5% ratio, which ordinary withdrawals permit when `minimumJrtSrtRatio` is 5%.
+
+Exit bands control the timing and fees of that Junior exit. A nonzero cooldown delays ordinary finalization and leaves the shares exposed to gains and losses; any permitted early exit remains subject to its fee and ratio checks. Markets without a lock in the applicable low-coverage band allow the immediate round trip, subject to other execution checks.
+
+Matured Silo withdrawals bypass the accounting ratio restriction, while pauses and other execution checks still apply. The minimum ratio is therefore not an unconditional floor maintained after every redemption.
+
+Separately, the coverage ratio used to select exit bands excludes shares already locked in the Silo. It uses unlocked NAV:
 
 $$
 \text{JuniorNAV} = \text{JuniorTVL} - \text{JuniorTVLInSilo}

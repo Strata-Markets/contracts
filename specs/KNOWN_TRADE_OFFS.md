@@ -95,3 +95,22 @@ In the tested 10-million-unit market, the original approximately 915.89-unit fee
 ### Possible fix and validation
 
 Track cumulative gross projected gain with consistent treatment of flows, fees, forfeitures, and reconciliation resets. The current policy regressions are in `test/PoC/Cyfrin/ProjectedReserveFeeCadence.t.sol`, covering the auditor scenario, deposits, exits, underwriter fees, and conservative DYS/MTM exits. Their cadence tolerances apply only to those fixtures and do not guarantee exact fee amounts.
+
+## KT-004: Temporary Junior capital can expand Senior admission capacity
+
+**Status:** Accepted policy
+
+### Behavior and conditions
+
+The accounting ratios are checks at the time of each action, not commitments by individual Junior holders. With a 6% Senior admission buffer and a 5% ordinary Junior withdrawal limit, Junior 300 and Senior 5,000 can become Junior 360 and Senior 6,000 through deposits. Where exit rules permit, withdrawing the added 60 Junior leaves the market at 5% and consumes ordinary Junior withdrawal headroom. This example ignores fees and NAV changes.
+
+### Acceptance rationale
+
+The buffer limits new Senior admission but does not bind the Junior capital that enabled it. Junior holders retain the right to exit under the configured exit rules. Enforcing a holding period or capital commitments would change that policy and require additional tracking, including treatment of share transfers.
+
+### Impact and mitigation
+
+Other Junior holders can lose ordinary withdrawal capacity. Low-coverage cooldowns delay ordinary finalization and keep shares exposed to losses; permitted early exits retain their fee and ratio checks. Without a lock in the applicable band, the immediate round trip is allowed. Operators should configure exit bands according to the intended exposure period; no particular deployed lock duration is assumed here.
+
+Matured cooldown withdrawals bypass the accounting ratio restriction, subject to pauses and other execution checks. Consequently, the minimum ratio is not an unconditional post-redemption floor. A larger admission buffer does not permanently commit Junior capital.
+
