@@ -13,6 +13,7 @@ import {StrataCDO} from "../../../contracts/tranches/StrataCDO.sol";
 import {Tranche} from "../../../contracts/tranches/Tranche.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
+import {RiskPremiumPower} from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import {IAccounting} from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import {IStrategy} from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import {ITranche} from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -96,6 +97,9 @@ abstract contract RoundTripStackBase is Test {
             ITranche(address(jrt)),
             ITranche(address(srt))
         );
+        DYSAccounting(accounting).setRiskModel(
+            new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18))
+        );
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
     }
@@ -159,7 +163,7 @@ contract DYSSeniorRoundTripProjectionTest is RoundTripStackBase {
                 3650 days
             )
         );
-        a.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        a.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         _deposit(jrt, alice, 500e18);
         _deposit(srt, bob, 500e18);
         vm.warp(vm.getBlockTimestamp() + 365 days);
@@ -285,7 +289,7 @@ contract MTMSeniorRoundTripProjectionTest is RoundTripStackBase {
                 1 days
             )
         );
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         _deposit(jrt, alice, 1000e18);
         _deposit(srt, bob, 1000e18);
         vm.warp(vm.getBlockTimestamp() + 1 hours);

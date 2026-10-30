@@ -5,6 +5,8 @@ import { Test } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import { DYSAccounting } from "../../contracts/tranches/DYSAccounting.sol";
+import { RiskPremiumPower } from "../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
+import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { IStrataCDO } from "../../contracts/tranches/interfaces/IStrataCDO.sol";
 import { IAprPairFeed } from "../../contracts/tranches/interfaces/IAprPairFeed.sol";
 import { AccessControlManager } from "../../contracts/governance/AccessControlManager.sol";
@@ -52,6 +54,9 @@ contract DYSInsuranceClaimFundingTest is Test {
                 )
             )
         );
+        // DYS has no built-in risk premium; install the legacy 0.2/0.2/0.3 power model
+        acm.grantRole(accounting.UPDATER_STRAT_CONFIG_ROLE(), address(this));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18)));
         pool = new MockInsurancePool();
         pool.setCapacity(1_000_000e18);
         accounting.setInsurancePool(pool);

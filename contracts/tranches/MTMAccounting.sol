@@ -2,7 +2,7 @@
 pragma solidity ^0.8.28;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {UD60x18, pow, mul} from "@prb/math/src/ud60x18/Math.sol";
+import {UD60x18} from "@prb/math/src/ud60x18/Math.sol";
 import {IAccounting} from "./interfaces/IAccounting.sol";
 import {IStrataCDO} from "./interfaces/IStrataCDO.sol";
 import {IAprPairFeed} from "./interfaces/IAprPairFeed.sol";
@@ -95,10 +95,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
     uint256 public srtBaseNav;
     uint256 public reserveNav;
 
-    /// @dev Risk parameters for Risk Premium calculation.
-    UD60x18 public riskX;
-    UD60x18 public riskY;
-    UD60x18 public riskK;
+    /// @dev Deprecated legacy risk parameters, kept for storage layout; see riskPremiumModel.
+    UD60x18 private __deprecatedRiskX;
+    UD60x18 private __deprecatedRiskY;
+    UD60x18 private __deprecatedRiskK;
 
     /// @notice The hard minimum TVLjrt/TVLsrt ratio.
     uint256 public minimumJrtSrtRatio;
@@ -210,9 +210,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
     ///      A zero starting rate uses proportional NAV-time allocation for that epoch, even in rate mode.
     uint256 public strategyRate;
 
-    /// @notice Optional external risk premium model.
-    /// @dev When unset, accounting falls back to the legacy `x + y * TVL_ratio_sr^k`
-    ///      model configured by `riskX`, `riskY`, and `riskK`.
+    /// @notice External risk premium model; when unset, Senior pays no risk premium.
     IRiskPremiumModel public riskPremiumModel;
 
     /* Underwriter Fee (Symbiotic) Parameters */
@@ -284,7 +282,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
     event ReservePercentageChanged(uint256 reserveBps);
     event UnderwriterFeeReduced(uint256 amount);
     event InsuranceClaimed(uint256 amount, uint256 insuranceAmount);
-    event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
     event RiskModelChanged(address riskPremiumModel);
     event MinimumJrtSrtRatioChanged(uint256 ratio);
     event MinimumJrtSrtRatioBufferChanged(uint256 ratio);
@@ -330,10 +327,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
         cdo = cdo_;
 
         aprPairFeed = aprPairFeed_;
-
-        riskX = UD60x18.wrap(0.2e18);
-        riskY = UD60x18.wrap(0.2e18);
-        riskK = UD60x18.wrap(0.3e18);
 
         srtTargetIndex = 1e18;
         navTargetIndex = 1e18;
@@ -1663,7 +1656,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
         uint256 srtNavTime_ = navTimeAccrued > 0 ? srtNavTimeAccrued : Math.saturatingSub(srtNavT0, state.insuranceAmount);
         uint256 navTime_ = navTimeAccrued > 0 ? navTimeAccrued : navT0;
 
-        // Note: riskPremium is capped at 1e18 (100%) via setRiskParameters validation
+        // Note: riskPremium is capped at 1e18 (100%) via setRiskModel validation
         UD60x18 riskPremium = calculateRiskPremium();
         // Risk premium: srtFactor = 1 - riskPremium
         uint256 srtFactor = 1e18 - riskPremium.unwrap();
@@ -2071,26 +2064,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
             srtEffective == 0 ? 0 : ((srtEffective * 1e18) / (srtEffective + jrtEffective))
         );
 
-        if (address(riskPremiumModel) != address(0)) {
-            return riskPremiumModel.riskPremium(tvlRatio);
+        if (address(riskPremiumModel) == address(0)) {
+            return UD60x18.wrap(0);
         }
-
-        UD60x18 riskPremium = calculateRiskPremiumInner(
-            riskX,
-            riskY,
-            riskK,
-            tvlRatio
-        );
-        return riskPremium;
-    }
-    function calculateRiskPremiumInner(
-        UD60x18 x,
-        UD60x18 y,
-        UD60x18 k,
-        UD60x18 tvlRatioSrt
-    ) internal pure returns (UD60x18) {
-        UD60x18 riskPremium = x + y * pow(tvlRatioSrt, k);
-        return riskPremium;
+        return riskPremiumModel.riskPremium(tvlRatio);
     }
 
     // Fetch APRs from Feed
@@ -2128,7 +2105,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
     }
     function updateAprSrt(UD60x18 aprTarget_, UD60x18 aprBase_) internal {
         UD60x18 risk = calculateRiskPremium();
-        UD60x18 aprSrt1 = mul(aprBase_, UD60x18.wrap(1e18) - risk);
+        UD60x18 aprSrt1 = UD60x18Ext.mul(aprBase_, UD60x18.wrap(1e18) - risk);
         aprSrt = UD60x18Ext.max(aprTarget_, aprSrt1);
     }
 
@@ -2175,30 +2152,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
         syncAprs();
     }
 
-    function setRiskParameters(
-        UD60x18 riskX_,
-        UD60x18 riskY_,
-        UD60x18 riskK_
-    ) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
-        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
-        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
-        riskX = riskX_;
-        riskY = riskY_;
-        riskK = riskK_;
-        UD60x18 risk = calculateRiskPremiumInner(
-            riskX_,
-            riskY_,
-            riskK_,
-            UD60x18.wrap(1e18)
-        );
-        require(risk.unwrap() < PERCENTAGE_100, ">=100%");
-        emit RiskParametersChanged(riskX_, riskY_, riskK_);
-        updateAprSrt(aprTarget, aprBase);
-    }
-
-    /// @notice Sets the optional external risk premium model.
-    /// @dev Set to the zero address to use the legacy `x + y * TVL_ratio_sr^k` model.
-    /// @param riskPremiumModel_ External model contract, or zero address for the legacy model.
+    /// @notice Sets the external risk premium model.
+    /// @param riskPremiumModel_ External model contract, or zero address for no risk premium.
     function setRiskModel(IRiskPremiumModel riskPremiumModel_) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
         (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
         updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);

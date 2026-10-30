@@ -6,6 +6,8 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { IRiskPremiumModel } from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IStrataCDO } from "../../../contracts/tranches/interfaces/IStrataCDO.sol";
 import { IAprPairFeed } from "../../../contracts/tranches/interfaces/IAprPairFeed.sol";
 import { Test } from "forge-std/Test.sol";
@@ -131,6 +133,12 @@ abstract contract ValuationInsuranceFixture is Test {
         accounting.updateBalanceFlow(1000e18, 0, 1000e18, 0);
     }
 
+    /// @dev DYS and MTM have no built-in risk premium; installs the legacy 0.2/0.2/0.3 power model
+    function _setDefaultRiskModel(address a) internal {
+        acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
+        DYSAccounting(a).setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18)));
+    }
+
     function _totalSlashed() internal view returns (uint256 totalSlashed) {
         (,, totalSlashed,,,) = middleware.markets(address(this));
     }
@@ -147,7 +155,7 @@ abstract contract ValuationInsuranceFixture is Test {
 
 interface IFloorAccounting {
     function setFloorRate(uint256 rate) external;
-    function setRiskParameters(UD60x18 riskX_, UD60x18 riskY_, UD60x18 riskK_) external;
+    function setRiskModel(IRiskPremiumModel riskPremiumModel_) external;
     function windowStartSrtNav() external view returns (uint256);
     function windowNetFlows() external view returns (int256);
     function windowEnd() external view returns (uint256);
@@ -159,7 +167,7 @@ interface IFloorAccounting {
 abstract contract ValuationFloorBaselineTests is ValuationInsuranceFixture {
     function setUp() public virtual override {
         super.setUp();
-        _floor().setRiskParameters(UD60x18.wrap(0.4e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        _floor().setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.4e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         _floor().setFloorRate(0.01e18);
     }
 
@@ -320,6 +328,7 @@ contract ValuationFloorBaselineDYSTest is ValuationFloorBaselineTests {
             )
         ));
         acm.grantRole(IFloorAccounting(a).UPDATER_STRAT_CONFIG_ROLE(), address(this));
+        _setDefaultRiskModel(a);
     }
 }
 
@@ -334,6 +343,7 @@ contract ValuationFloorBaselineMTMTest is ValuationFloorBaselineTests {
             )
         ));
         acm.grantRole(IFloorAccounting(a).UPDATER_STRAT_CONFIG_ROLE(), address(this));
+        _setDefaultRiskModel(a);
     }
 
     function test_LiveDipAfterRecoveryDoesNotLiftSenior() public {

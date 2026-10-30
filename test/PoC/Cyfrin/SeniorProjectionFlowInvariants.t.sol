@@ -4,6 +4,7 @@ pragma solidity ^0.8.28;
 import {RoundTripStackBase} from "./SeniorRoundTripProjection.t.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
+import {RiskPremiumPower} from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import {UD60x18} from "@prb/math/src/ud60x18/ValueType.sol";
 
 /// @notice Cash-flow invariants for purchased projection, across APR and live MTM pricing.
@@ -24,7 +25,7 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
         a = DYSAccounting(
             _deploy(impl, 50_000_000_000, 100_000_000_000, _liveMtm() ? 1 days : 3650 days)
         );
-        a.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        a.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         cdo.setValuationKeeper(address(this));
         _deposit(jrt, alice, 500e18);
         _deposit(srt, bob, 500e18);

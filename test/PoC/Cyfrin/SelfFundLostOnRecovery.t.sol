@@ -210,15 +210,17 @@ contract SelfFundLostOnRecoveryDiscreteTest is SelfFundLostOnRecoveryTests {
 }
 
 contract SelfFundLostOnRecoveryDYSTest is SelfFundLostOnRecoveryTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(new ERC1967Proxy(address(new DYSAccounting(18, false, false, false, true, false)),
+    function _deployAccounting() internal override returns (address a) {
+        a = address(new ERC1967Proxy(address(new DYSAccounting(18, false, false, false, true, false)),
             abi.encodeWithSignature("initialize(address,address,address,address)", address(this), address(acm), address(this), address(this))));
+        _setDefaultRiskModel(a);
     }
 }
 
 contract SelfFundLostOnRecoveryMTMTest is SelfFundLostOnRecoveryTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(new ERC1967Proxy(address(new MTMAccounting(18, false, true, false, true, false, true)),
+    function _deployAccounting() internal override returns (address a) {
+        a = address(new ERC1967Proxy(address(new MTMAccounting(18, false, true, false, true, false, true)),
             abi.encodeWithSignature("initialize(address,address,address,address)", address(this), address(acm), address(this), address(this))));
+        _setDefaultRiskModel(a);
     }
 }

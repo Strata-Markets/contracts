@@ -7,6 +7,8 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 import { DiscreteAccounting } from "../../../contracts/tranches/DiscreteAccounting.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
+import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { MockAprPairFeed } from "../../../contracts/test/MockAprPairFeed.sol";
 import { Accounting } from "../../../contracts/tranches/Accounting.sol";
 import { IStrataCDO } from "../../../contracts/tranches/interfaces/IStrataCDO.sol";
@@ -112,15 +114,24 @@ contract SharedStakeCommittedCapacityTest is Test {
         cdoB.exec(address(accountingB), abi.encodeCall(Accounting.updateBalanceFlow, (1000e18, 0, 1000e18, 0)));
     }
 
-    function _deployAccounting(AccessControlManager acm, address cdo) internal returns (Accounting) {
-        return Accounting(address(new ERC1967Proxy(
+    function _deployAccounting(AccessControlManager acm, address cdo) internal returns (Accounting a) {
+        a = Accounting(address(new ERC1967Proxy(
             _implementation(),
             abi.encodeWithSelector(
                 Accounting.initialize.selector,
                 address(this), address(acm), IStrataCDO(cdo), IAprPairFeed(address(new MockAprPairFeed()))
             )
         )));
+        if (_requiresRiskModel()) {
+            // DYS and MTM have no built-in risk premium; install the legacy 0.2/0.2/0.3 power model
+            acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
+            DYSAccounting(address(a)).setRiskModel(
+                new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18))
+            );
+        }
     }
+
+    function _requiresRiskModel() internal pure virtual returns (bool) { return false; }
 
     /// uniBTC (8 dec) -> base (USDe, $1, 18 dec) at $60k, no buffer; mirrors the middleware's _toBaseAsset.
     function _toBase(uint256 vault) internal pure returns (uint256) {
@@ -239,7 +250,9 @@ contract SharedStakeDiscreteTest is SharedStakeCommittedCapacityTest {
 }
 contract SharedStakeDYSTest is SharedStakeCommittedCapacityTest {
     function _implementation() internal override returns (address) { return address(new DYSAccounting(18, false, false, false, true, false)); }
+    function _requiresRiskModel() internal pure override returns (bool) { return true; }
 }
 contract SharedStakeMTMTest is SharedStakeCommittedCapacityTest {
     function _implementation() internal override returns (address) { return address(new MTMAccounting(18, false, true, false, true, true, true)); }
+    function _requiresRiskModel() internal pure override returns (bool) { return true; }
 }

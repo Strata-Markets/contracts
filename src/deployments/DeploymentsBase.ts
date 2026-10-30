@@ -48,6 +48,7 @@ import { $promise } from 'dequanto/utils/$promise';
 import { $account } from 'dequanto/utils/$account';
 import { Ownable } from 'dequanto/prebuilt/openzeppelin/Ownable';
 import { RiskPremiumSigmoid } from '@0xc/hardhat/RiskPremiumSigmoid/RiskPremiumSigmoid';
+import { RiskPremiumPower } from '@0xc/hardhat/RiskPremiumPower/RiskPremiumPower';
 import { MTMAccounting } from '@0xc/hardhat/MTMAccounting/MTMAccounting';
 
 
@@ -688,6 +689,8 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         await this.addRoles();
         await this.ensureRole($contract.keccak256('UPDATER_CDO_APR_ROLE'), feed.address);
         await this.configureCooldowns(strategy);
+        // MTM/DYS revert on risk premium reads until a model is set, so configure it before any deposit.
+        await this._configureRiskPremium({ accounting });
 
         await this.ds.configure(accounting, {
             title: `Update Performance (Accounting Reserve BPS) Fee`,
@@ -736,7 +739,6 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
 
         await this._configureFeeRetention(contracts);
         await this._configureExitBounds(contracts);
-        await this._configureRiskPremium(contracts);
         await this._configureMinumumJrtSrtRatios(contracts);
 
         await this.configureAprFeed(feed)
@@ -974,11 +976,14 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
         accounting: Accounting
     }) {
         const risk = this.cdoInfo.riskPremium;
-        if (risk == null) {
+        const accountingType = this.cdoInfo.ContractVersions?.accounting;
+        // MTM/DYS have no built-in x/y/k premium and always need an external model.
+        const requiresModel = accountingType === 'mtm' || accountingType === 'dys';
+        if (risk == null && requiresModel === false) {
             return null;
         }
         const { accounting } = contracts;
-        if (risk.model?.type === 'sigmoid') {
+        if (risk?.model?.type === 'sigmoid') {
             const {min, max, k, sOptimal } = risk.model;
             const id = [min, max, k, sOptimal].join('-')
             const model = await this.common.ensureContract(RiskPremiumSigmoid, {
@@ -990,21 +995,23 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
                     $bigint.toWei(sOptimal)
                 ]
             });
-            await this.ds.configure(accounting, {
-                title: `Update Accounting Risk Premium Model`,
-                value: model.address,
-                current: accounting.riskPremiumModel(),
-                updater: async (accounting, value) => {
-                    const acc = await this.getAccountByRole('UPDATER_STRAT_CONFIG_ROLE');
-                    await accounting.$receipt().setRiskModel(acc, model.address);
-                }
-            });
+            await this._configureRiskModel(accounting, model.address);
             return;
         }
 
-        const x = $bigint.toWei(risk.x ?? 0.2, 18);
-        const y = $bigint.toWei(risk.y ?? 0.2, 18);
-        const k = $bigint.toWei(risk.k ?? 0.3, 18);
+        const x = $bigint.toWei(risk?.x ?? 0.2, 18);
+        const y = $bigint.toWei(risk?.y ?? 0.2, 18);
+        const k = $bigint.toWei(risk?.k ?? 0.3, 18);
+
+        if (requiresModel) {
+            const id = [risk?.x ?? 0.2, risk?.y ?? 0.2, risk?.k ?? 0.3].join('-');
+            const model = await this.common.ensureContract(RiskPremiumPower, {
+                id: `RiskPremiumPower-${id}`,
+                arguments: [ x, y, k ]
+            });
+            await this._configureRiskModel(accounting, model.address);
+            return;
+        }
 
         await this.ds.configure(accounting, {
             title: `Update Accounting Risk Premium Parameters`,
@@ -1018,6 +1025,18 @@ export abstract class DeploymentsBase<T extends ICdoDeploymentsBase = any> {
             },
             updater: async (accounting, value) => {
                 await accounting.$receipt().setRiskParameters(this.owner, x, y, k);
+            }
+        });
+    }
+
+    private async _configureRiskModel(accounting: Accounting, model: TEth.Address) {
+        await this.ds.configure(accounting, {
+            title: `Update Accounting Risk Premium Model`,
+            value: model,
+            current: accounting.riskPremiumModel(),
+            updater: async (accounting, value) => {
+                const acc = await this.getAccountByRole('UPDATER_STRAT_CONFIG_ROLE');
+                await accounting.$receipt().setRiskModel(acc, model);
             }
         });
     }

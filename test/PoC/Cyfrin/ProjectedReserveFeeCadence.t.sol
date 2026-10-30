@@ -13,6 +13,8 @@ import { Tranche } from "../../../contracts/tranches/Tranche.sol";
 import { DiscreteAccounting } from "../../../contracts/tranches/DiscreteAccounting.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { IRiskPremiumModel } from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IAccounting } from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import { IStrategy } from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import { ITranche } from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -27,6 +29,7 @@ interface IProjAccounting {
     function setReserveBps(uint256) external;
     function setUnderwriterFeeBps(uint256) external;
     function setRiskParameters(UD60x18, UD60x18, UD60x18) external;
+    function setRiskModel(IRiskPremiumModel) external;
     function nav() external view returns (uint256);
     function feeWatermarkNav() external view returns (uint256);
 }
@@ -55,6 +58,10 @@ abstract contract ProjectedReserveFeeCadenceBase is Test {
 
     function _deployAccounting(IAprPairFeed feed) internal virtual returns (address);
     function _strategyEpoch() internal pure virtual returns (uint256);
+
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal virtual {
+        accounting.setRiskParameters(x, y, k);
+    }
 
     bool conservative;
 
@@ -93,7 +100,7 @@ abstract contract ProjectedReserveFeeCadenceBase is Test {
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
         // flat 50% risk premium, so the Senior APR is the 5% target throughout
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        _setRiskPremium(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
         accounting.setReserveBps(RESERVE_BPS);
 
         _deposit(jrt, alice, JRT_DEP);
@@ -245,6 +252,11 @@ abstract contract ProjectedReserveFeeCadenceBase is Test {
 }
 
 abstract contract ConservativeProjectedReserveFeeCadenceBase is ProjectedReserveFeeCadenceBase {
+    /// @dev DYS and MTM take their risk premium from an external model only
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal override {
+        accounting.setRiskModel(new RiskPremiumPower(x, y, k));
+    }
+
     function test_ConservativeJuniorExit() public { _deployMarket(true); _measure(3, false); }
     function test_ConservativeSeniorExit() public { _deployMarket(true); _measure(4, false); }
 }

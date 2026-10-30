@@ -6,6 +6,8 @@ import { Accounting } from "../../../contracts/tranches/Accounting.sol";
 import { DiscreteAccounting } from "../../../contracts/tranches/DiscreteAccounting.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { IRiskPremiumModel } from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IStrataCDO } from "../../../contracts/tranches/interfaces/IStrataCDO.sol";
 import { IAprPairFeed } from "../../../contracts/tranches/interfaces/IAprPairFeed.sol";
@@ -13,6 +15,7 @@ import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 
 interface ITargetGainConfig {
     function setRiskParameters(UD60x18, UD60x18, UD60x18) external;
+    function setRiskModel(IRiskPremiumModel) external;
     function onAprChanged() external;
 }
 
@@ -23,8 +26,12 @@ abstract contract DepegTargetGainCapTests is ValuationInsuranceFixture {
         acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
         mockAprTarget = 100_000_000_000;
         mockAprBase = 0;
-        ITargetGainConfig(address(accounting)).setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        _setRiskPremium(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
         ITargetGainConfig(address(accounting)).onAprChanged();
+    }
+
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal virtual {
+        ITargetGainConfig(address(accounting)).setRiskParameters(x, y, k);
     }
 
     function _benchmark() internal view virtual returns (uint256) { return 0; }
@@ -110,36 +117,46 @@ contract DepegTargetGainCapDiscreteAccountingTest is DepegTargetGainCapTests {
     }
 }
 
-contract DepegTargetGainCapDYSAccountingTest is DepegTargetGainCapTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(new ERC1967Proxy(
+/// @dev DYS and MTM take their risk premium from an external model only
+abstract contract DepegTargetGainCapRiskModelTests is DepegTargetGainCapTests {
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal override {
+        ITargetGainConfig(address(accounting)).setRiskModel(new RiskPremiumPower(x, y, k));
+    }
+}
+
+contract DepegTargetGainCapDYSAccountingTest is DepegTargetGainCapRiskModelTests {
+    function _deployAccounting() internal override returns (address a) {
+        a = address(new ERC1967Proxy(
             address(new DYSAccounting(18, true, false, false, true, false)),
             abi.encodeWithSelector(DYSAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this)))
         ));
+        _setDefaultRiskModel(a);
     }
     function _benchmark() internal view override returns (uint256) {
         return DYSAccounting(address(accounting)).srtPnLBenchmark();
     }
 }
 
-contract DepegTargetGainCapMTMAccountingTest is DepegTargetGainCapTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(new ERC1967Proxy(
+contract DepegTargetGainCapMTMAccountingTest is DepegTargetGainCapRiskModelTests {
+    function _deployAccounting() internal override returns (address a) {
+        a = address(new ERC1967Proxy(
             address(new MTMAccounting(18, true, false, false, true, false, false)),
             abi.encodeWithSelector(MTMAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this)))
         ));
+        _setDefaultRiskModel(a);
     }
     function _benchmark() internal view override returns (uint256) {
         return MTMAccounting(address(accounting)).srtPnLBenchmark();
     }
 }
 
-contract DepegTargetGainCapMTMLiveTest is DepegTargetGainCapTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(new ERC1967Proxy(
+contract DepegTargetGainCapMTMLiveTest is DepegTargetGainCapRiskModelTests {
+    function _deployAccounting() internal override returns (address a) {
+        a = address(new ERC1967Proxy(
             address(new MTMAccounting(18, true, true, false, true, false, true)),
             abi.encodeWithSelector(MTMAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this)))
         ));
+        _setDefaultRiskModel(a);
     }
     function _benchmark() internal view override returns (uint256) {
         return MTMAccounting(address(accounting)).srtPnLBenchmark();

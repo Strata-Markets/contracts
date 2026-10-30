@@ -91,8 +91,8 @@ abstract contract ProjectionCoverageResyncTests is DepegNavLossFixture {
 }
 
 contract DYSProjectionCoverageResyncTest is ProjectionCoverageResyncTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(
+    function _deployAccounting() internal override returns (address a) {
+        a = address(
             new ERC1967Proxy(
                 address(new DYSAccounting(18, false, true, false, false, true)),
                 abi.encodeCall(
@@ -106,6 +106,7 @@ contract DYSProjectionCoverageResyncTest is ProjectionCoverageResyncTests {
                 )
             )
         );
+        _setDefaultRiskModel(a);
     }
 
     function _openProjection() internal override {
@@ -117,8 +118,8 @@ contract DYSProjectionCoverageResyncTest is ProjectionCoverageResyncTests {
 contract MTMProjectionCoverageResyncTest is ProjectionCoverageResyncTests {
     uint256 liveNav;
 
-    function _deployAccounting() internal override returns (address) {
-        return address(
+    function _deployAccounting() internal override returns (address a) {
+        a = address(
             new ERC1967Proxy(
                 address(new MTMAccounting(18, false, true, false, false, true, true)),
                 abi.encodeCall(
@@ -132,6 +133,7 @@ contract MTMProjectionCoverageResyncTest is ProjectionCoverageResyncTests {
                 )
             )
         );
+        _setDefaultRiskModel(a);
     }
 
     function totalStrategyAssetsSnapshot(uint256, uint256)

@@ -7,6 +7,8 @@ import { Accounting } from "../../contracts/tranches/Accounting.sol";
 import { DiscreteAccounting } from "../../contracts/tranches/DiscreteAccounting.sol";
 import { DYSAccounting } from "../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../contracts/tranches/MTMAccounting.sol";
+import { RiskPremiumPower } from "../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
+import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { AccessControlManager } from "../../contracts/governance/AccessControlManager.sol";
 import { IInsurancePool } from "../../contracts/tranches/symbiotic/interfaces/IInsurancePool.sol";
 import { MockInsurancePool } from "./mocks/MockInsurancePool.sol";
@@ -68,6 +70,13 @@ contract PerformanceFeeSuspensionTest is Test {
                 address(this), address(acm), address(this), address(0)
             )
         )));
+        if (variant >= 2) {
+            // DYS and MTM have no built-in risk premium; install the legacy 0.2/0.2/0.3 power model
+            acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
+            DYSAccounting(address(accounting)).setRiskModel(
+                new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18))
+            );
+        }
         accounting.setReserveBps(0.1e18);
         MockInsurancePool pool = new MockInsurancePool();
         pool.setCapacity(1_000_000e18);

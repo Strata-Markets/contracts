@@ -12,6 +12,7 @@ import { IAccounting } from "../tranches/interfaces/IAccounting.sol";
 import { ITranche } from "../tranches/interfaces/ITranche.sol";
 import { UD60x18, pow, mul } from "@prb/math/src/ud60x18/Math.sol";
 import { UD60x18Ext } from "../tranches/utils/UD60x18Ext.sol";
+import { IRiskPremiumModel } from "../tranches/accounting/premium/IRiskPremiumModel.sol";
 
 /**
  * @title Strata CDO Contract Helper
@@ -104,13 +105,9 @@ contract CDOLens is OwnableUpgradeable {
 
         (uint256 jrtNav, uint256 srtNav, ) = accounting.totalAssets();
 
-        UD60x18 riskX = accounting.riskX();
-        UD60x18 riskY = accounting.riskY();
-        UD60x18 riskK = accounting.riskK();
-
         UD60x18 tvlRatioSrt = UD60x18.wrap(srtNav == 0 ? 0 : (srtNav * 1e18 / (srtNav + jrtNav)));
         UD60x18 tvlRatioJrt = UD60x18.wrap(jrtNav == 0 ? 1 : (jrtNav * 1e18 / (srtNav + jrtNav)));
-        UD60x18 risk = calculateRiskPremiumInner(riskX, riskY, riskK, tvlRatioSrt);
+        UD60x18 risk = calculateRiskPremium(accounting, tvlRatioSrt);
 
 
         UD60x18 aprSrt1 = mul(UD60x18.wrap(uint256(aprBase)), UD60x18.wrap(1e18) - risk);
@@ -263,6 +260,17 @@ contract CDOLens is OwnableUpgradeable {
     }
 
 
+    /// @dev Uses the accounting's external risk model when set, otherwise the legacy x/y/k parameters.
+    ///      Accounting versions without `riskPremiumModel()` also fall back to the legacy parameters.
+    function calculateRiskPremium (IAccountingApi accounting, UD60x18 tvlRatioSrt) internal view returns (UD60x18) {
+        try accounting.riskPremiumModel() returns (IRiskPremiumModel model) {
+            if (address(model) != address(0)) {
+                return model.riskPremium(tvlRatioSrt);
+            }
+        } catch {}
+        return calculateRiskPremiumInner(accounting.riskX(), accounting.riskY(), accounting.riskK(), tvlRatioSrt);
+    }
+
     function calculateRiskPremiumInner (UD60x18 x, UD60x18 y, UD60x18 k, UD60x18 tvlRatioSrt) internal pure returns (UD60x18){
         // RiskPremium = x + y * TVL_ratio_sr ^ k
         UD60x18 riskPremium = x + y * pow(tvlRatioSrt, k);
@@ -276,6 +284,7 @@ interface IAccountingApi is IAccounting {
     function riskX () external view returns (UD60x18);
     function riskY () external view returns (UD60x18);
     function riskK () external view returns (UD60x18);
+    function riskPremiumModel () external view returns (IRiskPremiumModel);
     function reserveBps () external view returns (uint256);
 }
 interface IStrataCDOApi is IStrataCDO {

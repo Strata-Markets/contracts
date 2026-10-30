@@ -7,6 +7,8 @@ import {Accounting} from '../../contracts/tranches/Accounting.sol';
 import {DiscreteAccounting} from '../../contracts/tranches/DiscreteAccounting.sol';
 import {DYSAccounting} from '../../contracts/tranches/DYSAccounting.sol';
 import {MTMAccounting} from '../../contracts/tranches/MTMAccounting.sol';
+import {RiskPremiumPower} from '../../contracts/tranches/accounting/premium/RiskPremiumPower.sol';
+import {UD60x18} from '@prb/math/src/ud60x18/ValueType.sol';
 import {MockInsurancePool} from './mocks/MockInsurancePool.sol';
 
 import {ERC1967Proxy} from '@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol';
@@ -62,6 +64,8 @@ contract ValuationFundDYSAccounting is DYSAccounting {
     function seed(MockInsurancePool pool, bool selfFunded) external {
         cdo = IStrataCDO(msg.sender);
         insurancePool = pool;
+        // DYS has no built-in risk premium; the legacy 0.2/0.2/0.3 power model
+        riskPremiumModel = new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18));
         jrtBaseNav = 1000e18;
         jrtNavProjected = 1000e18;
         srtBaseNav = 1000e18;
@@ -79,6 +83,8 @@ contract ValuationFundMTMAccounting is MTMAccounting {
     function seed(MockInsurancePool pool, bool selfFunded) external {
         cdo = IStrataCDO(msg.sender);
         insurancePool = pool;
+        // MTM has no built-in risk premium; the legacy 0.2/0.2/0.3 power model
+        riskPremiumModel = new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18));
         jrtBaseNav = 1000e18;
         jrtNavProjected = 1000e18;
         srtBaseNav = 1000e18;

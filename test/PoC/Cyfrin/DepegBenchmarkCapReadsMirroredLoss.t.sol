@@ -6,6 +6,7 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { AccessControlManager } from "../../../contracts/governance/AccessControlManager.sol";
 import { StrataCDO } from "../../../contracts/tranches/StrataCDO.sol";
 import { Tranche } from "../../../contracts/tranches/Tranche.sol";
@@ -81,7 +82,7 @@ contract DepegBenchmarkCapReadsMirroredLossTest is Test {
         cdo.configure(IAccounting(address(accounting)), IStrategy(address(mtmStrategy)), ITranche(address(jrt)), ITranche(address(srt)));
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
 
         // Symbiotic connected, capacity unavailable during the epoch, zero underwriter fee, zero reserve
         pool = new MockInsurancePool();

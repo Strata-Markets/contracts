@@ -8,6 +8,7 @@ import { $bigint } from 'dequanto/utils/$bigint';
 import { $date } from 'dequanto/utils/$date';
 import { $require } from 'dequanto/utils/$require';
 import { TAccountingFactory } from './TAccountingFactory';
+import { $accounting } from '../../utils/$accounting';
 
 export namespace dys {
 
@@ -130,8 +131,7 @@ export namespace dys {
                 useJuniorCoversPaidSrtProjection: params.useJuniorCoversPaidSrtProjection
             }
         });
-        await dysAccounting.storage.$set('riskX', .5e18);
-        await dysAccounting.storage.$set('riskY', 0);
+        await $accounting.setRiskModelStorage(dysAccounting, .5, 0);
 
         accounting = dysAccounting as any as DYSAccounting;
     }

@@ -16,6 +16,8 @@ import { Accounting } from "../../../contracts/tranches/Accounting.sol";
 import { DiscreteAccounting } from "../../../contracts/tranches/DiscreteAccounting.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { IRiskPremiumModel } from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IAccounting } from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import { IStrategy } from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import { ITranche } from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -41,6 +43,7 @@ interface ISelfFundAccounting {
     function reserveNav() external view returns (uint256);
     function setReserveBps(uint256 bps) external;
     function setRiskParameters(UD60x18, UD60x18, UD60x18) external;
+    function setRiskModel(IRiskPremiumModel) external;
     function onAprChanged() external;
 }
 
@@ -140,8 +143,12 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
         cdo.setValuationKeeper(keeper);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        _setRiskPremium(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
         accounting.setReserveBps(0.1e18);
+    }
+
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal virtual {
+        accounting.setRiskParameters(x, y, k);
     }
 
     function _deployInsurance() internal {
@@ -313,6 +320,10 @@ contract StaleSelfFundResyncReslashesCreditDYSTest is StaleSelfFundResyncReslash
         ));
     }
 
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal override {
+        accounting.setRiskModel(new RiskPremiumPower(x, y, k));
+    }
+
     function _epochDuration() internal pure override returns (uint256) {
         // MockMTMStrategy returns its fresh NAV while inside this window
         return 3650 days;
@@ -327,6 +338,10 @@ contract StaleSelfFundResyncReslashesCreditMTMTest is StaleSelfFundResyncReslash
                 MTMAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(cdo)), IAprPairFeed(address(feed))
             )
         ));
+    }
+
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal override {
+        accounting.setRiskModel(new RiskPremiumPower(x, y, k));
     }
 
     function _epochDuration() internal pure override returns (uint256) {

@@ -7,6 +7,8 @@ import { Accounting } from "../../../contracts/tranches/Accounting.sol";
 import { DiscreteAccounting } from "../../../contracts/tranches/DiscreteAccounting.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
+import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { IStrataCDO } from "../../../contracts/tranches/interfaces/IStrataCDO.sol";
 import { IAprPairFeed } from "../../../contracts/tranches/interfaces/IAprPairFeed.sol";
 import { AccessControlManager } from "../../../contracts/governance/AccessControlManager.sol";
@@ -42,6 +44,12 @@ abstract contract UnderwriterFeePayoutSkipsWatermarkTests is Test {
     }
 
     function _deployAccounting() internal virtual returns (address);
+
+    /// @dev DYS and MTM have no built-in risk premium; installs the legacy 0.2/0.2/0.3 power model
+    function _setDefaultRiskModel(address a) internal {
+        acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
+        DYSAccounting(a).setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18)));
+    }
 
     function setUp() public {
         vm.warp(1_790_000_000);
@@ -106,6 +114,7 @@ contract UnderwriterFeePayoutSkipsWatermarkDYSTest is UnderwriterFeePayoutSkipsW
         a = address(new ERC1967Proxy(address(new DYSAccounting(18, false, false, false, false, false)), abi.encodeWithSelector(
             DYSAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this))
         )));
+        _setDefaultRiskModel(a);
     }
 }
 
@@ -114,5 +123,6 @@ contract UnderwriterFeePayoutSkipsWatermarkMTMTest is UnderwriterFeePayoutSkipsW
         a = address(new ERC1967Proxy(address(new MTMAccounting(18, false, false, false, false, false, false)), abi.encodeWithSelector(
             MTMAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this))
         )));
+        _setDefaultRiskModel(a);
     }
 }

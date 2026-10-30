@@ -10,6 +10,7 @@ import {StrataCDO} from "../../../contracts/tranches/StrataCDO.sol";
 import {Tranche} from "../../../contracts/tranches/Tranche.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
+import {RiskPremiumPower} from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import {IAccounting} from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import {IStrategy} from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import {ITranche} from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -67,6 +68,7 @@ contract FreshRateAccountingInitializationTest is Test {
         // The mock exposes fresh NAV through different scheduling rules for DYS and MTM.
         strategy.setEpochDuration(mode == 0 ? 9 days : 1 days);
         cdo.configure(IAccounting(address(accounting)), IStrategy(address(strategy)), ITranche(address(junior)), ITranche(address(senior)));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18)));
         cdo.setActionStates(address(0), true, true);
     }
 
@@ -87,7 +89,7 @@ contract FreshRateAccountingInitializationTest is Test {
         assertEq(accounting.strategyRate(), 0, "deposits do not seed the rate");
         assertEq(accounting.epochStart(), initialEpochStart);
         _deposit(senior, 500e18);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         assertEq(accounting.srtBaseNav(), 500e18);
 
         vm.warp(block.timestamp + 1 days + 1);
@@ -112,7 +114,7 @@ contract FreshRateAccountingInitializationTest is Test {
         _deposit(junior, 500e18);
         _deposit(senior, 500e18);
         assertEq(accounting.strategyRate(), 0);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         vm.warp(block.timestamp + 1 days + 1);
         strategy.setRate(1.5e18);
         strategy.setTotalAssets(1100e18);

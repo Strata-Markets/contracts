@@ -81,15 +81,17 @@ contract FundedSurplusReuseDiscreteAccountingTest is FundedSurplusReuseTests {
 }
 
 contract FundedSurplusReuseDYSAccountingTest is FundedSurplusReuseTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(new ERC1967Proxy(address(new DYSAccounting(18, false, false, false, true, false)),
+    function _deployAccounting() internal override returns (address a) {
+        a = address(new ERC1967Proxy(address(new DYSAccounting(18, false, false, false, true, false)),
             abi.encodeWithSelector(DYSAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this)))));
+        _setDefaultRiskModel(a);
     }
 }
 
 contract FundedSurplusReuseMTMAccountingTest is FundedSurplusReuseTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(new ERC1967Proxy(address(new MTMAccounting(18, false, true, false, true, true, true)),
+    function _deployAccounting() internal override returns (address a) {
+        a = address(new ERC1967Proxy(address(new MTMAccounting(18, false, true, false, true, true, true)),
             abi.encodeWithSelector(MTMAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this)))));
+        _setDefaultRiskModel(a);
     }
 }

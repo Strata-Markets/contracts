@@ -11,6 +11,7 @@ import { AccessControlManager } from "../../../contracts/governance/AccessContro
 import { StrataCDO } from "../../../contracts/tranches/StrataCDO.sol";
 import { Tranche } from "../../../contracts/tranches/Tranche.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IAccounting } from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import { IStrategy } from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import { ITranche } from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -89,7 +90,7 @@ contract MTMLossJuniorRatioGuardTest is Test {
         cdo.configure(IAccounting(address(accounting)), IStrategy(address(mtmStrategy)), ITranche(address(jrt)), ITranche(address(srt)));
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
 
         _deposit(jrt, alice, JRT_DEP);
         _deposit(srt, bob, SRT_DEP);

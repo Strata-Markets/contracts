@@ -8,6 +8,10 @@ import { DiscreteAccounting } from "../../contracts/tranches/DiscreteAccounting.
 import { DYSAccounting } from "../../contracts/tranches/DYSAccounting.sol";
 import { IInsurancePool } from "../../contracts/tranches/symbiotic/interfaces/IInsurancePool.sol";
 import { MTMAccounting } from "../../contracts/tranches/MTMAccounting.sol";
+import { RiskPremiumPower } from "../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
+import { IStrataCDO } from "../../contracts/tranches/interfaces/IStrataCDO.sol";
+import { IAprPairFeed } from "../../contracts/tranches/interfaces/IAprPairFeed.sol";
+import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { AccessControlManager } from "../../contracts/governance/AccessControlManager.sol";
 import { MockInsurancePool } from "./mocks/MockInsurancePool.sol";
 
@@ -31,6 +35,12 @@ interface IProRataAccounting {
 
 contract MTMRedemptionHarness is MTMAccounting {
     constructor(bool conservative) MTMAccounting(18, false, false, false, false, conservative, false) {}
+
+    /// @dev MTM has no built-in risk premium; installs the legacy 0.2/0.2/0.3 power model
+    function initialize(address owner_, address acm_, IStrataCDO cdo_, IAprPairFeed aprPairFeed_) public override {
+        super.initialize(owner_, acm_, cdo_, aprPairFeed_);
+        riskPremiumModel = new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18));
+    }
 
     function seed(uint256 junior, uint256 senior, uint256 claim, uint256 credit,
         uint256 fundedGross, uint256 fund, uint256 projection, uint128 price) external
@@ -90,6 +100,12 @@ contract DiscreteAccountingRedemptionHarness is DiscreteAccounting {
 
 contract DYSAccountingRedemptionHarness is DYSAccounting {
     constructor(bool conservative) DYSAccounting(18, false, false, false, false, conservative) {}
+
+    /// @dev DYS has no built-in risk premium; installs the legacy 0.2/0.2/0.3 power model
+    function initialize(address owner_, address acm_, IStrataCDO cdo_, IAprPairFeed aprPairFeed_) public override {
+        super.initialize(owner_, acm_, cdo_, aprPairFeed_);
+        riskPremiumModel = new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18));
+    }
 
     function seed(uint256 junior, uint256 senior, uint256 claim, uint256 credit,
         uint256 fundedGross, uint256 fund, uint256 projection, uint128 price) external

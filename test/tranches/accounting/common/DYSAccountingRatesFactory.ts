@@ -2,6 +2,7 @@ import { UTest } from 'atma-utest';
 import { $require } from 'dequanto/utils/$require';
 import { dys } from './dys';
 import { TAccountingFactory } from './TAccountingFactory';
+import { $accounting } from '../../utils/$accounting';
 
 
 
@@ -445,9 +446,9 @@ export async function DYSAccountingRatesFactory(factory: TAccountingFactory) {
         },
         async 'floor window per day at -1% floor for senior and -2% for underlying protocol'() {
             // Disable RiskPremium for this floor test so the Senior loss matches the raw rate loss.
-            // With the default riskX=50%, a -2% daily rate loss becomes only -1% for Senior,
+            // With the default 50% premium model, a -2% daily rate loss becomes only -1% for Senior,
             // because srtFactor = 1 - riskPremium = 50%.
-            await accounting.storage.$set('riskX', 0);
+            await $accounting.setRiskModelStorage(accounting, 0, 0);
 
             await accounting.$receipt().setFloorRate(deployer, BigInt(0.01e18));
             await deposit(500, 1000);

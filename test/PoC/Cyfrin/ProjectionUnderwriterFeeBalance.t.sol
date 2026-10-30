@@ -4,6 +4,8 @@ pragma solidity ^0.8.28;
 import {Test} from "forge-std/Test.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
+import {RiskPremiumPower} from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
+import {UD60x18} from "@prb/math/src/ud60x18/ValueType.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 
 import {DiscreteAccounting} from "../../../contracts/tranches/DiscreteAccounting.sol";
@@ -32,6 +34,9 @@ abstract contract ProjectionUnderwriterFeeTests is Test {
 
     function _implementation() internal virtual returns (address);
     function _booksProjectionFee() internal pure virtual returns (bool);
+
+    /// @dev DiscreteAccounting keeps its built-in default risk premium
+    function _setDefaultRiskModel(AccessControlManager acm) internal virtual {}
 
     function totalStrategyAssetsSnapshot(uint256, uint256)
         external
@@ -63,6 +68,7 @@ abstract contract ProjectionUnderwriterFeeTests is Test {
                 )
             )
         );
+        _setDefaultRiskModel(acm);
 
         // 20% underwriter fee; risk premium is the default ~40% at ratio 1, so ~8% of Senior gain
         accounting.setUnderwriterFeeBps(0.2e18);
@@ -139,6 +145,14 @@ contract DiscreteProjectionUnderwriterFeeBalanceTest is ProjectionUnderwriterFee
 }
 
 abstract contract DeferredProjectionUnderwriterFeeTests is ProjectionUnderwriterFeeTests {
+    /// @dev DYS and MTM have no built-in risk premium; installs the legacy 0.2/0.2/0.3 power model
+    function _setDefaultRiskModel(AccessControlManager acm) internal override {
+        acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
+        DYSAccounting(address(accounting)).setRiskModel(
+            new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18))
+        );
+    }
+
     function _assertJuniorProjection() internal view override {
         assertGe(
             accounting.jrtNavProjected(), ONE_ASSET, "gross debit preserves projected Junior floor"
