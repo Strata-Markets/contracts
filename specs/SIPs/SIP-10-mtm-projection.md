@@ -306,4 +306,6 @@ Implementations MUST preserve the following:
 
 `MTMAccounting` is intended as an accounting implementation alongside existing DYS accounting. Existing strategies that only support settled NAV MAY use the default `Strategy.totalAssetsSnapshot()` implementation.
 
+The default snapshot reports the settled NAV for both observations when the supplied accounting anchor is at or after the current block timestamp. This avoids conflicting equal-time observations after same-block flows, including rounding differences. A distinct live NAV change during that interval, including a genuine gain or loss, is deferred until the timestamp advances. Strategies requiring different observation timing MUST override the default snapshot with consistent NAVs and timestamps; MTM accounting continues to reject inconsistent snapshots.
+
 Deployments SHOULD enable `useMTMProjection` only for strategies that can provide a meaningful live MTM NAV. Deployments SHOULD enable `useConservativePrice` when deposits and redemptions must be protected from stale epoch prices during open MTM epochs.
