@@ -3,9 +3,10 @@ pragma solidity ^0.8.28;
 
 import { ICDOComponent } from "./ICDOComponent.sol";
 import { IAprPairFeedListener } from "./IAprPairFeed.sol";
+import { IAccountingState } from "./IAccountingState.sol";
 import {IInsurancePool} from "../symbiotic/interfaces/IInsurancePool.sol";
 
-interface IAccounting is ICDOComponent, IAprPairFeedListener {
+interface IAccounting is ICDOComponent, IAprPairFeedListener, IAccountingState {
 
     event InsuranceClaimWrittenDown(uint256 amount);
 
@@ -41,10 +42,7 @@ interface IAccounting is ICDOComponent, IAprPairFeedListener {
         uint256 srtNavSettled
     );
     function totalReserve () external view returns (uint256);
-    /// @notice Settled strategy NAV, excluding insurance claims.
-    function nav () external view returns (uint256);
     function totalUnderwriterFeeNav () external view returns (uint256);
-    function valuationPrice () external view returns (uint128);
     function reduceReserve (uint256 amount, uint256 jrtAmountIn, uint256 srtAmountIn) external;
     function reduceUnderwriterFee (uint256 amount) external;
     function accrueFee(bool isJrt, uint256 amount) external;
@@ -56,5 +54,4 @@ interface IAccounting is ICDOComponent, IAprPairFeedListener {
     function setValuationPrice(uint128 valuationPrice) external returns (bool valuationLossEntered);
     function setInsurancePool(IInsurancePool pool) external;
     function setUnderwriterFeeBps(uint256 fee) external;
-    function underwriterFeeBps() external view returns (uint256);
 }
