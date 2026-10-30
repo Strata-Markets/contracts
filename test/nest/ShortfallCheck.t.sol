@@ -23,6 +23,28 @@ contract ShortfallCheckTest is NestOpalDeploy {
         vm.stopPrank();
     }
 
+    function test_ThresholdSetterUsesStoredPrice() public {
+        uint256 storedNav = 500 * ONE_USDC;
+        vm.mockCall(address(accounting), abi.encodeWithSignature("totalAssetsT0()"), abi.encode(storedNav, 0, 0));
+        uint256 storedPrice = storedNav * 10 ** (36 - cdo.baseAssetDecimals()) / jrtVault.totalSupply();
+        uint256 livePrice = cdo.pricePerShare(address(jrtVault));
+        assertGt(livePrice, storedPrice);
+        vm.expectRevert("ShortfallPriceTooLarge");
+        vm.prank(owner);
+        cdo.setJrtShortfallPausePrice((livePrice + storedPrice) / 2);
+        vm.prank(owner);
+        cdo.setJrtShortfallPausePrice(storedPrice - 1);
+        assertEq(cdo.jrtShortfallPausePrice(), storedPrice - 1);
+    }
+
+    function test_ThresholdSetterRejectsEquality() public {
+        (uint256 storedNav,,) = accounting.totalAssetsT0();
+        uint256 storedPrice = storedNav * 10 ** (36 - cdo.baseAssetDecimals()) / jrtVault.totalSupply();
+        vm.expectRevert("ShortfallPriceTooLarge");
+        vm.prank(owner);
+        cdo.setJrtShortfallPausePrice(storedPrice);
+    }
+
     function _lose() internal {
         nestAccountant.setExchangeRate(INITIAL_RATE * 70 / 100);
     }

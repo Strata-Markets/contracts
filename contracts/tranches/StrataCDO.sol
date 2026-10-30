@@ -694,10 +694,12 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         emit ExitFeesSet(feeJrt, feeSrt);
     }
 
-    /// @notice Sets the JRT shortfall price to automatically pause the deposits, when the price falls below this price
+    /// @notice Sets the Junior PPS threshold enforced after deposits and Junior withdrawals.
     function setJrtShortfallPausePrice (uint256 jrtShortfallPausePrice_) external onlyRole(PAUSER_ROLE) {
-        // If the shortfall pause price is above current price, deposits must be paused manually by the Pauser
-        require(jrtShortfallPausePrice_ <= pricePerShare(address(jrtVault)), "ShortfallPriceTooLarge");
+        // Validate against the same stored price as shortfallCheck, which rejects equality.
+        (uint256 jrtNav,,) = accounting.totalAssetsT0();
+        uint256 jrtPrice = calculatePricePerShare(jrtNav, jrtVault.totalSupply(), baseAssetDecimals);
+        require(jrtShortfallPausePrice_ < jrtPrice, "ShortfallPriceTooLarge");
         jrtShortfallPausePrice = jrtShortfallPausePrice_;
         emit JrtShortfallPausePriceSet(jrtShortfallPausePrice_);
     }
