@@ -23,6 +23,7 @@ import { IAccounting } from "./interfaces/IAccounting.sol";
 import { ISharesCooldown } from "./interfaces/cooldown/ISharesCooldown.sol";
 import { IInsuranceMiddleware } from "./symbiotic/interfaces/IInsuranceMiddleware.sol";
 import { IInsuranceVault } from "./symbiotic/interfaces/IInsuranceVault.sol";
+import { IStrataAccounting } from "./symbiotic/interfaces/IStrataAccounting.sol";
 import { RoundingGuard } from "./utils/RoundingGuard.sol";
 
 
@@ -628,9 +629,15 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
             accounting.setUnderwriterFeeBps(0);
             emit UnderwriterFeePercentageChanged(0);
         }
+        // Checkpoint through the old pool while the CDO still exposes the old vault and middleware.
+        accounting.setInsurancePool(insuranceMiddleware_);
+        require(
+            IStrataAccounting(address(accounting)).insuranceAmount() == 0 &&
+            (address(insuranceVault) == address(0) || insuranceVault.fundedCoverage() == 0),
+            "OpenInsuranceObligations"
+        );
         insuranceMiddleware = insuranceMiddleware_;
         insuranceVault = insuranceVault_;
-        accounting.setInsurancePool(insuranceMiddleware_);
         emit InsuranceConfigSet(address(insuranceMiddleware_), address(insuranceVault_));
     }
 
