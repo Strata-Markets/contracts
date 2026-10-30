@@ -215,6 +215,37 @@ contract InsuranceMiddlewareTest is Test {
         assertTrue(enabled);
     }
 
+    function test_setMarket_rejectsZeroAddresses() public {
+        vm.startPrank(owner);
+        vm.expectRevert("InvalidMarket");
+        middleware.setMarket(address(0), accounting, address(usde), 0, true);
+        vm.expectRevert("InvalidMarket");
+        middleware.setMarket(cdo, IStrataAccounting(address(0)), address(usde), 0, false);
+        vm.expectRevert("InvalidMarket");
+        middleware.setMarket(cdo, accounting, address(0), 0, true);
+        vm.stopPrank();
+        (IStrataAccounting acc, address baseAsset,,, bool enabled,) = middleware.markets(cdo);
+        assertEq(address(acc), address(accounting));
+        assertEq(baseAsset, address(usde));
+        assertTrue(enabled);
+    }
+
+    function test_setMarket_invalidRegistrationThenRepairDoesNotDuplicate() public {
+        address cdo2 = address(new MockStrataCDO(accounting));
+        vm.startPrank(owner);
+        vm.expectRevert("InvalidMarket");
+        middleware.setMarket(cdo2, IStrataAccounting(address(0)), address(usde), 0, true);
+        middleware.setMarket(cdo2, accounting, address(usde), 0, true);
+        middleware.setMarket(cdo2, accounting, address(usde), 1000, false);
+        middleware.setMarket(cdo2, accounting, address(usde), 0, true);
+        vm.stopPrank();
+        assertEq(middleware.marketCdos(0), cdo);
+        assertEq(middleware.marketCdos(1), cdo2);
+        vm.expectRevert();
+        middleware.marketCdos(2);
+        assertEq(middleware.request(cdo, 100e18), 100e18);
+    }
+
     function test_setMarket_onlyOwner() public {
         vm.expectRevert(abi.encodeWithSelector(Ownable.OwnableUnauthorizedAccount.selector, stranger));
         vm.prank(stranger);

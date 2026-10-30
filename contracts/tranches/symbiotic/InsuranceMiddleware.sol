@@ -191,6 +191,10 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         bool enabled
     ) external onlyOwner {
         require(bufferBps <= MAX_BUFFER_BPS, "InvalidBuffer");
+        require(
+            cdo != address(0) && address(accounting) != address(0) && baseAsset != address(0),
+            "InvalidMarket"
+        );
         TMarket storage market = markets[cdo];
         if (address(market.accounting) == address(0)) {
             marketCdos.push(cdo);
