@@ -159,6 +159,42 @@ after an off-chain swap, `payCoverage` reverts while a claim is unfunded. The ke
 to run `updateAccounting` itself, finalize the Symbiotic claim, swap, and fund the vault before
 Senior redemptions clear.
 
+### Funding shortfalls after the collateral swap
+
+Slashing values collateral at slash time and includes the configured `bufferBps` cushion.
+If collateral prices fall or swap slippage exceeds that cushion before the proceeds are funded,
+the vault can receive less than the outstanding claim. This market risk is borne by the protocol:
+the reserve manager is responsible for arranging and funding the shortfall, rather than automatically
+reducing Senior entitlements or charging underwriters again for the same claim.
+
+The operator must:
+
+1. Keep Senior withdrawals paused while finalizing the slash, swapping collateral, and funding coverage.
+2. Fund the proceeds through `StrataCDO.fundInsuranceClaim` and compare `InsuranceVault.fundedCoverage`
+   with the whole current `Accounting.insuranceAmount`, converted using the current valuation price
+   and token decimals. Checkpoint accounting before assessing the outstanding claim.
+3. Promptly top up any shortfall through `StrataCDO.fundInsuranceClaim`, using the vault's current
+   coverage token and an account with `RESERVE_MANAGER_ROLE`. A direct token transfer to the vault
+   does not update `fundedCoverage`; funding must be recorded through the CDO.
+4. Reopen Senior withdrawals only after recorded funding covers the whole outstanding claim.
+   Recheck coverage after further claim or valuation-price changes.
+
+Partial funding is accepted without automatically writing down the claim. `payCoverage` pays each
+requested slice in full or reverts; it does not require the whole claim to be funded first. If
+withdrawals remain open, early exits can consume available coverage and later exits can revert,
+including their strategy-funded portion. Pausing during funding is an operator responsibility,
+not an automatic consequence of an underfunded vault.
+
+For example, a claim of 801 backed by 480.6 coverage tokens at par has a 320.4 shortfall. An exit
+consuming half the claim receives 400.5, leaving only 80.1 for later exits. Funding the missing
+320.4 restores backing for the remaining claim.
+
+If further funding is unavailable, the separate `writeDownInsuranceClaim` procedure below can
+recognize an eligible unrecoverable shortfall as a Senior loss. This is an explicit loss-acceptance
+decision, not the normal swap-shortfall policy. Perform it before reopening withdrawals so early
+exits do not avoid losses subsequently assigned to remaining Seniors. Valuation-only claims are
+not eligible for a principal write-down.
+
 ## Valuation coverage: the `srtInsuranceFundNav` model
 
 A base-asset de-peg is a different kind of loss. No tokens leave, so `nav` does not move  -  the loss
@@ -196,6 +232,8 @@ sizing Senior's need, so compensation is not itself compensated.
 A realized-loss claim remains denominated in base assets. If it was funded during a depeg,
 a partial or full recovery can leave the vault short of coverage tokens. Before reopening withdrawals,
 the operator should fund all available slash proceeds and assess whether more funding can be obtained.
+The same procedure can apply to an eligible unrecoverable shortfall after a collateral swap, once
+the protocol has established that the required top-up cannot be funded.
 
 If the remainder is unrecoverable, an account with `RESERVE_MANAGER_ROLE` can call
 `StrataCDO.writeDownInsuranceClaim(maxPrincipalLoss)`. The argument is the maximum accepted permanent
