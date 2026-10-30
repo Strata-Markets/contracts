@@ -35,3 +35,23 @@ The zero-rate interval intentionally suspends target accrual. It does not stop t
 Use `initializeV3` only if the proxy's initialization version permits it and the V3 migration has not already run. Verify the deployed predecessor's storage layout, migration bitmap, target implementation settings, and rate-mode initialization for the specific upgrade. If V3 has already been initialized, use an explicitly reviewed migration rather than assuming it will run again.
 
 This procedure addresses Cyfrin #74 untracked Discrete projection; it is not a substitute for validating the complete upgrade against the deployed state.
+
+## Temporary terminal Junior dust recovery
+
+`contracts/tranches/accounting/recovery` contains a recovery subclass for each accounting variant. Normal implementations do not expose `settleTerminalJuniorDust`. The subclasses add no storage slots; their constructor parameters must match the original implementation's decimals and immutable accounting flags. Use the same accounting version and verify storage compatibility and deployed bytecode size before deploying the recovery implementation.
+
+This recovery handles a terminal de-peg state, including strategy gains received afterwards. Current and applicable settled strategy NAV must agree, reserve and underwriter fees must be zero, and the entire insurance claim must be valuation credit. It checkpoints pending PnL without first unwinding valuation credit. The unsupported amount is valuation credit minus Senior NAV: it must be positive and no larger than one asset. Junior NAV minus that amount must equal the current strategy NAV. Recovery subtracts only that unsupported amount from Junior NAV, valuation credit and the insurance claim, preserving recovered strategy assets and synchronizing middleware backing. It does not transfer collateral or forgive a realized-loss claim.
+
+For example, Junior NAV 1, Senior NAV 499, and claim/valuation credit 500 become Junior NAV 0, Senior NAV 499, and claim/credit 499. A later price recovery can unwind the credit without subtracting more than Senior holds. If the strategy has meanwhile recovered 1 asset, Junior NAV 2 becomes 1 instead of zero; the same 1 asset of unsupported credit is removed. Both an already-recorded gain and a gain checkpointed by recovery are supported. If live and settled strategy NAV differ, wait for a consistent snapshot before recovering.
+
+### Atomic owner procedure
+
+Deploy the matching recovery implementation, then execute these three calls in a single reverting batch from the accounting owner (for example, its Safe), which must also control the ProxyAdmin:
+
+1. `ProxyAdmin.upgradeAndCall(accountingProxy, recoveryImplementation, "")`.
+2. Call `accountingProxy.settleTerminalJuniorDust()` directly from the accounting owner.
+3. `ProxyAdmin.upgradeAndCall(accountingProxy, originalImplementation, "")`.
+
+Do not run an initializer. The recovery call uses `onlyOwner`; putting it in the upgrade calldata would make ProxyAdmin the caller and fail authorization. The batch must revert as a whole if any call fails, including restoration of the original implementation. Do not use a batch executor that changes the recovery caller away from the accounting owner or permits individual failures.
+
+Verify `TerminalJuniorDustSettled`, the resulting NAV/claim identity, and restoration of the original implementation. The operation does not reopen the market, burn shares, or reset an empty tranche for new deposits. Existing funded surplus and unneeded slashed collateral remain subject to the separate surplus/return procedures.
