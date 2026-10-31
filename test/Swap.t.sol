@@ -208,8 +208,8 @@ contract CDOTest is Test {
         SafeERC20.forceApprove(usdt, address(trancheDepositor), type(uint256).max);
 
         TrancheDepositor.TDepositParams memory params = TrancheDepositor.TDepositParams({
-            swapDeadline: 0,
-            swapAmountOutMinimum: 0,
+            swapDeadline: block.timestamp + 1 hours,
+            swapAmountOutMinimum: 1,
             swapTokenOut: usde,
             minShares: 0
         });

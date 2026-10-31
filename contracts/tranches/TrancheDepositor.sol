@@ -27,6 +27,8 @@ contract TrancheDepositor is AccessControlled {
     error InvalidAsset(address vault, address asset);
     error MintedSharesBelowMin(uint256 shares, uint256 minShares);
     error InsufficientOutputAmount(uint256 received, uint256 minimum);
+    error InvalidDeadline();
+    error ZeroSlippageProtection();
 
     struct TAutoSwap {
         address router;
@@ -37,9 +39,9 @@ contract TrancheDepositor is AccessControlled {
     }
 
     struct TDepositParams {
-        // Optional, default 0 = no deadline
+        // Required for swaps: unix timestamp deadline >= block.timestamp
         uint256 swapDeadline;
-        // Optional, default 0 = calculate return based on minimumReturnPercentage
+        // Required for swaps: minimum acceptable tokenOut amount
         uint256 swapAmountOutMinimum;
         // Optional, default Tranche::asset()
         address swapTokenOut;
@@ -269,8 +271,8 @@ contract TrancheDepositor is AccessControlled {
         SafeERC20.forceApprove(tokenIn, swapInfo.router, amount);
 
         uint256 deadline = depositParams.swapDeadline;
-        if (deadline == 0) {
-            deadline = block.timestamp;
+        if (deadline < block.timestamp) {
+            revert InvalidDeadline();
         }
         address tokenOut = depositParams.swapTokenOut;
         if (tokenOut == address(0)) {
@@ -279,11 +281,7 @@ contract TrancheDepositor is AccessControlled {
 
         uint256 amountOutMin = depositParams.swapAmountOutMinimum;
         if (amountOutMin == 0) {
-            // Calculate the amountOutMin based on the preconfigured expected return percentage
-            // however prefer to specify the "swapAmountOutMinimum" in the tx
-            amountOutMin = amount * swapInfo.minimumReturnPercentage * (10 ** IERC20Metadata(tokenOut).decimals())
-                / 10 ** IERC20Metadata(address(tokenIn)).decimals()
-                / 1000;
+            revert ZeroSlippageProtection();
         }
 
 
