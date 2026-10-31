@@ -74,7 +74,9 @@ contract MidasCooldownRequestImpl is IUnstakeHandler, Initializable {
     }
     function request(address receiver_) public returns (uint256 unlockAt) {
         require(msg.sender == handler, "NotAuthorized");
-        require(pending == false, "HasActiveRequest");
+        if (pending) {
+            require(requestedAt == block.timestamp, "HasActiveRequest");
+        }
 
         uint256 shares = mToken.balanceOf(address(this));
         require(shares > 0, "NoMTokenToRedeem");
@@ -102,8 +104,12 @@ contract MidasCooldownRequestImpl is IUnstakeHandler, Initializable {
 
         requestedAt = block.timestamp;
         receiver = receiver_;
-        pending = true;
-        requestedAmount = expectedBaseAssets;
+        if (pending) {
+            requestedAmount += expectedBaseAssets;
+        } else {
+            pending = true;
+            requestedAmount = expectedBaseAssets;
+        }
 
         // Midas typically processes requests within 1-3 days
         return block.timestamp + 3 days;
