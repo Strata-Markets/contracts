@@ -57,10 +57,14 @@ contract UnstakeCooldown is IUnstakeCooldown, CooldownBase {
         if (initialFrom != to && requestsCount >= PUBLIC_REQUEST_SLOTS_CAP) {
             revert ExternalReceiverRequestLimitReached(token, initialFrom, to, amount);
         }
+        if (requestsCount >= MAX_ACTIVE_REQUEST_SLOTS) {
+            if (requestsCount == 0 || requests[requestsCount - 1].proxy.requestedAt() != block.timestamp) {
+                revert ExternalReceiverRequestLimitReached(token, initialFrom, to, amount);
+            }
+        }
         if (requestsCount > 0) {
-            // Check if we should create a new request or extend the last one
-            shouldReuseRequest = requestsCount >= MAX_ACTIVE_REQUEST_SLOTS
-                || requests[requestsCount - 1].proxy.requestedAt() == block.timestamp;
+            // Only merge requests initiated within the exact same block
+            shouldReuseRequest = requests[requestsCount - 1].proxy.requestedAt() == block.timestamp;
         }
         if (shouldReuseRequest) {
             proxy = requests[requestsCount - 1].proxy;

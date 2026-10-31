@@ -71,14 +71,16 @@ contract SaturnCooldownRequestImpl is IUnstakeHandler, Initializable, IERC721Rec
 
     function request(address receiver_) public returns (uint256 unlockAt) {
         require(msg.sender == handler, "NotAuthorized");
-        require(pending == false, "HasActiveRequest");
+        if (pending) {
+            require(requestedAt == block.timestamp, "HasActiveRequest");
+        }
 
         uint256 shares = sUSDat.balanceOf(address(this));
         require(shares > 0, "NoSharesToRedeem");
 
         // Record the expected base asset value before the request
         // (shares will be transferred to the withdrawal queue)
-        requestedAmount = sUSDat.previewRedeem(shares);
+        uint256 addedAmount = sUSDat.previewRedeem(shares);
 
         // requestRedeem internally transfers shares from this contract to the WithdrawalQueue.
         // No approval needed — sUSDat uses internal _transfer.
@@ -87,7 +89,12 @@ contract SaturnCooldownRequestImpl is IUnstakeHandler, Initializable, IERC721Rec
 
         requestedAt = block.timestamp;
         receiver = receiver_;
-        pending = true;
+        if (pending) {
+            requestedAmount += addedAmount;
+        } else {
+            pending = true;
+            requestedAmount = addedAmount;
+        }
 
         // Saturn typically processes requests within 7 days
         return block.timestamp + 7 days;
