@@ -1,4 +1,4 @@
-pragma solidity 0.8.28;
+pragma solidity ^0.8.28;
 
 import {ISharesCooldown} from "../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {Test} from "forge-std/Test.sol";
