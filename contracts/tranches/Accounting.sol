@@ -109,7 +109,7 @@ contract Accounting is IAccounting, CDOComponent {
     /// @notice Gross Senior NAV deposited during valuation loss and self-funded by Senior.
     uint256 public srtFundedGrossNav;
 
-    /// @notice Remaining self-funding recorded at entry, capped at the current valuation loss when used.
+    /// @notice Remaining entry loss in USD, scaled to base-asset decimals; converted and capped when used.
     /// @dev Per-entry valuation recovery is not bucketed; small mismatches are socialized through the Senior share price.
     uint256 public srtFundNav;
 
@@ -1085,14 +1085,14 @@ contract Accounting is IAccounting, CDOComponent {
         if (amount == 0 || valuationPrice == 1e18) {
             return 0;
         }
-        srtFundAmountIn = Math.mulDiv(amount, 1e18 - valuationPrice, valuationPrice);
+        srtFundAmountIn = Math.mulDiv(amount, 1e18 - valuationPrice, 1e18);
         srtFundedGrossNav += amount;
     }
 
     /// @dev Entry self-funding usable at this price, without erasing it on partial recovery.
     function _cappedSrtFundNav(uint256 price) internal view returns (uint256) {
         if (price >= 1e18) return 0;
-        return Math.min(srtFundNav, Math.mulDiv(srtFundedGrossNav, 1e18 - price, price));
+        return Math.min(Math.mulDiv(srtFundNav, 1e18, price), Math.mulDiv(srtFundedGrossNav, 1e18 - price, price));
     }
 
     function _resyncSrtFundNav(uint128 price) internal {

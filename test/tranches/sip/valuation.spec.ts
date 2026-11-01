@@ -248,7 +248,7 @@ UTest.create({
         await t.deposit(bob, 0, 990_000);
         $test.compare(
             await accounting.srtFundNav(),
-            10_000,
+            9_900,
             18,
             `Senior deposit should only fund the existing 1% valuation loss`
         );
@@ -256,31 +256,25 @@ UTest.create({
         await cdo.$receipt().setValuationPrice(deployer, BigInt(.95e18));
         $test.compare(
             await accounting.srtFundNav(),
-            10_000,
+            9_900,
             18,
             `Later valuation loss should not increase Senior-funded exemption`
         );
 
         // Bob mints 990k / 1.0101 = 980_100 Senior shares.
         // Senior base NAV: 10M + 990k = 10_990_000
-        // Additional valuation loss: 10_990_000 * 0.05 / 0.95 - 10_000 = 568_421.052
-        // JRT price: (800k - 568_421.052) / 800k = 0.28947
-        // SRT price: (10_990_000 + 568_421.052) / 10_980_100 = 1.05266
-        await t.comparePrices(0.28947, 1.05266);
+        // Additional valuation loss: (10_990_000 * 0.05 - 9_900) / 0.95 = 568_000
+        // JRT price: (800k - 568_000) / 800k = 0.29
+        // SRT price: (10_990_000 + 568_000) / 10_980_100 = 1.05263
+        await t.comparePrices(0.29, 1.05263);
 
         const { srt: bobAssets } = await t.redeem(bob, 0, '100%');
-        await t.comparePrices(0.28947, 1.05266, 'Expected no price impact');
+        await t.comparePrices(0.29, 1.05263, 'Expected no price impact');
 
-        // Junior intentionally covers about $540_000 of later valuation loss.
-        // Additionally, aggregate accounting over-credits Senior by about $400 versus exact bucketed accounting.
-        // That $400 is socialized across Senior holders: Bob gets about $36, Alice gets about $364.
-
-        // Aggregate accounting over-credits Senior by about $400:
-        // (10_990_000 + 568_421.052) * 0.95 - (10_000_000 + 990_000 * 0.99) = 400
-        // Bob owns 980_100 / 10_980_100 of Senior shares, so his share is ~400 * 8.93% = 36.
+        // The entry loss remains $9,900, so Bob receives his original dollar value.
         $test.compare(
             bobAssets * 0.95,
-            990_000 * 0.99 + 36,
+            990_000 * 0.99,
             18,
             `Expected Bob exit value to match his entry value`
         );
@@ -316,7 +310,7 @@ UTest.create({
         await t.deposit(bob, 0, 10_000);
         $test.compare(
             await accounting.srtFundNav(),
-            10_000 * 0.01 / 0.99,
+            10_000 * 0.01,
             18,
             `Senior deposit should only fund the existing 1% valuation loss`
         );
@@ -325,8 +319,8 @@ UTest.create({
         await t.deposit(bob, 0, 10_000);
         $test.compare(
             await accounting.srtFundNav(),
-            10_000 * 0.01 / 0.99
-            + 10_000 * 0.02 / 0.98,
+            10_000 * 0.01
+            + 10_000 * 0.02,
             18,
             `Senior deposit fund should increase after the 2. valuation loss`
         );
@@ -335,29 +329,18 @@ UTest.create({
         await t.deposit(bob, 0, 10_000);
         $test.compare(
             await accounting.srtFundNav(),
-            10_000 * 0.01 / 0.99
-            + 10_000 * 0.02 / 0.98
-            + 10_000 * 0.03 / 0.97,
+            10_000 * 0.01
+            + 10_000 * 0.02
+            + 10_000 * 0.03,
             18,
             `Senior deposit fund should increase after the 3. valuation loss`
         );
 
-        // 1. deposit 10_000 ->
-        //      Bobs NAV = 10_000
-        //      Bobs Shares = 10_000 / 1.010101 = 9_900
-        // 2. Valuation drop: 0.98 ->
-        //      Bobs NAV = (Shares 9_900 * NewPrice 1.020410) = 10_102.060828
-        // 3. deposit 10_000 ->
-        //      Bobs NAV = 10_102.060828 + 10_000 = 20_102.060828
-        //      Bobs Shares = 10_000 / 1.020410 + 9_900
-        // 4. Valuation drop: 0.97 ->
-        //      Bobs NAV = (Shares 19_699.980586 * NewPrice 1.030936) = 20_309.417795
-        // 5. deposit 10_000 ->
-        //      Bobs NAV 20_309.417795 + 10_000 = 30_309.417795
+        // Each deposit retains its entry dollar value: $9,900 + $9,800 + $9,700.
         const { srt: bobAssets } = await t.redeem(bob, 0, '100%');
         $test.compare(
             bobAssets,
-            30_309.417795,
+            (9_900 + 9_800 + 9_700) / 0.97,
             18,
             `Expected no PnL for Bob`
         );

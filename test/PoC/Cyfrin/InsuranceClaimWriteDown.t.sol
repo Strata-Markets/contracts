@@ -121,7 +121,7 @@ contract InsuranceClaimWriteDownTest is Test {
             pool.setCapacity(10000e18);
             assertEq(a.writeDownInsuranceClaim(286e18, 140e18), 140e18);
             assertEq(a.srtFundedGrossNav(), 360e18);
-            assertEq(a.srtFundNav(), 90e18);
+            assertEq(a.srtFundNav(), 72e18);
             assertEq(a.srtInsuranceFundNav(), 225e18);
             a.updateAccounting();
             assertEq(a.insuranceAmount(), 286e18);
@@ -383,12 +383,12 @@ contract InsuranceWriteDownSizingTest is Test {
     ) public pure {
         principal = bound(principal, 1, 100);
         gross = bound(gross, 0, principal);
-        fund = bound(fund, 0, gross * 9999);
+        fund = bound(fund, 0, gross);
         price = uint128(bound(price, 0.0001e18, 1e18 - 1));
         projection = bound(projection, 0, 20);
         junior = bound(junior, 0, 100);
         realized = bound(realized, 0, principal);
-        uint256 capped = Math.min(fund, Math.mulDiv(gross, 1e18 - price, price));
+        uint256 capped = Math.min(Math.mulDiv(fund, 1e18, price), Math.mulDiv(gross, 1e18 - price, price));
         uint256 credit = Math.saturatingSub(
             Math.saturatingSub(Math.mulDiv(principal + projection, 1e18, price) - principal - projection, capped), junior
         );
@@ -411,7 +411,7 @@ contract InsuranceWriteDownSizingTest is Test {
         uint256 fund = s.selfFund * (principal - loss) / principal;
         uint256 remaining = s.seniorNav - s.valuationCredit - loss;
         uint256 need = remaining * 1e18 / s.price - remaining;
-        uint256 cap = Math.min(fund, gross * (1e18 - s.price) / s.price);
+        uint256 cap = Math.min(fund * 1e18 / s.price, gross * (1e18 - s.price) / s.price);
         need = Math.saturatingSub(Math.saturatingSub(need, cap), s.juniorAvailable);
         return loss + Math.min(s.claim - loss, Math.saturatingSub(s.valuationCredit, need));
     }

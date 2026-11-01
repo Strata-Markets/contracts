@@ -100,7 +100,7 @@ contract SelfFundWriteDownTest is Test {
 
     function _assertFunds(uint256 expected) internal view {
         assertEq(a.srtFundedGrossNav(), expected, "self-funded principal");
-        assertEq(a.srtFundNav(), expected, "self-fund deduction");
+        assertApproxEqAbs(a.srtFundNav(), expected / 2, 1, "self-fund deduction");
     }
 
     function test_realizedLossThenDeeperDepeg() public {
@@ -118,8 +118,8 @@ contract SelfFundWriteDownTest is Test {
             _assertFunds(80e18);
             pool.setCapacity(1000e18);
             a.setValuationPrice(0.4e18);
-            assertEq(a.insuranceAmount(), 40e18);
-            assertEq(a.srtBaseNav(), 120e18);
+            assertEq(a.insuranceAmount(), 20e18);
+            assertEq(a.srtBaseNav(), 100e18);
             _assertFunds(80e18);
         }
     }
@@ -184,7 +184,7 @@ contract SelfFundWriteDownTest is Test {
             a.setValuationPrice(0.7e18);
             assertLt(a.srtInsuranceFundNav(), 100e18);
             assertEq(a.srtFundedGrossNav(), 200e18);
-            assertEq(a.srtFundNav(), 200e18, "entry self-funding survives claim cancellation");
+            assertEq(a.srtFundNav(), 100e18, "entry self-funding survives claim cancellation");
             a.setValuationPrice(1e18);
             _assertFunds(0);
         }
@@ -269,7 +269,7 @@ contract SelfFundWriteDownTest is Test {
             _seed(0, 100e18, 0, 0, 100e18, 0);
             a.setValuationPrice(0.7e18);
             uint256 fundBefore = a.srtFundNav();
-            assertEq(fundBefore, 100e18, "partial recovery retains entry self-funding");
+            assertEq(fundBefore, 50e18, "partial recovery retains entry self-funding");
             strategyNav = 80e18;
             a.updateAccounting();
             assertEq(a.srtFundedGrossNav(), 80e18);
@@ -285,7 +285,7 @@ contract SelfFundWriteDownTest is Test {
             strategyNav += 1e18;
             a.updateAccounting();
             // These fixtures charge paid projection to Senior at reconciliation.
-            assertLt(a.srtBaseNav(), 100e18);
+            assertLt(a.srtBaseNav(), 120e18);
             assertGt(a.srtBaseNav(), 90e18);
             _assertFunds(uint256(100e18) * a.srtBaseNav() / 120e18);
         }

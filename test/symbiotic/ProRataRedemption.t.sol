@@ -41,7 +41,7 @@ contract MTMRedemptionHarness is MTMAccounting {
         insuranceAmount = claim;
         srtInsuranceFundNav = credit;
         srtFundedGrossNav = fundedGross;
-        srtFundNav = fund;
+        srtFundNav = fund * price / 1e18; // Seed converts the token allowance to its USD basis.
         srtPnLProjected = int256(projection);
         nav = junior + senior - claim;
         feeWatermarkNav = nav;
@@ -60,7 +60,7 @@ contract AccountingRedemptionHarness is Accounting {
         insuranceAmount = claim;
         srtInsuranceFundNav = credit;
         srtFundedGrossNav = fundedGross;
-        srtFundNav = fund;
+        srtFundNav = fund * price / 1e18; // Seed converts the token allowance to its USD basis.
         require(projection == 0);
         nav = junior + senior - claim;
         feeWatermarkNav = nav;
@@ -80,7 +80,7 @@ contract DiscreteAccountingRedemptionHarness is DiscreteAccounting {
         insuranceAmount = claim;
         srtInsuranceFundNav = credit;
         srtFundedGrossNav = fundedGross;
-        srtFundNav = fund;
+        srtFundNav = fund * price / 1e18; // Seed converts the token allowance to its USD basis.
         require(projection == 0);
         nav = junior + senior - claim;
         feeWatermarkNav = nav;
@@ -100,7 +100,7 @@ contract DYSAccountingRedemptionHarness is DYSAccounting {
         insuranceAmount = claim;
         srtInsuranceFundNav = credit;
         srtFundedGrossNav = fundedGross;
-        srtFundNav = fund;
+        srtFundNav = fund * price / 1e18; // Seed converts the token allowance to its USD basis.
         srtPnLProjected = projection;
         nav = junior + senior - claim;
         feeWatermarkNav = nav;
@@ -256,12 +256,12 @@ abstract contract ProRataRedemptionTestBase is Test {
     function test_chunking_partialInsurance() public { _chunked(100e18, 1100e18, 100e18); }
 
     function test_selfFunding_usesStoredFundAtDeeperDepeg() public {
-        // Deposit at 0.5 self-funded 100; a later drop to 0.4 does not reprice that fund upward.
+        // Seed 100 tokens of usable self-funding at 0.4 (40 USD).
         a.seed(2000e18, 1100e18, 0, 0, 100e18, 100e18, 0, 0.4e18);
         // Effective Senior NAV is 1100 / 0.4 - 100 = 2650.
         assertEq(a.updateBalanceFlow(0, 0, 0, 265e18), 0);
         assertEq(a.srtFundedGrossNav(), 90e18);
-        assertEq(a.srtFundNav(), 90e18);
+        assertEq(a.srtFundNav(), 36e18);
         assertEq(a.srtBaseNav(), 990e18);
         assertEq(a.jrtBaseNav(), 1845e18);
         _identity();
@@ -308,7 +308,7 @@ abstract contract ProRataRedemptionTestBase is Test {
         a.seed(2000e18, 1100e18, 0, 0, 100e18, 100e18, 0, 0.4e18);
         a.updateBalanceFlow(0, 0, 100e18, 265e18);
         assertEq(a.srtFundedGrossNav(), 190e18);
-        assertEq(a.srtFundNav(), 240e18);
+        assertEq(a.srtFundNav(), 96e18);
         _identity();
     }
 

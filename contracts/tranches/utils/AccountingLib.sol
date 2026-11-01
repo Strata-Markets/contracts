@@ -26,7 +26,7 @@ library AccountingLib {
         uint256 seniorAvailable;
         uint256 valuationCredit;
         uint256 fundedGross;
-        uint256 selfFund;
+        uint256 selfFund; // Entry loss in USD, scaled to base-asset decimals.
         uint256 juniorAvailable;
         uint256 price;
     }
@@ -84,7 +84,7 @@ library AccountingLib {
         }
         uint256 principalAfter = Math.saturatingSub(state.seniorNav - amount, state.valuationCredit);
         uint256 needed = Math.mulDiv(principalAfter, 1e18, state.price) - principalAfter;
-        uint256 cappedFund = Math.min(selfFund, Math.mulDiv(gross, 1e18 - state.price, state.price));
+        uint256 cappedFund = Math.min(Math.mulDiv(selfFund, 1e18, state.price), Math.mulDiv(gross, 1e18 - state.price, state.price));
         needed = Math.saturatingSub(Math.saturatingSub(needed, cappedFund), state.juniorAvailable);
         uint256 unwound = Math.min(Math.saturatingSub(state.valuationCredit, needed), state.claim - amount);
         return amount + unwound;

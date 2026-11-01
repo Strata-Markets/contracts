@@ -34,9 +34,9 @@ contract ValuationFundAccounting is Accounting {
         nav = 2000e18;
         valuationPrice = selfFunded ? uint128(0.4e18) : uint128(1e18);
         if (selfFunded) {
-            // 100 of Senior deposits at 0.4 carry 150 of self-funded protection.
+            // 100 of Senior deposits at 0.4 record 60 USD of entry loss (150 tokens at entry).
             srtFundedGrossNav = 100e18;
-            srtFundNav = 150e18;
+            srtFundNav = 60e18;
         }
     }
 }
@@ -51,9 +51,9 @@ contract ValuationFundDiscreteAccounting is DiscreteAccounting {
         nav = 2000e18;
         valuationPrice = selfFunded ? uint128(0.4e18) : uint128(1e18);
         if (selfFunded) {
-            // 100 of Senior deposits at 0.4 carry 150 of self-funded protection.
+            // 100 of Senior deposits at 0.4 record 60 USD of entry loss (150 tokens at entry).
             srtFundedGrossNav = 100e18;
-            srtFundNav = 150e18;
+            srtFundNav = 60e18;
         }
     }
 }
@@ -68,9 +68,9 @@ contract ValuationFundDYSAccounting is DYSAccounting {
         nav = 2000e18;
         valuationPrice = selfFunded ? uint128(0.4e18) : uint128(1e18);
         if (selfFunded) {
-            // 100 of Senior deposits at 0.4 carry 150 of self-funded protection.
+            // 100 of Senior deposits at 0.4 record 60 USD of entry loss (150 tokens at entry).
             srtFundedGrossNav = 100e18;
-            srtFundNav = 150e18;
+            srtFundNav = 60e18;
         }
     }
 }
@@ -85,9 +85,9 @@ contract ValuationFundMTMAccounting is MTMAccounting {
         nav = 2000e18;
         valuationPrice = selfFunded ? uint128(0.4e18) : uint128(1e18);
         if (selfFunded) {
-            // 100 of Senior deposits at 0.4 carry 150 of self-funded protection.
+            // 100 of Senior deposits at 0.4 record 60 USD of entry loss (150 tokens at entry).
             srtFundedGrossNav = 100e18;
-            srtFundNav = 150e18;
+            srtFundNav = 60e18;
         }
     }
 }
@@ -153,7 +153,7 @@ contract ValuationFundResyncTest is Test {
 
             uint256 selfFund = (uint256(100e18) * 0.59e18) / 0.41e18;
             uint256 claim = (uint256(1000e18) * 1e18) / 0.41e18 - 1000e18 - selfFund - 999e18;
-            assertEq(accounting.srtFundNav(), selfFund);
+            assertEq(accounting.srtFundNav(), 60e18);
             assertEq(accounting.insuranceAmount(), claim);
             assertEq(accounting.srtInsuranceFundNav(), claim);
             assertEq(accounting.srtBaseNav(), 1000e18 + claim);
@@ -197,8 +197,8 @@ contract ValuationFundResyncTest is Test {
         for (uint256 variant; variant < 4; variant++) {
             (IValuationFundHarness accounting, MockInsurancePool pool) = _deploy(variant, true);
             accounting.setValuationPrice(0.39e18);
-            uint256 claim = (uint256(1000e18) * 1e18) / 0.39e18 - 1000e18 - 150e18 - 999e18;
-            assertEq(accounting.srtFundNav(), 150e18);
+            uint256 claim = (uint256(1000e18) * 1e18) / 0.39e18 - 1000e18 - uint256(60e36) / 0.39e18 - 999e18;
+            assertEq(accounting.srtFundNav(), 60e18);
             assertEq(accounting.insuranceAmount(), claim);
             assertEq(accounting.srtInsuranceFundNav(), claim);
             assertEq(CAPACITY - pool.capacity(), claim);

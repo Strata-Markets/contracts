@@ -55,3 +55,7 @@ Deploy the matching recovery implementation, then execute these three calls in a
 Do not run an initializer. The recovery call uses `onlyOwner`; putting it in the upgrade calldata would make ProxyAdmin the caller and fail authorization. The batch must revert as a whole if any call fails, including restoration of the original implementation. Do not use a batch executor that changes the recovery caller away from the accounting owner or permits individual failures.
 
 Verify `TerminalJuniorDustSettled`, the resulting NAV/claim identity, and restoration of the original implementation. The operation does not reopen the market, burn shares, or reset an empty tranche for new deposits. Existing funded surplus and unneeded slashed collateral remain subject to the separate surplus/return procedures.
+
+## Entry self-funding units
+
+The entry-value protection fix changes `srtFundNav` from a token allowance to the entry loss in USD, scaled to base-asset decimals. Upgrade from the old representation only when both `srtFundNav` and `srtFundedGrossNav` are zero, or migrate the remaining entry basis explicitly. Multiplying an old aggregate allowance by the current valuation price is not a valid migration for entries at different prices.

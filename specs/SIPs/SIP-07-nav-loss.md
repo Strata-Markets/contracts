@@ -196,6 +196,10 @@ The system models:
 * **Valuation loss as external repricing event**
 * **Yield as recapitalization of Junior**
 
+### 15.1 Senior entries during a depeg
+
+Senior entries record their entry loss as `amount * (1 - entryPrice)` in `srtFundNav`, in USD scaled to base-asset decimals. Using normalized prices, at a later price, the usable token allowance is `min(srtFundNav / price, srtFundedGrossNav * (1 - price) / price)`. This preserves entry dollar value on a deeper depeg and retains the entry basis through partial recoveries. Exits and principal reductions scale both trackers proportionally; a full repeg clears them. Different entry prices remain pooled rather than tracked per depositor.
+
 ## 16. Alternatives Considered
 ### Continuous oracle reads (rejected)
 Rejected due to:

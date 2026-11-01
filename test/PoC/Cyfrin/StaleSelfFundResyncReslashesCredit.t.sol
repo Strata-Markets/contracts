@@ -209,7 +209,7 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
             // The reserve manager credits 1000 of reserve to Senior at 0.4, it self-funds 1000 x 0.6 / 0.4
             vm.prank(multisig);
             cdo.distributeReserve(0, RESERVE_CREDIT);
-            assertApproxEqAbs(accounting.srtFundNav(), 1_500e18, 1, "self-fund booked at 0.4");
+            assertApproxEqAbs(accounting.srtFundNav(), 600e18, 1, "self-fund booked at 0.4");
         }
 
         // Underwriters add stake, enough for any correct top-up
@@ -227,11 +227,11 @@ abstract contract StaleSelfFundResyncReslashesCreditBase is Test {
     }
 
     /// @dev Same need formula as the resync but measured against own principal only, with the self-fund
-    ///      stored before the push, it shows the stale self-fund alone already zeroes the need
+    ///      converted to the historical entry-token allowance, it shows the stale self-fund alone already zeroes the need
     function _needWithStaleFundOnPrincipal() internal view returns (uint256) {
         uint256 principal = accounting.srtBaseNav() - accounting.srtInsuranceFundNav();
         uint256 extra = Math.saturatingSub(Math.mulDiv(principal, 1e18, RECOVERY_PRICE), principal);
-        extra = Math.saturatingSub(extra, fundBefore);
+        extra = Math.saturatingSub(extra, Math.mulDiv(fundBefore, 1e18, 0.4e18));
         return Math.saturatingSub(extra, accounting.jrtBaseNav() - ONE_ASSET);
     }
 
