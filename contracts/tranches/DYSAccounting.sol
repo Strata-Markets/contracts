@@ -1015,6 +1015,11 @@ contract DYSAccounting is IAccounting, CDOComponent {
                 (juniorOut, seniorOut,) = _splitValuationWithdrawal(amountToReserve);
                 jrtBaseNav -= juniorOut;
                 jrtNavProjected -= juniorOut;
+            } else if (useConservativePrice && useBenchmarkProjection && srtPnLBenchmark > 0) {
+                // Reserve-bound fees forfeit benchmark on pre-fee net NAV; retained fees keep it.
+                uint256 srtNetNav = Math.saturatingSub(srtBaseNav, srtPnLProjected);
+                uint256 forfeitedBenchmark = Math.mulDiv(amountToReserve, srtPnLBenchmark, srtNetNav);
+                srtPnLBenchmark -= Math.min(forfeitedBenchmark, srtPnLBenchmark);
             }
             srtBaseNav -= seniorOut;
             windowNetFlows -= int256(seniorOut);
