@@ -377,7 +377,7 @@ contract InsuranceClaimWriteDownFullStackTest is CoveredClaimFreezeTest {
 
 /// @notice Check the search against exhaustive candidates with integer rounding, self-funding and projection.
 contract InsuranceWriteDownSizingTest is Test {
-    function testFuzz_minimumPrincipalLoss(
+    function testFuzz_fundedPrincipalLoss(
         uint256 principal, uint256 gross, uint256 fund, uint128 price,
         uint256 projection, uint256 junior, uint256 realized, uint256 gap
     ) public pure {
@@ -402,7 +402,31 @@ contract InsuranceWriteDownSizingTest is Test {
         while (_reduction(state, expected) < gap) {
             ++expected;
         }
-        assertEq(AccountingLib.insuranceWriteDown(state, state.claim - gap, principal), expected);
+        uint256 actual = AccountingLib.insuranceWriteDown(state, state.claim - gap, principal);
+        assertGe(actual, expected);
+        assertLe(actual, Math.min(realized, gap));
+        assertGe(_reduction(state, actual), gap, "remaining claim must be funded");
+        uint256 bounded = AccountingLib.insuranceWriteDown(state, state.claim - gap, actual);
+        assertLe(bounded, actual, "respect the operator limit");
+        assertGe(_reduction(state, bounded), gap);
+        if (actual <= 32) {
+            assertEq(actual, expected, "scan covers every smaller candidate");
+        }
+    }
+
+    function test_roundingDipDoesNotSkipSmallerLossOrRejectTightLimit() public pure {
+        AccountingLib.InsuranceWriteDownState memory state = AccountingLib.InsuranceWriteDownState({
+            claim: 70, seniorNav: 79, seniorAvailable: 72, valuationCredit: 60,
+            fundedGross: 10, selfFund: 5, juniorAvailable: 25, price: 135629754405563401
+        });
+        assertEq(_reduction(state, 4), 16);
+        assertEq(_reduction(state, 5), 15);
+        assertEq(AccountingLib.insuranceWriteDown(state, 54, 4), 4);
+        assertEq(AccountingLib.insuranceWriteDown(state, 54, 5), 4);
+        assertEq(AccountingLib.insuranceWriteDown(state, 54, 12), 4);
+        // The realized-claim ceiling itself can also land in the rounding dip.
+        state.claim = 65;
+        assertEq(AccountingLib.insuranceWriteDown(state, 49, 12), 4);
     }
 
     function _reduction(AccountingLib.InsuranceWriteDownState memory s, uint256 loss) private pure returns (uint256) {

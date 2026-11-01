@@ -31,7 +31,8 @@ library AccountingLib {
         uint256 price;
     }
 
-    /// @dev Finds the smallest principal loss that funds the remaining claim, including credit unwind.
+    /// @dev Sizes a principal loss that funds the remaining claim, including credit unwind.
+    ///      Bounded scans handle nearby rounding dips; the result is not guaranteed to be minimal.
     ///      Only the realized claim and settled principal can absorb a permanent write-down.
     function insuranceWriteDown(
         InsuranceWriteDownState memory state,
@@ -55,9 +56,12 @@ library AccountingLib {
             require(shortfall <= maxPrincipalLoss, "ExceedsMaxPrincipalLoss");
             return shortfall;
         }
-        require(_insuranceClaimReduction(state, limit) >= shortfall, "InsuranceShortfallUnresolved");
-        uint256 high = Math.min(limit, maxPrincipalLoss);
-        require(_insuranceClaimReduction(state, high) >= shortfall, "ExceedsMaxPrincipalLoss");
+        uint256 high = _scanInsuranceWriteDown(state, limit, shortfall);
+        require(high != type(uint256).max, "InsuranceShortfallUnresolved");
+        if (high > maxPrincipalLoss) {
+            high = _scanInsuranceWriteDown(state, maxPrincipalLoss, shortfall);
+            require(high != type(uint256).max, "ExceedsMaxPrincipalLoss");
+        }
         uint256 low;
         // Search cached values only; no storage writes or external calls in the loop.
         while (low < high) {
@@ -68,7 +72,24 @@ library AccountingLib {
                 low = mid + 1;
             }
         }
-        return low;
+        return _scanInsuranceWriteDown(state, low, shortfall);
+    }
+
+    /// @dev Scaling the USD self-fund can make claim reduction dip between adjacent amounts.
+    ///      Check at most 32 raw base-asset units below a candidate, only on the operator recovery path.
+    function _scanInsuranceWriteDown(InsuranceWriteDownState memory state, uint256 high, uint256 shortfall)
+        private pure returns (uint256 result)
+    {
+        result = type(uint256).max;
+        uint256 low = Math.saturatingSub(high, 32);
+        for (uint256 amount = low; ; ++amount) {
+            if (_insuranceClaimReduction(state, amount) >= shortfall) {
+                return amount;
+            }
+            if (amount == high) {
+                return result;
+            }
+        }
     }
 
     /// @dev Mirrors _scaleSrtFund followed by _resyncInsuranceFundNav, including rounding.
