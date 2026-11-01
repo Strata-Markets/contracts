@@ -59,3 +59,9 @@ Verify `TerminalJuniorDustSettled`, the resulting NAV/claim identity, and restor
 ## Entry self-funding units
 
 The entry-value protection fix changes `srtFundNav` from a token allowance to the entry loss in USD, scaled to base-asset decimals. Upgrade from the old representation only when both `srtFundNav` and `srtFundedGrossNav` are zero, or migrate the remaining entry basis explicitly. Multiplying an old aggregate allowance by the current valuation price is not a valid migration for entries at different prices.
+
+## DYS and MTM signed projection storage
+
+Both accountings store `srtPnLProjected` and `srtBoughtProjected` as `int256`. The layout comparison confirms all 58 storage entries match by name, slot, offset, type and width.
+
+DYS continues to require nonnegative projection and purchased projection; signed storage does not enable MTM loss-projection behavior in DYS. Do not switch from MTM to DYS while either tracker is negative. Matching layouts alone does not establish that an open epoch can be transferred safely: reconcile and validate the complete accounting state and implementation settings before switching variants.

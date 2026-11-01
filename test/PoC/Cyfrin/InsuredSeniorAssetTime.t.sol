@@ -250,7 +250,7 @@ abstract contract InsuredSeniorAssetTimeRegressionTests is ValuationInsuranceFix
         _prepareProjection();
         accounting.updateAccounting();
         DYSAccounting a = DYSAccounting(address(accounting));
-        uint256 projection = a.srtPnLProjected();
+        uint256 projection = uint256(a.srtPnLProjected());
         assertGt(projection, 0);
         uint256 principal = accounting.srtBaseNav() - projection;
         accounting.setValuationPrice(0.4e18);

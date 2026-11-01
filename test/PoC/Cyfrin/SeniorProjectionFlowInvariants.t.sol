@@ -58,12 +58,16 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
     }
 
     function _state() internal view returns (uint256[5] memory) {
+        if (!_mtm()) {
+            assertGe(a.srtPnLProjected(), 0, "DYS projection remains nonnegative");
+            assertGe(a.srtBoughtProjected(), 0, "DYS bought projection remains nonnegative");
+        }
         return [
             a.srtBaseNav(),
             a.jrtBaseNav(),
-            a.srtPnLProjected(),
+            uint256(a.srtPnLProjected()),
             a.srtPaidProjected(),
-            a.srtBoughtProjected()
+            uint256(a.srtBoughtProjected())
         ];
     }
 
@@ -163,7 +167,7 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
         cdo.setValuationPrice(0.8e18);
         cdo.setActionStates(address(srt), true, true);
         (uint256 juniorBefore, uint256 seniorBefore,) = a.totalAssets();
-        uint256 projectedBefore = a.srtPnLProjected();
+        int256 projectedBefore = a.srtPnLProjected();
         uint256 received = _roundTrip(carol, 4725e18);
         (uint256 juniorAfter, uint256 seniorAfter,) = a.totalAssets();
         // Valuation exits redistribute base NAV and self-funding; compare effective NAVs.
@@ -217,7 +221,7 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
         }
         _redeem(srt.balanceOf(carol), carol);
         uint256 bobShares = srt.balanceOf(bob);
-        uint256 expectedCredit = a.srtBoughtProjected() * 0.1e18 / bobShares;
+        int256 expectedCredit = a.srtBoughtProjected() * 0.1e18 / int256(bobShares);
         _redeem(bobShares - 0.1e18, bob);
         assertApproxEqAbs(a.srtBoughtProjected(), expectedCredit, 1e6);
     }

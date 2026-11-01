@@ -101,7 +101,7 @@ contract DYSAccountingRedemptionHarness is DYSAccounting {
         srtInsuranceFundNav = credit;
         srtFundedGrossNav = fundedGross;
         srtFundNav = fund * price / 1e18; // Seed converts the token allowance to its USD basis.
-        srtPnLProjected = projection;
+        srtPnLProjected = int256(projection);
         nav = junior + senior - claim;
         feeWatermarkNav = nav;
         valuationPrice = price;
