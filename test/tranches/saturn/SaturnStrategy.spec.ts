@@ -408,7 +408,7 @@ UTest.create({
                 const { error: errWithdraw } = await $promise.caught(
                     $erc4626.redeemMeta(srtVault, sUSDat, deployer, '100%')
                 );
-                $require.match(/TokenWithdrawalPaused/, errWithdraw.message);
+                $require.match(/WithdrawalRejectedByStrategy/, errWithdraw.message);
             }
         });
     },

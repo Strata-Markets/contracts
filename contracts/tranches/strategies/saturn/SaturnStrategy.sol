@@ -326,6 +326,14 @@ contract SaturnStrategy is Strategy {
         return isWithdrawalPaused != true;
     }
 
+    /// @notice Paused or unsupported withdrawal routes have no capacity.
+    function maxWithdraw(address tranche, address token, uint256 /*tokenAmount*/) external view override returns (uint256) {
+        if (!supportsToken(token)) {
+            return 0;
+        }
+        return isTokenEnabledForWithdrawal(tranche, token) ? type(uint256).max : 0;
+    }
+
     /// @notice Paused or unsupported deposit routes have no capacity.
     function maxDeposit(address tranche, address token, uint256 /*tokenAmount*/) external view override returns (uint256) {
         if (!supportsToken(token)) {
