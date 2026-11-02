@@ -109,15 +109,16 @@ available capacity; any uncovered remainder continues through the waterfall.
 
 New benchmark accrual follows these rules:
 
-- **Projection updates:** Junior's real NAV must be above `ONE_ASSET` both before and after the
-  projected allocation. Projected Senior gain is capped by available Junior NAV, but at par the
-  benchmark entitlement itself is not capped by that NAV.
-- **Reconciliation:** the final uncheckpointed interval is included when starting real Junior NAV
-  is above `ONE_ASSET`. If Junior depletes at settlement, that interval may still draw on reserve or
-  insurance. Subsequent intervals starting at or below the floor accrue no new benchmark.
-- **During a depeg:** new benchmark accrual is additionally capped by effective Junior headroom,
-  accounting for existing benchmark entitlement not already embedded in projection. This cap does
-  not cancel benchmark accrued earlier.
+- **Projection updates:** available Junior NAV (the lower of real and projected NAV) must be above
+  `ONE_ASSET` both before and after the projected allocation.
+- **Headroom cap:** new benchmark is capped by starting available Junior NAV above `ONE_ASSET`,
+  less earlier benchmark entitlement not already embedded in Senior projection. This prevents
+  deferred fee residue from supporting repeated accrual against the same headroom.
+- **Reconciliation:** the same cap applies to the final uncheckpointed interval before projection
+  is unwound. If a realized loss then depletes Junior, the preserved entitlement may still draw on
+  reserve or insurance. Intervals starting at or below the floor accrue no new benchmark.
+- **During a depeg:** the cap uses effective Junior headroom and accounts for the valuation
+  protection required by new Senior gain. Neither cap cancels benchmark accrued earlier.
 
 Operators may set the benchmark APR to zero before Junior depletes. This stops future accrual;
 it does not erase existing benchmark entitlement.

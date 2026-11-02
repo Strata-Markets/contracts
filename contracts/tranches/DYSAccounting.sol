@@ -1332,16 +1332,18 @@ contract DYSAccounting is IAccounting, CDOComponent {
         );
 
         // Include the final interval before unwinding projection; views and settlement use the same entitlement.
-        if (useBenchmarkProjection && jrtNavT0Real > ONE_ASSET) {
+        if (useBenchmarkProjection && Math.min(jrtNavT0Real, jrtNavT0Projected) > ONE_ASSET) {
             int256 benchmarkGain = calculateGain(srtNavT0, getBenchmarkIndexT1(), benchmarkIndex);
             if (benchmarkGain > 0) {
                 uint256 pendingBenchmark = uint256(benchmarkGain);
+                uint256 maxProtectedGain = Math.saturatingSub(Math.min(jrtNavT0Real, jrtNavT0Projected), ONE_ASSET);
                 if (valuationPrice < 1e18) {
-                    (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT0Real, srtNavT0);
-                    uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
-                    uint256 unprojectedBenchmark = Math.saturatingSub(state.srtPnLBenchmark, state.srtPnLProjected);
-                    pendingBenchmark = Math.min(pendingBenchmark, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
+                    (uint256 jrtEffective,) = calcEffectiveNav(Math.min(jrtNavT0Real, jrtNavT0Projected), srtNavT0);
+                    maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
                 }
+                // Reserve earlier entitlement not already embedded in Senior NAV before adding new benchmark.
+                uint256 unprojectedBenchmark = Math.saturatingSub(state.srtPnLBenchmark, state.srtPnLProjected);
+                pendingBenchmark = Math.min(pendingBenchmark, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
                 // If Junior depletes, the waterfall may fund the final interval from reserve or insurance, or reduce the gain.
                 state.srtPnLBenchmark += pendingBenchmark;
             }
@@ -1607,20 +1609,21 @@ contract DYSAccounting is IAccounting, CDOComponent {
             srtPnLProjected += int256(srtGain);
 
             // Accrue only for intervals where Junior stays above the floor; retain earlier entitlement.
-            if (useBenchmarkProjection && jrtNavT1Real > ONE_ASSET && jrtBaseNav > ONE_ASSET) {
+            if (useBenchmarkProjection && Math.min(jrtNavT1Real, jrtNavT1Projected) > ONE_ASSET && Math.min(jrtBaseNav, jrtNavProjected) > ONE_ASSET) {
                 uint256 benchmarkIndexT1 = getBenchmarkIndexT1();
                 int256 srtBenchmarkGain = calculateGain(
                     srtBaseNav, benchmarkIndexT1, benchmarkIndex
                 );
                 if (srtBenchmarkGain > 0) {
                     uint256 benchmarkGain = uint256(srtBenchmarkGain);
+                    uint256 maxProtectedGain = Math.saturatingSub(Math.min(jrtBaseNav, jrtNavProjected), ONE_ASSET);
                     if (valuationPrice < 1e18) {
-                        (uint256 jrtEffective,) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
-                        uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
-                        // Reserve earlier benchmark entitlement not already embedded in Senior NAV.
-                        uint256 unprojectedBenchmark = Math.saturatingSub(srtPnLBenchmark, uint256(srtPnLProjected) - srtGain);
-                        benchmarkGain = Math.min(benchmarkGain, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
+                        (uint256 jrtEffective,) = calcEffectiveNav(Math.min(jrtBaseNav, jrtNavProjected), srtBaseNav);
+                        maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
                     }
+                    // Reserve earlier entitlement not already embedded in Senior NAV before adding new benchmark.
+                    uint256 unprojectedBenchmark = Math.saturatingSub(srtPnLBenchmark, uint256(srtPnLProjected) - srtGain);
+                    benchmarkGain = Math.min(benchmarkGain, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
                     srtPnLBenchmark += benchmarkGain;
                 }
             }

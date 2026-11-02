@@ -1583,6 +1583,24 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
         underwriterFeeNavT1 = state.underwriterFeeNav;
 
+        // Include the final interval before unwinding projection; views and settlement use the same entitlement.
+        if (useBenchmarkProjection && Math.min(jrtNavT0Real, jrtNavT0Projected) > ONE_ASSET) {
+            int256 benchmarkGain = calculateGain(srtNavT0, getBenchmarkIndexT1(timestamp), benchmarkIndex);
+            if (benchmarkGain > 0) {
+                uint256 pendingBenchmark = uint256(benchmarkGain);
+                uint256 maxProtectedGain = Math.saturatingSub(Math.min(jrtNavT0Real, jrtNavT0Projected), ONE_ASSET);
+                if (valuationPrice < 1e18) {
+                    (uint256 jrtEffective,) = calcEffectiveNav(Math.min(jrtNavT0Real, jrtNavT0Projected), srtNavT0);
+                    maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
+                }
+                // Reserve earlier entitlement not already embedded in Senior NAV before adding new benchmark.
+                uint256 unprojectedBenchmark = Math.saturatingSub(state.srtPnLBenchmark, _positiveProjection(state.srtPnLProjected));
+                pendingBenchmark = Math.min(pendingBenchmark, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
+                // If Junior depletes, the waterfall may fund the final interval from reserve or insurance, or reduce the gain.
+                state.srtPnLBenchmark += pendingBenchmark;
+            }
+        }
+
         // Accrue the unpersisted interval before unwinding projected Senior NAV.
         (
             uint256 srtNavTimeAccrued,
@@ -1597,22 +1615,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
             timestamp,
             state
         );
-
-        // Include the final interval before unwinding projection; views and settlement use the same entitlement.
-        if (useBenchmarkProjection && jrtNavT0Real > ONE_ASSET) {
-            int256 benchmarkGain = calculateGain(srtNavT0, getBenchmarkIndexT1(timestamp), benchmarkIndex);
-            if (benchmarkGain > 0) {
-                uint256 pendingBenchmark = uint256(benchmarkGain);
-                if (valuationPrice < 1e18) {
-                    (uint256 jrtEffective,) = calcEffectiveNav(jrtNavT0Real, srtNavT0);
-                    uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
-                    uint256 unprojectedBenchmark = Math.saturatingSub(state.srtPnLBenchmark, _positiveProjection(state.srtPnLProjected));
-                    pendingBenchmark = Math.min(pendingBenchmark, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
-                }
-                // If Junior depletes, the waterfall may fund the final interval from reserve or insurance, or reduce the gain.
-                state.srtPnLBenchmark += pendingBenchmark;
-            }
-        }
 
         // Unwind the signed epoch projection before allocating realized PnL.
         uint256 projUndo;
@@ -1929,7 +1931,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 windowEnd = navT1Time + 1 days;
             }
         } else if (nav > 0) {
-            _accrueSrtProjection(srtNavT1, jrtNavT1Real, timestamp);
+            _accrueSrtProjection(srtNavT1, Math.min(jrtNavT1Real, jrtNavT1Projected), timestamp);
         }
 
         updateIndex(timestamp);
@@ -1957,7 +1959,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
     }
 
     /// @dev Tracks live projection and benchmark accrual before the new NAVs are stored.
-    function _accrueSrtProjection(uint256 srtNavT1, uint256 jrtNavT1Real, uint256 timestamp) internal {
+    function _accrueSrtProjection(uint256 srtNavT1, uint256 jrtNavT1Available, uint256 timestamp) internal {
         // During epoch, srtBaseNav already includes live Senior projection.
         // Keep unpaid srtPnLProjected equal to the current signed embedded projection,
         // not the sum of all intermediate MTM updates.
@@ -1968,21 +1970,23 @@ contract MTMAccounting is IAccounting, CDOComponent {
         srtPnLProjected = int256(useConservativePrice ? 0 : srtPaidProjected)
             + int256(srtNavT1) - int256(srtBaseNavReal);
 
-        // Accrue only for intervals where Junior stays above the floor; retain earlier entitlement.
-        if (useBenchmarkProjection && jrtNavT1Real > ONE_ASSET && jrtBaseNav > ONE_ASSET) {
+        // Live Junior excludes mirrored Senior losses; retain benchmark accrued before depletion.
+        uint256 jrtNavAvailable = Math.min(jrtBaseNav, jrtNavProjected);
+        if (useBenchmarkProjection && jrtNavT1Available > ONE_ASSET && jrtNavAvailable > ONE_ASSET) {
             uint256 benchmarkIndexT1 = getBenchmarkIndexT1(timestamp);
             int256 srtBenchmarkGain = calculateGain(
                 srtBaseNav, benchmarkIndexT1, benchmarkIndex
             );
             if (srtBenchmarkGain > 0) {
                 uint256 benchmarkGain = uint256(srtBenchmarkGain);
+                uint256 maxProtectedGain = Math.saturatingSub(jrtNavAvailable, ONE_ASSET);
                 if (valuationPrice < 1e18) {
-                    (uint256 jrtEffective,) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
-                    uint256 maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
-                    // Reserve earlier benchmark entitlement not already embedded in Senior NAV.
-                    uint256 unprojectedBenchmark = Math.saturatingSub(srtPnLBenchmark, _positiveProjection(liveProjection));
-                    benchmarkGain = Math.min(benchmarkGain, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
+                    (uint256 jrtEffective,) = calcEffectiveNav(jrtNavAvailable, srtBaseNav);
+                    maxProtectedGain = Math.mulDiv(Math.saturatingSub(jrtEffective, ONE_ASSET), valuationPrice, 1e18);
                 }
+                // Reserve earlier entitlement not already embedded in Senior NAV before adding new benchmark.
+                uint256 unprojectedBenchmark = Math.saturatingSub(srtPnLBenchmark, _positiveProjection(liveProjection));
+                benchmarkGain = Math.min(benchmarkGain, Math.saturatingSub(maxProtectedGain, unprojectedBenchmark));
                 srtPnLBenchmark += benchmarkGain;
             }
         }
