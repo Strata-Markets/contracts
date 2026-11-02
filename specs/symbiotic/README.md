@@ -240,7 +240,7 @@ If the remainder is unrecoverable, an account with `RESERVE_MANAGER_ROLE` can ca
 Senior principal loss in base-asset units, not an exact amount to debit. The function:
 
 - Checkpoints accounting and values vault funding at the current valuation price in the same transaction.
-- Calculates the smallest principal loss that closes the funding gap, including any valuation-credit unwind.
+- Calculates a principal loss that closes the funding gap, including any valuation-credit unwind.
 - Reverts atomically if the required loss exceeds the operator's limit, available settled principal, or realized claim.
 - Preserves positive live projection and scales entry self-funding with the remaining principal during a depeg.
 - Reduces the claim and Senior NAV equally, including released valuation credit; strategy and Junior NAV stay unchanged.
@@ -268,7 +268,10 @@ shortfallBase = max(0, insuranceAmount - fundedBase)
 
 Use `fundedCoverage`, not the vault's raw token balance. The operator can set `maxPrincipalLoss` to
 `shortfallBase` if they accept that much principal loss, passing it in base-asset smallest units.
-The contract still applies only the required loss, which may be smaller when valuation credit unwinds.
+The calculated loss may be smaller when valuation credit unwinds. The search checks up to 32 raw
+base-asset units below its candidates to handle rounding dips. It does not guarantee the absolute
+minimum; wider rounding gaps may still require a looser operator limit or cause the call to revert.
+Any successful call stays within the operator limit and leaves the remaining claim fully funded.
 For a tighter limit, simulate `StrataCDO.writeDownInsuranceClaim` and use its returned principal loss.
 The simulation checkpoints accounting; standalone getter values may be stale. The transaction sizes
 the loss again and reverts if the required principal loss exceeds the supplied limit.

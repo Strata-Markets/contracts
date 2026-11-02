@@ -39,7 +39,7 @@ contract KyberSwapTest is Test {
     address public router = address(0x6131B5fae19EA4f9D964eAc0408E4408b66337b5);
 
     function setUp() public {
-        string memory rpcUrl = vm.envString("RPC");
+        string memory rpcUrl = vm.envString("MAINNET_RPC_URL");
         uint256 forkId = vm.createFork(rpcUrl, MAINNET_BLOCK);
         vm.selectFork(forkId);
 

@@ -136,7 +136,7 @@ abstract contract ValuationInsuranceFixture is Test {
 interface IFeeAccounting {
     function underwriterFeeNav() external view returns (uint256);
     function accrueFee(bool isJrt, uint256 amount) external;
-    function reduceReserve(uint256 amount, uint256 jrtAmountIn, uint256 srtAmountIn) external;
+    function setFeeRetentionBps(uint256 junior, uint256 senior) external;
 }
 
 /// @notice Regression adapted from the auditor PoC: excess claims must not block Senior exits.
@@ -230,23 +230,35 @@ abstract contract NearTotalLossClaimAboveSeniorBlocksExitsTests is ValuationInsu
         srt = accounting.srtBaseNav();
         claim = accounting.insuranceAmount();
 
-        // A Senior holder burns its own shares as fee (Tranche::burnSharesAsFee -> accrueFee) worth the gap + 1
+        // Even if the owner re-enables reserve fees after depletion, an open claim forces full Senior retention.
+        _fee().setFeeRetentionBps(0, 0);
+        uint256 reserveBefore = accounting.reserveNav();
+        uint256 navBefore = accounting.nav();
         uint256 burn = srt - claim + 1e18;
         _fee().accrueFee(false, burn);
-        assertGt(accounting.insuranceAmount(), accounting.srtBaseNav());
-        uint256 snapshot = vm.snapshotState();
-        uint256 claimBeforeExit = accounting.insuranceAmount();
-        uint256 navBeforeExit = accounting.nav();
-        assertEq(accounting.updateBalanceFlow(0, 0, 0, 100e18), 100e18);
-        assertEq(accounting.insuranceAmount(), claimBeforeExit - 100e18);
-        assertEq(accounting.nav(), navBeforeExit);
+        assertEq(accounting.srtBaseNav(), srt, "insured Senior fee remains with Senior");
+        assertEq(accounting.insuranceAmount(), claim, "fee does not consume the insurance claim");
+        assertEq(accounting.reserveNav(), reserveBefore, "insurance backing cannot become reserve NAV");
+        assertEq(accounting.nav(), navBefore);
         _identity();
-        vm.revertToState(snapshot);
 
-        // RESERVE_MANAGER_ROLE can hand the burned fee back to Senior through distributeReserve
-        _fee().reduceReserve(burn, 0, burn);
+        // Partial exit still draws proportionally from insurance and the strategy.
+        uint256 expectedInsurance = Math.mulDiv(100e18, claim, srt);
         slice = accounting.updateBalanceFlow(0, 0, 0, 100e18);
-        assertLe(slice, 100e18);
+        assertEq(slice, expectedInsurance);
+        assertLt(slice, 100e18);
+        assertEq(accounting.srtBaseNav(), srt - 100e18);
+        assertEq(accounting.insuranceAmount(), claim - expectedInsurance);
+        assertEq(accounting.nav(), navBefore - (100e18 - expectedInsurance));
+        _identity();
+
+        // The final exit consumes the remaining Senior claim without any reserve redistribution.
+        uint256 remainingClaim = accounting.insuranceAmount();
+        assertEq(accounting.updateBalanceFlow(0, 0, 0, srt - 100e18), remainingClaim);
+        assertEq(accounting.srtBaseNav(), 0);
+        assertEq(accounting.insuranceAmount(), 0);
+        assertEq(accounting.reserveNav(), reserveBefore);
+        _identity();
     }
 
     function test_smallPoolExcessClaimDoesNotBlockExit() public {

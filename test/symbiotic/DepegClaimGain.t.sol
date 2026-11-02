@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
+
 import { PerformanceFeeSuspensionTest } from "./PerformanceFeeSuspension.t.sol";
 
 interface IDepegClaimAccounting {
@@ -28,15 +30,28 @@ contract DepegClaimGainTest is PerformanceFeeSuspensionTest {
                 mockStrategyTvl += gains[i];
                 a.totalAssets();
                 a.updateAccounting();
-                assertEq(a.insuranceAmount(), 501e18);
-                assertEq(a.srtInsuranceFundNav(), 501e18);
+                uint256 credit = a.srtInsuranceFundNav();
+                assertEq(a.insuranceAmount(), credit, "gain must not detach the claim from valuation credit");
+                if (variant < 2) {
+                    assertEq(credit, 501e18, "Accounting/Discrete retain credit until valuation resync");
+                } else {
+                    // DYS/MTM resize coverage after ordinary updates, including gains that restore Junior backing.
+                    uint256 principal = a.srtBaseNav() - credit;
+                    uint256 needed = Math.saturatingSub(
+                        Math.mulDiv(principal, 1e18, 0.4e18) - principal,
+                        Math.saturatingSub(a.jrtBaseNav(), 1e18)
+                    );
+                    assertEq(credit, needed, "credit matches the remaining valuation shortfall");
+                    assertLe(credit, 501e18, "this gain must not increase the claim");
+                }
+                assertEq(a.jrtBaseNav() + a.srtBaseNav() + a.reserveNav(), mockStrategyTvl + credit);
                 assertEq(a.reserveNav(), gains[i] / 10);
                 assertEq(a.srtFundNav(), 0, "earnings retain ordinary valuation protection");
                 uint256 seniorBeforeRepeg = a.srtBaseNav();
                 a.setValuationPrice(1e18);
                 assertEq(a.insuranceAmount(), 0);
                 assertEq(a.srtInsuranceFundNav(), 0);
-                assertEq(a.srtBaseNav(), seniorBeforeRepeg - 501e18);
+                assertEq(a.srtBaseNav(), seniorBeforeRepeg - credit);
                 assertEq(a.jrtBaseNav() + a.srtBaseNav() + a.reserveNav(), mockStrategyTvl);
                 a.setValuationPrice(0.9e18);
                 (, uint256 seniorEffective,) = a.totalAssets();

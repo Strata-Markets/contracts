@@ -29,7 +29,11 @@ contract GuardianPoCsTest is Test {
     function testJrtSupplyRunawayTest_test_poc() public {
         JrtSupplyRunawayTest jrtSupplyRunawayTest = new JrtSupplyRunawayTest();
         jrtSupplyRunawayTest.setUp();
-        vm.expectRevert(bytes("(PoC) JRT deposit is still enabled"));
+        // Deposits now revert at the shortfall threshold instead of setting the pause flag.
+        vm.expectRevert(abi.encodeWithSelector(
+            StrataCDO.Shortfall.selector,
+            uint256(999999936562089474)
+        ));
         jrtSupplyRunawayTest.pocJrtSupplyRunawayDueToTinyPrice();
     }
 
