@@ -966,7 +966,8 @@ contract DYSAccounting is IAccounting, CDOComponent {
     {
         uint256 liveProjection = _srtFlowProjection();
         uint256 seniorNav = srtBaseNav;
-        uint256 juniorNav = jrtBaseNav;
+        // Match the Junior backing used to price the exit, capped by settled NAV.
+        uint256 juniorNav = Math.min(jrtBaseNav, jrtNavProjected);
         if (useConservativePrice) {
             liveProjection = Math.min(liveProjection, seniorNav);
             seniorNav -= liveProjection;
