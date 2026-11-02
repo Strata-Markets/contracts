@@ -267,6 +267,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
         int256 srtPnLProjected;
         uint256 srtPaidProjected;
         uint256 srtPnLBenchmark;
+        uint256 benchmarkIndex;
+        uint256 indexTimestamp;
         uint256 epochStart;
         uint256 strategyRate;
         uint256 feeWatermarkNav;
@@ -427,6 +429,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
             state.srtPaidProjected = srtPaidProjected;
         }
         state.srtPnLBenchmark = srtPnLBenchmark;
+        if (useBenchmarkProjection) {
+            state.benchmarkIndex = benchmarkIndex;
+            state.indexTimestamp = indexTimestamp;
+        }
         state.feeWatermarkNav = feeWatermarkNav;
         state.underwriterFeeNav = underwriterFeeNav;
         state.insuranceAmount = insuranceAmount;
@@ -554,6 +560,11 @@ contract MTMAccounting is IAccounting, CDOComponent {
             state.srtPnLProjected = 0;
             state.srtPaidProjected = 0;
             state.srtPnLBenchmark = 0;
+            if (useBenchmarkProjection) {
+                // Match updateIndex at the reconciliation boundary before previewing the live mark.
+                state.benchmarkIndex = getBenchmarkIndexT1(navT1Time);
+                state.indexTimestamp = navT1Time;
+            }
             state.lastAccrual = navT1Time;
             state.feeWatermarkNav = navT1 > state.feeWatermarkNav ? navT1 : state.feeWatermarkNav;
             if (useRatesForReconciliation) {
@@ -613,7 +624,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
                 navT1Time,
                 navMTM,
                 navMTMTime,
-                block.timestamp,
+                isReconciliation && navMTMTime > navT1Time ? navT1Time : block.timestamp,
                 state
             );
 
@@ -691,6 +702,11 @@ contract MTMAccounting is IAccounting, CDOComponent {
             state.srtPnLProjected = 0;
             state.srtPaidProjected = 0;
             state.srtPnLBenchmark = 0;
+            if (useBenchmarkProjection) {
+                // Match updateIndex at the reconciliation boundary before previewing the live mark.
+                state.benchmarkIndex = getBenchmarkIndexT1(navT1Time);
+                state.indexTimestamp = navT1Time;
+            }
             state.lastAccrual = navT1Time;
             state.feeWatermarkNav = navT1 > state.feeWatermarkNav
                 ? navT1
@@ -1585,7 +1601,11 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
         // Include the final interval before unwinding projection; views and settlement use the same entitlement.
         if (useBenchmarkProjection && Math.min(jrtNavT0Real, jrtNavT0Projected) > ONE_ASSET) {
-            int256 benchmarkGain = calculateGain(srtNavT0, getBenchmarkIndexT1(timestamp), benchmarkIndex);
+            int256 benchmarkGain = calculateGain(
+                srtNavT0,
+                calculateTargetIndex(state.benchmarkIndex, state.indexTimestamp, timestamp, aprTarget),
+                state.benchmarkIndex
+            );
             if (benchmarkGain > 0) {
                 uint256 pendingBenchmark = uint256(benchmarkGain);
                 uint256 maxProtectedGain = Math.saturatingSub(Math.min(jrtNavT0Real, jrtNavT0Projected), ONE_ASSET);
