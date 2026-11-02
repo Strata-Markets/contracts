@@ -113,13 +113,22 @@ contract Tranche is ITranche, CDOComponent, ERC4626Upgradeable, ERC20PermitUpgra
     /**
      * @dev Extends {IERC4626-maxWithdraw} to handle the paused state and the TVL ratio
      *      For public use (includes actual fee calculation).
+     *      Token-independent protocol maximum in base assets; excludes strategy route limits.
+     *      Use maxWithdraw(token, owner) for the selected route. Unlike standard ERC-4626 expectations,
+     *      this may remain positive while the asset() route is paused; execution enforces route limits.
      */
     function maxWithdraw(address owner) public view override(ERC4626Upgradeable, IERC4626) returns (uint256 assetsNet) {
         uint256 sharesGross = balanceOf(owner);
         assetsNet = Math.min(previewRedeem(sharesGross), cdo.maxWithdraw(address(this), owner));
     }
 
-    /** @dev Extends {IERC4626-maxRedeem} to handle the paused state and the TVL ratio */
+    /**
+     * @dev Extends {IERC4626-maxRedeem} to handle the paused state and the TVL ratio.
+     *      Token-independent protocol maximum in shares; excludes strategy route limits.
+     *      Use maxWithdraw(token, owner) for the selected route's capacity in token units.
+     *      Unlike standard ERC-4626 expectations, this may remain positive while the asset() route
+     *      is paused; execution enforces the selected route's limits.
+     */
     function maxRedeem(address owner) public view override(ERC4626Upgradeable, IERC4626) returns (uint256 sharesGross) {
         uint256 assetsProtocolMax = cdo.maxWithdraw(address(this), owner);
         uint256 sharesProtocolMax = _convertToShares(

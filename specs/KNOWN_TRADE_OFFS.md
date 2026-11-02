@@ -114,3 +114,32 @@ Other Junior holders can lose ordinary withdrawal capacity. Low-coverage cooldow
 
 Matured cooldown withdrawals bypass the accounting ratio restriction, subject to pauses and other execution checks. Consequently, the minimum ratio is not an unconditional post-redemption floor. A larger admission buffer does not permanently commit Junior capital.
 
+## KT-005: Standard withdrawal maxima exclude strategy route limits
+
+**Status:** Accepted integration limitation
+**Reference:** Cyfrin f-76, strategy withdrawal route limits
+
+### Behavior and conditions
+
+`Tranche.maxWithdraw(owner)` and `Tranche.maxRedeem(owner)` report token-independent protocol maxima, denominated in base assets and shares respectively. They include protocol restrictions but do not include strategy route limits. A standard maximum can therefore remain positive while the `asset()` withdrawal route is paused or has a lower strategy capacity.
+
+This intentionally differs from standard ERC-4626 expectations, where these maxima describe withdrawals through the vault's `asset()` route.
+
+### Acceptance rationale
+
+The same maxima are used internally by withdrawals and redemptions in other supported tokens. Keeping them token-independent avoids applying the base-token route's pause or capacity to an otherwise enabled route.
+
+### Impact and mitigation
+
+Generic ERC-4626 integrations can submit a withdrawal within the advertised standard maximum and encounter a revert. Execution still enforces the selected route's strategy limits and rolls back the failed transaction.
+
+Integrations should query `maxWithdraw(token, owner)` for the selected withdrawal route. Its result is denominated in that token's units, not shares or necessarily base assets. Saturn's strategy hook returns zero for unsupported or paused withdrawal routes. Token-aware queries do not remove the other accepted maximum-view limitations in this register, and state can change before execution.
+
+### Reconsider when
+
+- Generic ERC-4626 integrations require the standard maxima to reflect the base-token route.
+- Route-independent internal checks can be separated from public maxima without blocking enabled alternate routes, share-lock requests, or fee burns.
+
+### Possible fix and validation
+
+Apply the `asset()` route's strategy limit to public standard maxima while retaining separate token-independent execution checks where required. The current policy and Saturn route behavior are covered by `test/PoC/Cyfrin/TrancheMaxViewsSaturnRoutePauses.t.sol`, including independent tranche/token pauses, reopening, and an enabled sUSDat exit while USDat is paused.
