@@ -84,34 +84,36 @@ contract NestMTMSameBlockSnapshotTest is MTMStackBase {
         cdo.updateAccounting();
     }
 
-    function _assertSameBlockThenFreshSnapshot() internal {
-        uint256 storedNav = accounting.nav();
-        uint256 anchor = accounting.lastReconciliation();
-        uint256 live = nest.totalAssets();
-        assertTrue(live != storedNav);
-        (uint256 settled, uint256 settledTime, uint256 mark, uint256 markTime) = nest.totalAssetsSnapshot(storedNav, anchor);
-        assertEq(settled, storedNav);
-        assertEq(mark, storedNav);
-        assertEq(settledTime, markTime);
-        vm.warp(vm.getBlockTimestamp() + 1);
-        (settled, settledTime, mark, markTime) = nest.totalAssetsSnapshot(storedNav, anchor);
-        assertEq(settled, storedNav);
-        assertEq(mark, live);
-        assertLt(settledTime, markTime);
-        vm.prank(address(jrt));
-        cdo.updateAccounting();
-    }
-
-    function test_sameBlockDonationAppearsWhenTimeAdvances() public {
+    function test_sameBlockDonationReconcilesImmediately() public {
         _firstFlow(1_000_000_000);
         nOpal.mint(address(nest), 1_000_000);
-        _assertSameBlockThenFreshSnapshot();
+        uint256 storedNav = accounting.nav();
+        uint256 live = nest.totalAssets();
+        assertGt(live, storedNav);
+        (uint256 settled, uint256 settledTime, uint256 mark, uint256 markTime) =
+            nest.totalAssetsSnapshot(storedNav, accounting.lastReconciliation());
+        assertEq(settled, live);
+        assertEq(mark, live);
+        assertEq(settledTime, block.timestamp);
+        assertEq(markTime, settledTime);
+        vm.prank(address(jrt));
+        cdo.updateAccounting();
+        assertEq(accounting.nav(), live);
     }
 
-    function test_sameBlockLossAppearsWhenTimeAdvances() public {
+    function test_sameBlockLossReconcilesImmediately() public {
         _firstFlow(1_000_000_000);
         nOpal.burn(address(nest), 1_000_000);
-        _assertSameBlockThenFreshSnapshot();
+        uint256 live = nest.totalAssets();
+        (uint256 settled, uint256 settledTime, uint256 mark, uint256 markTime) =
+            nest.totalAssetsSnapshot(accounting.nav(), accounting.lastReconciliation());
+        assertEq(settled, live);
+        assertEq(mark, live);
+        assertEq(settledTime, block.timestamp);
+        assertEq(markTime, settledTime);
+        vm.prank(address(jrt));
+        cdo.updateAccounting();
+        assertEq(accounting.nav(), live);
     }
 
     function test_accountingStillRejectsInconsistentCustomSnapshot() public {

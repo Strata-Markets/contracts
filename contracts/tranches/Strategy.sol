@@ -139,9 +139,9 @@ abstract contract Strategy is IStrategy, CDOComponent {
         navMTM = totalAssets();
         navMTMTime = block.timestamp;
         navT1 = totalAssets(latestNav, timestamp);
-        // Equal timestamps must report one NAV; defer a distinct same-block live mark until time advances.
+        // Equal timestamps must report one fresh NAV: reconcile same-block gains and losses.
         if (timestamp >= navMTMTime) {
-            navMTM = navT1;
+            navT1 = navMTM;
         }
         navT1Time = navMTM != navT1 ? timestamp : navMTMTime;
     }
