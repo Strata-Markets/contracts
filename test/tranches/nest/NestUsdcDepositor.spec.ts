@@ -10,6 +10,8 @@ import { Eth } from '@s/platforms/Eth';
 import { NestOpalStrategy } from '@0xc/hardhat/NestOpalStrategy/NestOpalStrategy';
 import { $require } from 'dequanto/utils/$require';
 import { $test } from '../utils/$test';
+import { ERC4626 } from 'dequanto/prebuilt/openzeppelin/ERC4626';
+import { $bigint } from 'dequanto/utils/$bigint';
 
 const test = await $hh.create('nestopal', {
     forked: 'latest',
@@ -45,6 +47,9 @@ UTest.create({
         const deployer = test.deployer;
         await $erc20.setBalanceAny(usdc, deployer.address, amount);
 
+        const nestVault = new ERC4626(Eth.nestopal.nestVault, test.client);
+        const nOPALAmount = await nestVault.previewDeposit(amount);
+
         await usdc.$receipt().approve(deployer.address, depositor.address, amount);
         await depositor.$receipt().deposit(
             deployer,
@@ -54,7 +59,7 @@ UTest.create({
             deployer.address,
             {
                 minShares: 0n,
-                swapAmountOutMinimum: 0n,
+                swapAmountOutMinimum: $bigint.multWithFloat(nOPALAmount, 0.9),
                 swapDeadline: 0n,
                 swapTokenOut: nOPAL.address,
                 data: bytes
