@@ -143,3 +143,24 @@ Integrations should query `maxWithdraw(token, owner)` for the selected withdrawa
 ### Possible fix and validation
 
 Apply the `asset()` route's strategy limit to public standard maxima while retaining separate token-independent execution checks where required. The current policy and Saturn route behavior are covered by `test/PoC/Cyfrin/TrancheMaxViewsSaturnRoutePauses.t.sol`, including independent tranche/token pauses, reopening, and an enabled sUSDat exit while USDat is paused.
+
+## KT-006: Senior exits can bear live depeg losses before insurance reconciliation
+
+### Behavior and conditions
+
+With MTM projection enabled during a valuation loss, live strategy losses can consume Junior backing already pledged to Senior. Additional insurance protection for that shortfall may not be recognized until reconciliation, despite available capacity. Junior need not be depleted in stored NAV, and an existing insurance claim is not required. Conservative pricing still uses the lower live NAV.
+
+### Acceptance rationale
+
+Redemptions reflect live losses immediately. The protocol accepts the timing difference rather than adding coverage allocation and unwind handling for this projected-loss case. Earlier exiters receive no retrospective compensation; remaining holders can benefit from coverage recognized at reconciliation.
+
+### Impact and mitigation
+
+In the auditor's example, Senior effective NAV falls from 2,500 to 2,400 base assets. A 10% holder exits for 240 instead of 250; sufficient insurance at reconciliation restores the remaining holders to 2,250. An epoch duration limits the time window, not the possible percentage shortfall.
+
+After a valuation loss, the operator assesses market conditions and may set the strategy epoch duration to zero. This requires the strategy to return fresh settled and live NAV together, with consistent timestamps, so new NAV changes reconcile on the next accounting update. It must not hide losses by returning stale settled NAV. Checkpoint and fund new coverage before reopening redemptions. With a nonzero epoch and redemptions enabled, the timing risk remains accepted.
+
+
+### Possible fix and validation
+
+Align projected valuation-loss coverage with available live Junior backing, including repeated updates, recovery, reconciliation and actual insurance payouts. The accounting-level scenarios in `test/PoC/Cyfrin/LiveMtmLossDuringDepegUncovered.t.sol` reproduce the accepted behavior; they do not execute a full Tranche/CDO withdrawal or vault payout. See [SIP-10, Section 10.1](SIPs/SIP-10-mtm-projection.md#101-live-losses-during-a-valuation-loss).

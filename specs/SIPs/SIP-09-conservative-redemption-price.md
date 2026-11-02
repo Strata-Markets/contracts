@@ -79,6 +79,8 @@ Total payout at the valuation price                   = $524.75
 
 The example assumes zero fees and a fully funded coverage token valued at $1. The $24.75 above the holder's $500 protected settled principal is intentional. The same insurance policy applies in DYS and MTM accounting; it does not make the 99 projected base units directly redeemable.
 
+During an open MTM epoch, conservative redemption still uses the lower of live and settled NAV. A live loss during a depeg can reduce Senior's payout before additional insurance protection is recognized at reconciliation; exiting holders receive no later reimbursement. Operators may remove that interval through a strategy-supported zero-duration epoch. See [SIP-10, Section 10.1](SIP-10-mtm-projection.md#101-live-losses-during-a-valuation-loss).
+
 The claim is measured after the redemption's accounting checkpoint. Reconciliation, projection unwind or valuation recovery may reduce it before an exit. This policy neither freezes earlier coverage nor crystallizes projection permanently. See the [insurance specification](../symbiotic/README.md#conservative-senior-redemptions-with-valuation-coverage).
 
 ---

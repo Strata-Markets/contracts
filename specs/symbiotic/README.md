@@ -246,6 +246,12 @@ For example, 1,000 settled Senior principal plus 99 projection and 1,099 valuati
 
 Allocation uses the current claim after accounting is checkpointed. Subsequent reconciliation, projection unwind or valuation recovery can release excess credit before redemption; this policy does not preserve a historical claim amount or permanently realize projected gain. It also does not change how pending slash proceeds are handled. See [SIP-09, Section 3.1](../SIPs/SIP-09-conservative-redemption-price.md#31-conservative-senior-redemption-during-insured-valuation-loss).
 
+### Live MTM losses before reconciliation
+
+During a depeg, a live MTM loss may reduce Junior backing already pledged to Senior without immediately adding the corresponding insurance coverage. Senior exits use that lower live value, including with conservative pricing. Additional protection may be recognized at reconciliation for the remaining holders; earlier exiters are not reimbursed. This timing difference is accepted and does not imply that all claim changes wait for reconciliation.
+
+Based on market conditions after a valuation loss, the operator may set the strategy epoch duration to zero. The strategy must then report fresh NAV as both settled and live NAV, so each newly reported change reconciles at the next accounting update. The operator should checkpoint and fund any new claim before reopening redemptions. See [SIP-10, Section 10.1](../SIPs/SIP-10-mtm-projection.md#101-live-losses-during-a-valuation-loss) for the policy and required snapshot semantics.
+
 ### Unrecoverable funding shortfall
 
 A realized-loss claim remains denominated in base assets. If it was funded during a depeg,

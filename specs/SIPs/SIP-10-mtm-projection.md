@@ -284,6 +284,30 @@ This means an MTM gain does not let new depositors mint at the older cheaper epo
 
 With conservative pricing disabled, users interact against live projected NAV. Any paid-out Senior projection MUST be tracked so reconciliation can unwind projected PnL before applying realized PnL.
 
+### 10.1 Live losses during a valuation loss
+
+During a valuation loss (`valuationPrice < 1e18`), a live MTM loss can consume Junior backing already pledged to Senior's valuation protection. The resulting additional insurance protection can be recognized only when the loss reconciles. While that loss remains projected, Senior redemptions use the lower live value, including under conservative pricing (`min(settled, live)`). An existing insurance claim is not required for this timing difference.
+
+This is an accepted allocation policy: Senior holders who exit before reconciliation bear the uncovered live loss in their redemption price and receive no later reimbursement. Holders who remain may receive additional protection at reconciliation, subject to insurance capacity and funding. The protocol does not promise the same protection for an exit before reconciliation as for a holder who remains. This policy concerns the additional shortfall caused by live losses; it does not defer all insurance claim updates until reconciliation.
+
+For example, at a valuation price of $0.40, a live loss can reduce Senior's effective NAV from 2,500 to 2,400 base assets. A 10% holder exits for 240 rather than 250 base assets. If sufficient insurance is available when the loss reconciles, the remaining 90% can be restored to 2,250. The exiter's 10-base-asset shortfall is permanent. A shorter epoch limits the exposure window, not the percentage loss.
+
+After a valuation loss, the operator assesses market conditions and MAY set the strategy's epoch duration to zero to remove this open-MTM interval. A strategy offering this mode MUST expose each fresh NAV as both `navT1` and `navMTM`, with consistent observation timestamps, rather than suppressing the loss by repeating an old settled NAV. Every newly reported NAV change then reconciles when accounting next updates; unchanged NAV need not trigger reconciliation. This mode does not change the immutable `useMTMProjection` flag, and setting zero alone is insufficient unless the strategy implements these snapshot semantics, including consistent same-block behavior.
+
+An epoch-based strategy can select the settled snapshot with:
+
+```solidity
+bool settleNow = epochDuration == 0 || block.timestamp - lastReconciliation >= epochDuration;
+navT1 = settleNow ? freshNav : accountingNav;
+navT1Time = settleNow ? block.timestamp : lastReconciliation;
+navMTM = freshNav;
+navMTMTime = block.timestamp;
+```
+
+The open-epoch branch must also keep same-timestamp snapshots consistent. The explicit zero-duration branch must take priority, including when accounting already checkpointed in the same block. Use elapsed time, not modulo. `test/PoC/Cyfrin/ZeroEpochDepegSettlement.t.sol` demonstrates the 24-hour boundary, immediate same-block reconciliation, coverage funding and a real Senior redemption through the CDO and insurance vault; strategy NAV and insurance capacity are mocked.
+
+Before reopening redemptions under this mode, the operator SHOULD checkpoint the fresh NAV and ensure newly requested coverage is funded. Epoch expiry or a zero duration does not schedule an accounting transaction. If the operator retains a nonzero epoch and permits redemptions, the lower pre-reconciliation payout described above remains accepted.
+
 ---
 
 ## 11. Invariants
