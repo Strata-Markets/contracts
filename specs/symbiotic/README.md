@@ -213,7 +213,7 @@ Symbiotic covers only the residual Junior cannot absorb.
    `nav + insuranceAmount == jrt + srt + reserve + underwriter fee` balanced  -  booking the claim alone would
    revert every `totalAssets()` with `InvalidNavSplit`.
 3. The claim settles at redemption from the `InsuranceVault`, exactly as for a strategy loss. The
-   credit itself persists while the de-peg lasts.
+   credit is resized after DYS/MTM accounting updates as the remaining valuation shortfall changes.
 4. On **re-peg**, `_resyncInsuranceFundNav` unwinds the credit: Senior hands it back and the claim is
    cancelled by the same amount, leaving `nav` untouched. Collateral already slashed stays in the
    vault as surplus rather than being credited to a tranche. Later claims reuse funded surplus
@@ -226,6 +226,16 @@ Because the coverage is credited into `srtBaseNav`, `calcEffectiveNav` stays a p
 (`jrtEffective + srtEffective == jrtFact + srtFact`); it only excludes `srtInsuranceFundNav` when
 sizing Senior's need, so compensation is not itself compensated.
 
+
+### Conservative Senior redemptions with valuation coverage
+
+During a valuation loss with insufficient Junior headroom and an outstanding insurance claim, conservative pricing applies to Senior's non-insurance position: unreconciled projection is excluded from redeemable NAV. The current insurance claim is still allocated pro rata to exiting Seniors, subject to the normal payout cap and vault funding requirements. Coverage booked for existing projection is not separately removed from the exiter's allocation.
+
+This deliberately allows Senior to forfeit projected gain itself while retaining its share of the insurance coverage associated with that gain. Underwriters must account for this exposure: existing projection can enter valuation coverage even though new projection is capped when Junior has no available headroom. Conservative pricing does not restrict the resulting payout to protection of settled principal alone.
+
+For example, 1,000 settled Senior principal plus 99 projection and 1,099 valuation credit gives 2,198 stored Senior NAV. At a valuation price of $0.50, conservative redemption excludes 99, leaving 2,099. A half-holder receives 500 strategy base units ($250) and coverage for 549.5 base units ($274.75), totaling $524.75 rather than $500. This assumes zero fees and funded coverage tokens valued at $1.
+
+Allocation uses the current claim after accounting is checkpointed. Subsequent reconciliation, projection unwind or valuation recovery can release excess credit before redemption; this policy does not preserve a historical claim amount or permanently realize projected gain. It also does not change how pending slash proceeds are handled. See [SIP-09, Section 3.1](../SIPs/SIP-09-conservative-redemption-price.md#31-conservative-senior-redemption-during-insured-valuation-loss).
 
 ### Unrecoverable funding shortfall
 

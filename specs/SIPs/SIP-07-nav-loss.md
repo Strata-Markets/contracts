@@ -92,6 +92,8 @@ valuationLoss = (valuationPrice < 1e18)
 * Senior withdraws against **effective assets**
 * Junior paused
 
+When Symbiotic insurance covers a valuation shortfall, conservative Senior redemption excludes unreconciled projection from the non-insurance NAV but retains the exiter's pro-rata share of the current insurance claim, including coverage booked for existing projection. The claim may be resized by the accounting checkpoint before redemption. See [SIP-09, Section 3.1](SIP-09-conservative-redemption-price.md#31-conservative-senior-redemption-during-insured-valuation-loss) and the [insurance policy](../symbiotic/README.md#conservative-senior-redemptions-with-valuation-coverage).
+
 ## 9. Recovery Behavior
 As valuation recovers:
 ```plaintext
