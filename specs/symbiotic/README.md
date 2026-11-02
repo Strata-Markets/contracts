@@ -26,14 +26,14 @@ per-market registry keyed by CDO address and nets shared capacity across markets
   - `request(cdo, lossAmount)`  -  **view**. Returns how much of a loss the pool can currently cover
     for a market, in that market's base asset. Bounded by the adapter's slashable stake minus
     coverage already committed to every other market (`_committedVault()`), so simultaneous
-    multi-market stress cannot over-commit the shared stake. Adds this market's funded surplus.
+    multi-market stress cannot over-commit the shared stake. Adds this market's funded surplus and unallocated pending slash proceeds.
     Reserves nothing and slashes nothing.
   - `coverAndSlash(cdo, lossBase)`  -  **the main path**, called by the market's own accounting in the
-    same transaction the claim is booked, before storing the claim increase. Reuses funded surplus,
+    same transaction the claim is booked, before storing the claim increase. Reuses funded surplus and unallocated pending proceeds,
     then slashes the buffered vault equivalent of the remainder (capped to live `slashable()`).
     Returns the sum of reused and freshly slashed coverage in base assets.
   - `confirmInsuranceClaimFunding(cdo, amount)`  -  called by the CDO during `fundInsuranceClaim` (or the owner as fallback);
-    clears the in-flight amount.
+    clears the entire pending slash batch, regardless of the funded value.
   - Registry: `setMarket`. Upgradeable / Ownable2Step / Pausable.
 - **`OracleAdapter` / `IOracleAdapter`**  -  prices base assets and the vault asset (uniBTC) in a
   common quote so claims can be sized in vault-asset terms (`_toVaultAsset` / `_toBaseAsset`).
@@ -159,6 +159,14 @@ after an off-chain swap, `payCoverage` reverts while a claim is unfunded. The ke
 to run `updateAccounting` itself, finalize the Symbiotic claim, swap, and fund the vault before
 Senior redemptions clear.
 
+### Pending slash proceeds and batch funding
+
+Before funding, released slash proceeds can back another claim for the same market. The middleware values pending collateral at the current oracle price, applies the swap buffer, and reserves enough for the existing claim after funded coverage. Only the excess is reusable. Reallocation does not reduce `pendingInsuranceClaimFunding`: those assets still need to be swapped and funded. Pending proceeds are not liquid vault coverage and cannot pay a redemption until funded.
+
+Every `fundInsuranceClaim` call finalizes the **entire pending batch**. Its confirmation clears `pendingInsuranceClaimFunding`, even when swap losses, fees or price movements make the funded value smaller. This prevents spent buffer or swap losses from appearing as reusable collateral. Operators must account for all batch proceeds before funding; partial-batch reuse is not supported. Any residual collateral outside the vault must be handled manually and is no longer counted as pending after confirmation. Existing insurance claims remain outstanding, and funding shortfalls still require a top-up or the normal write-down procedure.
+
+Before batch finalization, surplus collateral returned manually must be recorded with `confirmSlashedCollateralReturned`, so it cannot be reused. Funded surplus remains withdrawable through `withdrawSurplus`. Neither reuse nor funding resets cumulative `totalSlashed`.
+
 ### Funding shortfalls after the collateral swap
 
 Slashing values collateral at slash time and includes the configured `bufferBps` cushion.
@@ -217,8 +225,8 @@ Symbiotic covers only the residual Junior cannot absorb.
 4. On **re-peg**, `_resyncInsuranceFundNav` unwinds the credit: Senior hands it back and the claim is
    cancelled by the same amount, leaving `nav` untouched. Collateral already slashed stays in the
    vault as surplus rather than being credited to a tranche. Later claims reuse funded surplus
-   before slashing additional collateral. Both coverage previews and the owner slash path account
-   for this funding; proceeds still awaiting funding are not reusable surplus.
+   and unallocated pending proceeds before slashing additional collateral. Coverage previews and
+   `coverAndSlash` both reserve backing for live claims before reusing either source.
    The vault owner can return surplus through `withdrawSurplus` after checkpointing accounting,
    while retaining enough funded coverage for the recorded live claim.
 

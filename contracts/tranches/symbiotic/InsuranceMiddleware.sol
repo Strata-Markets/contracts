@@ -84,7 +84,7 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     // ===============================================
     // Coverage and owner functions
 
-    /// @notice Uses funded surplus first, then slashes the remaining new claim.
+    /// @notice Reuses funded surplus and unallocated pending proceeds before slashing a new claim.
     /// @dev Accounting calls before adding lossBase to insuranceAmount, so the vault reserves
     ///      only existing claims when calculating surplusCoverage().
     function coverAndSlash(address cdo, uint256 lossBase) external returns (uint256 coveredBase) {
@@ -96,7 +96,7 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
             return 0;
         }
 
-        uint256 reused = Math.min(lossBase, _fundedBase(cdo, market, true));
+        uint256 reused = _reusableBase(cdo, market, lossBase);
         if (reused > 0) {
             slashedClaimBase[cdo] += reused;
             emit CoverageReused(cdo, reused);
@@ -142,8 +142,9 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         slashedClaimBase[cdo] = Math.min(slashedClaimBase[cdo], market.accounting.insuranceAmount());
     }
 
-    /// @notice Marks a completed insurance claim funding: slashed funds were funded into the market's insurance vault.
-    /// @dev Updates funding status only; already-slashed backing remains until the claim settles.
+    /// @notice Finalizes the entire pending slash batch after funding the market's insurance vault.
+    /// @dev Clears all pending collateral even if the funded value is lower; partial-batch reuse is not supported.
+    ///      Already-slashed backing remains until the claim settles.
     ///      Called by the market's CDO itself during fundInsuranceClaim(), or by the owner as a manual fallback.
     /// @param cdo The CDO address identifying the market in the coverage registry.
     /// @param amount The funded claim amount, denominated in the market's base asset.
@@ -153,9 +154,9 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         }
 
         TMarket storage market = markets[cdo];
-        // Saturating: the injected value can exceed the booked in-flight amount when the asset
-        // price moves between the slash and the insurance claim funding.
-        market.pendingInsuranceClaimFunding = Math.saturatingSub(market.pendingInsuranceClaimFunding, _toVaultAsset(market, amount));
+        // Funding finalizes the entire pending batch, including swap losses and buffer consumption.
+        // Never reuse an oracle-valued remainder that may already have been spent by the operator.
+        market.pendingInsuranceClaimFunding = 0;
 
         emit InsuranceClaimFundingConfirmed(cdo, amount);
     }
@@ -231,9 +232,9 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
     // IInsurancePool
 
     /// @dev View: returns how much of `lossAmount` (in the market's base asset) the shared pool can
-    ///      currently cover. Funded surplus is used first. Additional capacity is slashable stake minus
-    ///      the coverage already
-    ///      committed to every market (their outstanding claims not yet slashed), so simultaneous
+    ///      currently cover. Funded surplus and unallocated pending proceeds are used first.
+    ///      Additional capacity is slashable stake minus coverage committed to every market
+    ///      (their outstanding claims not yet slashed), so simultaneous
     ///      multi-market stress cannot over-commit the shared stake. The available stake is
     ///      de-buffered by the market's bufferBps: covering B base consumes bufferedVault(B) of the
     ///      stake at slash time, so the reported capacity must divide back out that same buffer.
@@ -244,7 +245,7 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
         if (!market.enabled || lossAmount == 0) {
             return 0;
         }
-        covered = Math.min(lossAmount, _fundedBase(cdo, market, true));
+        covered = _reusableBase(cdo, market, lossAmount);
         if (covered == lossAmount) return covered;
         uint256 availableVault = Math.saturatingSub(appAdapter.slashable(), _committedVault());
         uint256 availableBase = Math.mulDiv(
@@ -273,6 +274,22 @@ contract InsuranceMiddleware is IInsuranceMiddleware, AccessControlled {
 
     // ===============================================
     // Internal functions
+
+    /// @dev Pending collateral is market-specific and remains pending when allocated to a new claim.
+    ///      Reserve its buffered value for existing claims not already backed by funded coverage.
+    function _reusableBase(address cdo, TMarket storage market, uint256 requested) internal view returns (uint256) {
+        uint256 fundedSurplus = Math.min(requested, _fundedBase(cdo, market, true));
+        if (fundedSurplus == requested || market.pendingInsuranceClaimFunding == 0) {
+            return fundedSurplus;
+        }
+        uint256 pendingBase = Math.mulDiv(
+            _toBaseAsset(market, market.pendingInsuranceClaimFunding), BPS, BPS + market.bufferBps
+        );
+        uint256 unfundedClaim = Math.saturatingSub(
+            market.accounting.insuranceAmount(), _fundedBase(cdo, market, false)
+        );
+        return fundedSurplus + Math.min(requested - fundedSurplus, Math.saturatingSub(pendingBase, unfundedClaim));
+    }
 
     /// @dev Same valuation-price basis as CDO payouts; rounds down when converting funding to base.
     ///      Pending slashing proceeds are not available funded surplus.

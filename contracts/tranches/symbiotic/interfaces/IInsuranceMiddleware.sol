@@ -9,7 +9,8 @@ interface IInsuranceMiddleware is IInsurancePool {
     /// @notice The AppAdapter this middleware controls.
     function appAdapter() external view returns (IAppAdapter);
 
-    /// @notice Marks a completed insurance claim funding for a market, reducing its in-flight slashed amount.
+    /// @notice Finalizes funding for a market and clears its entire pending slash batch.
+    /// @dev Partial-batch tracking is not supported; amount records the funded value, not collateral consumed.
     /// @param cdo The CDO address identifying the market in the coverage registry.
     /// @param amount The funded claim amount.
     function confirmInsuranceClaimFunding(address cdo, uint256 amount) external;

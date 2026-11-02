@@ -94,7 +94,7 @@ contract DepegMTMOscillationReslashTest is Test {
 
     function _slashed() internal view returns (uint256 s) { (,, s,,,) = middleware.markets(address(this)); }
 
-    function test_PoC_MTMMarkOscillationReslashesUnfundedClaim() public {
+    function test_MTMMarkOscillationReusesUnfundedClaim() public {
         a.setFloorRate(0.005e18); // Senior shares unrealized losses (floor 0.5%/day)
         a.setValuationPrice(0.4e18); // de-peg push: claim 501 base slashed as 200.4 USD
         uint256 claim0 = a.insuranceAmount();
@@ -109,15 +109,15 @@ contract DepegMTMOscillationReslashTest is Test {
             mtm = settled - 40e18; // live mark dips: resync releases credit and claim
             a.updateAccounting();
             vm.warp(block.timestamp + 1 hours);
-            mtm = settled; // live mark recovers: the claim is re-booked and fresh collateral slashed
+            mtm = settled; // live mark recovers: the claim reuses the released pending collateral
             a.updateAccounting();
         }
 
         console.log("claim before / after (base)  ", claim0, a.insuranceAmount());
         console.log("slashed before / after (USD) ", slashed0, _slashed());
-        // claim unchanged at 501 base (200.4 USD) yet 237.925 USD of collateral has been slashed
+        // The claim returns to 501 base without slashing beyond the initial 200.4 USD.
         assertEq(a.insuranceAmount(), claim0, "claim back at its starting value");
-        assertEq(_slashed(), 237.925e18, "expected 200.4 USD slashed, actual 237.925 USD");
+        assertEq(_slashed(), slashed0, "released pending collateral is reused");
     }
 }
 

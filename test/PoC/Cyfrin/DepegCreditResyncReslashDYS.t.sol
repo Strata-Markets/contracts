@@ -81,7 +81,7 @@ contract DepegDYSRealizedPnLReslashTest is Test {
 
     /// Junior 500, Senior 1,500, floor 1%/day, push to 0.4. Senior's share of realized PnL (~45%) exceeds the price,
     /// so a realized loss Senior shares under the floor releases claim and the gain that recovers it re-books the claim
-    function test_PoC_DYSRealizedLossThenGainReslashesUnfundedClaim() public {
+    function test_PoC_DYSRealizedLossThenGainReusesUnfundedClaim() public {
         _setUpMarket(500e18, 1_500e18);
         a.setFloorRate(0.01e18); // Senior shares realized losses (floor 1%/day)
         a.setValuationPrice(PRICE); // de-peg push: 1,500 / 0.4 - 1,500 - 499 = 1,751 base claim
@@ -103,7 +103,7 @@ contract DepegDYSRealizedPnLReslashTest is Test {
             _update(settled); // realized gain back to the same strategy NAV
             claim = a.insuranceAmount();
             assertGt(claim, afterLoss, "gain re-books the released claim");
-            assertGt(_slashed(), slashedBefore, "re-book slashes fresh collateral");
+            assertApproxEqAbs(_slashed(), claim * PRICE / 1e18 > slashedBefore ? claim * PRICE / 1e18 : slashedBefore, 2, "slash only beyond existing pending backing");
         }
 
         uint256 freshUsd = _slashed() - slashed0;
@@ -112,14 +112,13 @@ contract DepegDYSRealizedPnLReslashTest is Test {
         console.log("released over 5 cycles (base)", released);
         console.log("slashed before / after (USD) ", slashed0, _slashed());
         console.log("fresh slash / claim growth (USD)", freshUsd, claimGrowthUsd);
-        // with released backing reused, fresh slashing would only fund claim growth; the excess is released * price
-        assertGt(freshUsd, claimGrowthUsd + 5e18, "fresh collateral slashed beyond the claim's growth");
-        assertGt(_slashed(), claim * PRICE / 1e18 + 5e18, "slashed collateral exceeds the outstanding claim");
+        // Released backing is reused; only net claim growth requires fresh collateral.
+        assertApproxEqAbs(freshUsd, claimGrowthUsd, 10, "only claim growth needs fresh collateral");
     }
 
     /// Junior 1,000, Senior 1,000, no floor, push to 0.4. Senior's share of realized PnL (~30%) is below the price,
     /// so a realized gain releases claim, and a realized loss (all on Junior without a floor) re-books it
-    function test_PoC_DYSRealizedGainThenLossReslashesUnfundedClaim() public {
+    function test_PoC_DYSRealizedGainThenLossReusesUnfundedClaim() public {
         _setUpMarket(1_000e18, 1_000e18);
         a.setValuationPrice(PRICE); // 1,000 / 0.4 - 1,000 - 999 = 501 base claim
         uint256 claim0 = a.insuranceAmount();
@@ -140,7 +139,7 @@ contract DepegDYSRealizedPnLReslashTest is Test {
             _update(settled); // realized loss back to the same strategy NAV
             claim = a.insuranceAmount();
             assertGt(claim, afterGain, "loss re-books the released claim");
-            assertGt(_slashed(), slashedBefore, "re-book slashes fresh collateral");
+            assertApproxEqAbs(_slashed(), claim * PRICE / 1e18 > slashedBefore ? claim * PRICE / 1e18 : slashedBefore, 2, "slash only beyond existing pending backing");
         }
 
         uint256 freshUsd = _slashed() - slashed0;
@@ -149,7 +148,6 @@ contract DepegDYSRealizedPnLReslashTest is Test {
         console.log("released over 5 cycles (base)", released);
         console.log("slashed before / after (USD) ", slashed0, _slashed());
         console.log("fresh slash / claim growth (USD)", freshUsd, claimGrowthUsd);
-        assertGt(freshUsd, claimGrowthUsd + 15e18, "fresh collateral slashed beyond the claim's growth");
-        assertGt(_slashed(), claim * PRICE / 1e18 + 15e18, "slashed collateral exceeds the outstanding claim");
+        assertApproxEqAbs(freshUsd, claimGrowthUsd, 10, "only claim growth needs fresh collateral");
     }
 }

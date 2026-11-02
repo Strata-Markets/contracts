@@ -292,7 +292,14 @@ contract InsuranceClaimWriteDownFullStackTest is CoveredClaimFreezeTest {
         collateral.transfer(lossSink, remaining);
         vm.prank(cdo.owner());
         cdo.setValuationKeeper(address(this));
+        // The pending collateral also loses 10% of its USD value, leaving no reusable excess.
+        // Otherwise the base depeg makes it worth more base units and backs a new valuation claim.
+        vm.mockCall(
+            address(oracle), abi.encodeWithSignature("getPrice(address)", address(collateral)),
+            abi.encode(uint256(0.9e18), uint256(18))
+        );
         cdo.setValuationPrice(0.9e18);
+        assertEq(accounting.insuranceAmount(), 101e18);
         USDe.mint(address(this), 90.9e18);
         USDe.approve(address(cdo), 90.9e18);
         cdo.fundInsuranceClaim(address(USDe), 90.9e18);

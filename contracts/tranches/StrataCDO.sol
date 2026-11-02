@@ -568,7 +568,8 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
     ///      usually the impaired asset, so buying back into it would expose Senior to a further drop.
     ///      The outstanding `insuranceAmount` is therefore left open and settles by paying redeeming
     ///      Seniors their covered slice from the vault. The caller MUST approve this contract for
-    ///      `amount` of `token` beforehand.
+    ///      `amount` of `token` beforehand. Each funding call finalizes the entire pending slash batch;
+    ///      the operator must account for all its proceeds, including swap losses, before funding.
     /// @param token The coverage token the uniBTC was swapped into (e.g. USDC).
     /// @param amount The funded amount, in `token` units.
     function fundInsuranceClaim (address token, uint256 amount) external onlyRole(RESERVE_MANAGER_ROLE) nonReentrant {
@@ -581,7 +582,7 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         // Straight from the multisig into the vault, so only this contract needs an approval.
         SafeERC20.safeTransferFrom(IERC20(token), msg.sender, address(insuranceVault), amount);
         insuranceVault.recordFunding(token, amount);
-        // The middleware tracks the in-flight claim in base assets, so value the proceeds there too.
+        // Report funded value in base assets; confirmation clears the entire pending collateral batch.
         uint256 baseAssets = _coverageToBase(amount);
         insuranceMiddleware.confirmInsuranceClaimFunding(address(this), baseAssets);
         emit InsuranceClaimFunded(token, amount, baseAssets);
