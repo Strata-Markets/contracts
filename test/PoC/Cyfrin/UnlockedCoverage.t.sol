@@ -3,6 +3,7 @@ pragma solidity ^0.8.28;
 
 import { SharesCooldown } from "../../../contracts/tranches/base/cooldown/SharesCooldown.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { Test } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -87,7 +88,7 @@ abstract contract UnlockedCoverageBase is Test {
         cdo.configure(IAccounting(address(accounting)), strategy_, ITranche(address(jrt)), ITranche(address(srt)));
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
     }
 
     function _tranche(IERC20Metadata asset, string memory name) internal returns (Tranche) {

@@ -2,11 +2,13 @@
 pragma solidity ^0.8.28;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {UD60x18, pow, mul} from "@prb/math/src/ud60x18/Math.sol";
-import {IAccounting} from "./interfaces/IAccounting.sol";
+import {UD60x18} from "@prb/math/src/ud60x18/Math.sol";
 import {IStrataCDO} from "./interfaces/IStrataCDO.sol";
 import {IAprPairFeed} from "./interfaces/IAprPairFeed.sol";
-import {CDOComponent} from "./base/CDOComponent.sol";
+import {IAccounting} from "./interfaces/IAccounting.sol";
+import {AccountingStorage} from "./accounting/AccountingStorage.sol";
+import {AccountingSetters} from "./accounting/AccountingSetters.sol";
+import {AccountingOperations} from "./accounting/AccountingOperations.sol";
 import {UD60x18Ext} from "./utils/UD60x18Ext.sol";
 import {AccountingLib} from "./utils/AccountingLib.sol";
 import {IRiskPremiumModel} from "./accounting/premium/IRiskPremiumModel.sol";
@@ -32,17 +34,13 @@ import {IInsurancePool} from "./symbiotic/interfaces/IInsurancePool.sol";
  *   - srtNav = srtNav - srtPnLProjected + srtPnLRealized
  *   - Asset-time counters are reset
  */
-contract MTMAccounting is IAccounting, CDOComponent {
-    uint256 private constant MIGRATION_V2 = 1 << 0;
-    uint256 private constant MIGRATION_V3 = 1 << 1;
-
+contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
     uint256 constant SECONDS_PER_YEAR = 31_536_000;
 
     int64 private constant APR_FEED_BOUNDARY_MAX = 2e12; // 200%
     int64 private constant APR_FEED_BOUNDARY_MIN = 0;
     uint256 private constant APR_FEED_DECIMALS = 12;
     uint256 constant PERCENTAGE_100 = 1e18;
-    uint256 constant RESERVE_BPS_MAX = 0.2e18;
     uint256 constant UNDERWRITER_FEE_BPS_MAX = 0.2e18;
 
     uint256 private immutable ONE_ASSET;
@@ -72,176 +70,8 @@ contract MTMAccounting is IAccounting, CDOComponent {
     /// @notice When true, projection uses current strategy MTM NAV instead of APR-indexed NAV.
     bool public immutable useMTMProjection;
 
-    /// @dev The oracle to fetch the latest APR floor and APR base.
-    IAprPairFeed public aprPairFeed;
-
-    /// @dev External floor target APR for Srt
-    UD60x18 public aprTarget;
-
-    /// @dev External APR for the underlying protocol
-    UD60x18 public aprBase;
-
-    /// @dev The calculated target APR for Srt; the primary objective in calculations.
-    UD60x18 public aprSrt;
-
-    uint256 public indexTimestamp;
-    uint256 public srtTargetIndex;
-
-    uint256 public reserveBps;
-
-    /// @dev Latest balances at T0 (latest protocol interrogation)
-    uint256 public nav;
-    uint256 public jrtBaseNav;
-    uint256 public srtBaseNav;
-    uint256 public reserveNav;
-
-    /// @dev Risk parameters for Risk Premium calculation.
-    UD60x18 public riskX;
-    UD60x18 public riskY;
-    UD60x18 public riskK;
-
-    /// @notice The hard minimum TVLjrt/TVLsrt ratio.
-    uint256 public minimumJrtSrtRatio;
-
-    /// @notice The protective buffer above the minimum Jrt/Srt ratio.
-    uint256 public minimumJrtSrtRatioBuffer;
-
-    /// @notice The portion of Junior fees that is returned to its TVL. The remainder goes to the reserve.
-    uint256 public feeJrtRetentionBps;
-
-    /// @notice The portion of Senior fees that is returned to the Senior tranche TVL.
-    uint256 public feeSrtRetentionBps;
-
-    /** Accounting Storage Compatibility **/
-
-    // The index for NAV during projection
-    uint256 public navTargetIndex;
-
-    /// @notice Latest changes to "nav"
-    uint256 public navTimestamp;
-
-    /// @notice Projected Junior NAV during the rewardless periods
-    uint256 public jrtNavProjected;
-
-    /** ValuationLoss Parameters */
-
-    /// @notice The current valuation price of the underlying asset in USD terms
-    /// @dev Scaled to 1e18 where 1e18 = $1.00. Maximum value is 1e18 (representing $1.00)
-    ///      When below 1e18, indicates a valuation loss has occurred
-    uint128 public valuationPrice;
-
-    /// @notice Timestamp of the last valuation price update
-    /// @dev Updated whenever the valuation keeper pushes a new valuation price
-    uint64 public valuationUpdatedAt;
-
-    /// @notice Timestamp when the valuation loss state was entered
-    /// @dev Set when valuationPrice drops below 1e18 for the first time
-    ///      Used to calculate the grace period during which deposits/withdrawals are restricted
-    uint64 public valuationEnteredAt;
-
-    /// @notice Duration in seconds of the grace period after entering valuation loss
-    /// @dev During this period after valuationEnteredAt, deposits and withdrawals are disabled
-    ///      to prevent front-running and allow for proper loss validation
-    uint64 public valuationGracePeriod;
-
-    /// @notice Gross Senior NAV deposited during valuation loss and self-funded by Senior.
-    uint256 public srtFundedGrossNav;
-
-    /// @notice Remaining entry loss in USD, scaled to base-asset decimals; converted and capped when used.
-    /// @dev Per-entry valuation recovery is not bucketed; small mismatches are socialized through the Senior share price.
-    uint256 public srtFundNav;
-
-    /// @notice High-water mark used to charge performance fees only on new NAV gains.
-    uint256 public feeWatermarkNav;
-
-    /// @notice Timestamp of the last oracle-detected NAV change; used as time anchor when useNavAtReconciliation is true
-    uint256 public lastReconciliation;
-
-
-    /*****************************************************************************
-     *                  DYS-specific State Variables                              *
-     *****************************************************************************/
-
-    /// @notice Benchmark index for tracking Senior Benchmark PnL during projection (used in Benchmark mode)
-    uint256 public benchmarkIndex;
-
-    /// @notice Time-weighted Senior NAV (asset-time)
-    uint256 public srtNavTime;
-
-    /// @notice Time-weighted total system NAV (asset-time) (incl. projected assets)
-    uint256 public navTime;
-
-    /// @notice Time-weighted total system NAV (asset-time) (net assets during projection)
-    uint256 public navTimeNet;
-
-    /// @notice Timestamp of last asset-time accrual
-    uint256 public lastAccrual;
-
-    /// @notice Signed Senior projection for the epoch, including projection already paid out.
-    int256 public srtPnLProjected;
-
-    /// @notice Asset-time of positive unpaid Senior projection.
-    /// @dev Negative projection is restored directly when accruing srtNavTime.
-    uint256 public srtProjectedPnLTime;
-
-    /// @notice Projection paid during this epoch that is not offset by projection purchased by deposits.
-    uint256 public srtPaidProjected;
-
-    /// @notice Accumulated benchmark Senior PnL during the current epoch
-    uint256 public srtPnLBenchmark;
-
-    /// @notice Senior NAV at the start of the current floor window (anchor)
-    uint256 public windowStartSrtNav;
-
-    /// @notice Cumulative net Senior flows (deposits - withdrawals) during the window
-    int256 public windowNetFlows;
-
-    /// @notice End timestamp of the current floor window
-    uint256 public windowEnd;
-
-    /// @notice Daily floor rate (1e18 = 100%). E.g. 0.001e18 = 0.1%/day
-    uint256 public floorRate;
-
-    /// @notice Timestamp of the epoch start (last reconciliation)
-    uint256 public epochStart;
-
-    /// @notice Exchange rate of the senior sub-strategy at the start of the current epoch.
-    /// @dev Stored after each reconciliation as T0 for the next epoch's true-up.
-    ///      A zero starting rate uses proportional NAV-time allocation for that epoch, even in rate mode.
-    uint256 public strategyRate;
-
-    /// @notice Optional external risk premium model.
-    /// @dev When unset, accounting falls back to the legacy `x + y * TVL_ratio_sr^k`
-    ///      model configured by `riskX`, `riskY`, and `riskK`.
-    IRiskPremiumModel public riskPremiumModel;
-
-    /* Underwriter Fee (Symbiotic) Parameters */
-
-    /// @notice Share of raw Senior risk premium used to derive the underwriter fee rate (1e18 = 100%)
-    uint256 public underwriterFeeBps;
-
-    /// @notice Accrued underwriter fee owed to underwriters, not yet paid out (part of nav)
-    uint256 public underwriterFeeNav;
-
-    /// @notice Coverage claimed from the insurance pool but not yet settled, in base assets
-    /// @dev Holds Senior whole against assets not yet in the strategy, so the NAV identity carries a
-    ///      `- insuranceAmount` term. Cleared as redeeming Seniors are paid their covered slice from
-    ///      the InsuranceVault. See base Accounting for the full model.
-    uint256 public insuranceAmount;
-
-    /// @notice The Symbiotic insurance pool queried for coverage
-    /// @dev When unset (address(0)) no coverage is requested and losses hit the tranches as usual.
-    IInsurancePool public insurancePool;
-
-    /// @notice Portion of the Senior valuation loss (base-asset de-peg) covered by Symbiotic.
-    /// @dev Tops Senior up in calcEffectiveNav for the de-peg loss Junior could not absorb, so Senior
-    ///      reads whole. It is external capital backed by slashed collateral and tracked in
-    ///      insuranceAmount. Booked in setValuationPrice, unwound on re-peg in _resyncsrtFundNav.
-    uint256 public srtInsuranceFundNav;
-
-    /// @notice Unmatched projection purchased by live-priced Senior deposits during this epoch.
-    /// @dev Signed projection purchased by deposits, excluded from unrealized PnL and matched on exits.
-    int256 public srtBoughtProjected;
+    /// @notice Initializers and setters, executed via delegatecall on this contract's storage.
+    address public immutable SETTERS;
 
     error InvalidNavSplit(
         uint256 navT1,
@@ -284,7 +114,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
     event ReservePercentageChanged(uint256 reserveBps);
     event UnderwriterFeeReduced(uint256 amount);
     event InsuranceClaimed(uint256 amount, uint256 insuranceAmount);
-    event RiskParametersChanged(UD60x18 x, UD60x18 y, UD60x18 k);
     event RiskModelChanged(address riskPremiumModel);
     event MinimumJrtSrtRatioChanged(uint256 ratio);
     event MinimumJrtSrtRatioBufferChanged(uint256 ratio);
@@ -315,76 +144,72 @@ contract MTMAccounting is IAccounting, CDOComponent {
 
         // MTM projection requires reconciliation-anchored NAV timestamps.
         require(!useMTMProjection_ || useNavAtReconciliation_, "UnsupportedNavTime");
+
+        SETTERS = address(new AccountingSetters(useNavAtReconciliation_, useRatesForReconciliation_));
     }
 
-    function initialize(
-        address owner_,
-        address acm_,
-        IStrataCDO cdo_,
-        IAprPairFeed aprPairFeed_
-    ) public virtual reinitializer(3) {
-        // This function sets the initializer version directly to the latest version.
-        // The guard ensures it can only be used for fresh deployments.
-        require(address(cdo) == address(0), "AlreadyInitialized");
-        AccessControlled_init(owner_, acm_);
-        cdo = cdo_;
+    /*****************************************************************************
+     *                  Setters module (AccountingSetters)                        *
+     *****************************************************************************/
 
-        aprPairFeed = aprPairFeed_;
+    /// @dev See AccountingSetters.initialize
+    function initialize(address, address, IStrataCDO, IAprPairFeed) public virtual { _delegateToSetters(); }
+    /// @dev See AccountingSetters.initializeV2
+    function initializeV2() external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.initializeV3
+    function initializeV3() external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.setRiskModel
+    function setRiskModel(IRiskPremiumModel) external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.setAprPairFeed
+    function setAprPairFeed(IAprPairFeed) external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.setFloorRate
+    function setFloorRate(uint256) external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.setReserveBps
+    function setReserveBps(uint256) external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.setFeeRetentionBps
+    function setFeeRetentionBps(uint256, uint256) external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.setMinimumJrtSrtRatio
+    function setMinimumJrtSrtRatio(uint256) external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.setMinimumJrtSrtRatioBuffer
+    function setMinimumJrtSrtRatioBuffer(uint256) external { _delegateToSetters(); }
+    /// @dev See AccountingSetters.setValuationGracePeriod
+    function setValuationGracePeriod(uint64) external { _delegateToSetters(); }
 
-        riskX = UD60x18.wrap(0.2e18);
-        riskY = UD60x18.wrap(0.2e18);
-        riskK = UD60x18.wrap(0.3e18);
-
-        srtTargetIndex = 1e18;
-        navTargetIndex = 1e18;
-        indexTimestamp = block.timestamp;
-        navTimestamp = block.timestamp;
-        minimumJrtSrtRatio = 0.05e18;
-        minimumJrtSrtRatioBuffer = 0.06e18;
-
-        _initV2();
-        _initV3();
-    }
-
-    function initializeV2() external reinitializer(2) {
-        _initV2();
-    }
-    function initializeV3() external reinitializer(3) {
-        _initV2();
-        _initV3();
-    }
-    /// @notice Migration V2: valuation loss support and performance fee high-watermark.
-    /// @dev V2 migration is compatible across all Strata accounting contracts.
-    function _initV2() internal {
-        if (migrationBitmap & MIGRATION_V2 != 0) {
+    /// @notice Runs accounting math for the setters module; callable only by this contract.
+    /// @dev Under delegatecall the module's address(this) is the proxy, so its call lands here.
+    function selfCall(uint256 op) external {
+        if (msg.sender != address(this)) {
+            revert InvalidCaller(msg.sender);
+        }
+        if (op == OP_CHECKPOINT) {
+            (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
+            updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
             return;
         }
-        valuationPrice = 1e18;
-        feeWatermarkNav = nav;
-        if (useNavAtReconciliation) {
-            lastReconciliation = navTimestamp;
-        }
-        migrationBitmap |= MIGRATION_V2;
-    }
-
-    /// @notice Migration V3: DYS asset-time tracking, Senior true-up, and Senior loss floor.
-    /// @dev V3 migration upgrades Strata accountings to DYS accounting.
-    function _initV3() internal {
-        if (migrationBitmap & MIGRATION_V3 != 0) {
+        if (op == OP_UPDATE_APR_SRT) {
+            updateAprSrt(aprTarget, aprBase);
             return;
         }
-        benchmarkIndex = 1e18;
-        lastAccrual = block.timestamp;
-        epochStart = block.timestamp;
-        windowEnd = block.timestamp + 1 days;
-        windowStartSrtNav = 0;
-        windowNetFlows = 0;
-        floorRate = 0;
-        // Fresh CDOs configure the strategy later; their first reconciliation uses proportional allocation.
-        if (useRatesForReconciliation && address(cdo.strategy()) != address(0)) {
-            strategyRate = cdo.strategy().getRate();
+        if (op == OP_SYNC_APRS) {
+            syncAprs();
+            return;
         }
-        migrationBitmap |= MIGRATION_V3;
+        if (op == OP_RESET_FLOOR_WINDOW) {
+            // Anchor settled Senior NAV, excluding unrealized PnL.
+            (, windowStartSrtNav) = _undoProjection(srtBaseNav, jrtBaseNav);
+            return;
+        }
+        revert("Unknown");
+    }
+
+    /// @dev Forwards the current call to the setters module and bubbles up its revert data.
+    function _delegateToSetters() private {
+        (bool ok, bytes memory ret) = SETTERS.delegatecall(msg.data);
+        if (!ok) {
+            assembly ("memory-safe") {
+                revert(add(ret, 32), mload(ret))
+            }
+        }
     }
 
     /*****************************************************************************
@@ -1663,7 +1488,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
         uint256 srtNavTime_ = navTimeAccrued > 0 ? srtNavTimeAccrued : Math.saturatingSub(srtNavT0, state.insuranceAmount);
         uint256 navTime_ = navTimeAccrued > 0 ? navTimeAccrued : navT0;
 
-        // Note: riskPremium is capped at 1e18 (100%) via setRiskParameters validation
+        // Note: riskPremium is capped at 1e18 (100%) via setRiskModel validation
         UD60x18 riskPremium = calculateRiskPremium();
         // Risk premium: srtFactor = 1 - riskPremium
         uint256 srtFactor = 1e18 - riskPremium.unwrap();
@@ -2071,26 +1896,10 @@ contract MTMAccounting is IAccounting, CDOComponent {
             srtEffective == 0 ? 0 : ((srtEffective * 1e18) / (srtEffective + jrtEffective))
         );
 
-        if (address(riskPremiumModel) != address(0)) {
-            return riskPremiumModel.riskPremium(tvlRatio);
+        if (address(riskPremiumModel) == address(0)) {
+            return UD60x18.wrap(0);
         }
-
-        UD60x18 riskPremium = calculateRiskPremiumInner(
-            riskX,
-            riskY,
-            riskK,
-            tvlRatio
-        );
-        return riskPremium;
-    }
-    function calculateRiskPremiumInner(
-        UD60x18 x,
-        UD60x18 y,
-        UD60x18 k,
-        UD60x18 tvlRatioSrt
-    ) internal pure returns (UD60x18) {
-        UD60x18 riskPremium = x + y * pow(tvlRatioSrt, k);
-        return riskPremium;
+        return riskPremiumModel.riskPremium(tvlRatio);
     }
 
     // Fetch APRs from Feed
@@ -2128,7 +1937,7 @@ contract MTMAccounting is IAccounting, CDOComponent {
     }
     function updateAprSrt(UD60x18 aprTarget_, UD60x18 aprBase_) internal {
         UD60x18 risk = calculateRiskPremium();
-        UD60x18 aprSrt1 = mul(aprBase_, UD60x18.wrap(1e18) - risk);
+        UD60x18 aprSrt1 = UD60x18Ext.mul(aprBase_, UD60x18.wrap(1e18) - risk);
         aprSrt = UD60x18Ext.max(aprTarget_, aprSrt1);
     }
 
@@ -2175,96 +1984,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
         syncAprs();
     }
 
-    function setRiskParameters(
-        UD60x18 riskX_,
-        UD60x18 riskY_,
-        UD60x18 riskK_
-    ) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
-        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
-        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
-        riskX = riskX_;
-        riskY = riskY_;
-        riskK = riskK_;
-        UD60x18 risk = calculateRiskPremiumInner(
-            riskX_,
-            riskY_,
-            riskK_,
-            UD60x18.wrap(1e18)
-        );
-        require(risk.unwrap() < PERCENTAGE_100, ">=100%");
-        emit RiskParametersChanged(riskX_, riskY_, riskK_);
-        updateAprSrt(aprTarget, aprBase);
-    }
-
-    /// @notice Sets the optional external risk premium model.
-    /// @dev Set to the zero address to use the legacy `x + y * TVL_ratio_sr^k` model.
-    /// @param riskPremiumModel_ External model contract, or zero address for the legacy model.
-    function setRiskModel(IRiskPremiumModel riskPremiumModel_) external onlyRole(UPDATER_STRAT_CONFIG_ROLE) {
-        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
-        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
-        if (address(riskPremiumModel_) != address(0)) {
-            UD60x18 risk = riskPremiumModel_.riskPremium(UD60x18.wrap(1e18));
-            require(risk.unwrap() < PERCENTAGE_100, ">=100%");
-        }
-        riskPremiumModel = riskPremiumModel_;
-        emit RiskModelChanged(address(riskPremiumModel_));
-        updateAprSrt(aprTarget, aprBase);
-    }
-
-    /// @notice Sets the APR feed contract for fetching APR target and APR base.
-    /// @dev Finalizes accounting with the current feed before switching, then starts the new APR period.
-    /// @param aprPairFeed_ The address of the new APR feed contract.
-    function setAprPairFeed(IAprPairFeed aprPairFeed_) external onlyOwner {
-        require(aprPairFeed_.decimals() == APR_FEED_DECIMALS, "InvalidFeed");
-        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
-        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
-        syncAprs();
-        aprPairFeed = aprPairFeed_;
-        emit AprPairFeedChanged(address(aprPairFeed_));
-        syncAprs();
-    }
-
-    /// @notice Sets the maximum allowed daily loss rate for the Senior tranche
-    /// @dev The floor rate defines the maximum percentage loss Senior can experience over a rolling
-    ///      24-hour window. This protection mechanism ensures Senior holders have a predictable
-    ///      worst-case scenario during periods of strategy underperformance.
-    ///      **Mechanism**:
-    ///      - The floor is calculated as: `srtNavFloor = (windowStartSrtNav + windowNetFlows) * (1 - floorRate)`
-    ///      - At reconciliation, if `srtNavT1 < srtNavFloor`, Junior transfers assets to bring Senior back to the floor
-    ///      - The window resets every 24 hours at reconciliation, capturing the new baseline Senior NAV
-    ///      **Window Extension**:
-    ///      If no reconciliation occurs for >24h, the allowed loss extends proportionally
-    ///      **State Reset**:
-    ///      Calling this function triggers accounting update and immediately resets the floor window
-    /// @param rate The maximum daily loss rate in 18-decimal fixed-point (e.g., 0.01e18 = 1% per day)
-    /// @custom:example If floorRate = 0.005e18 (0.5%/day) and windowStartSrtNav = 1000 USDC:
-    ///                 - Floor = 1000 * (1 - 0.005) = 995 USDC
-    ///                 - If reconciliation shows srtNavT1 = 990 USDC, Junior transfers 5 USDC to Senior
-    ///                 - If Junior cannot cover the full 5 USDC, it transfers up to its safe assets
-    function setFloorRate(uint256 rate) external onlyOwner {
-        require(rate <= 0.01e18, "FloorRateTooHigh"); // max 1%/day
-        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
-        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
-        floorRate = rate;
-
-        // Anchor settled Senior NAV, retaining valuation credit but excluding unrealized PnL.
-        (, windowStartSrtNav) = _undoProjection(srtBaseNav, jrtBaseNav);
-        windowNetFlows = 0;
-        windowEnd = block.timestamp + 1 days;
-        emit FloorRateChanged(rate);
-    }
-
-    function setReserveBps(uint256 bps) external onlyOwner {
-        require(
-            bps <= RESERVE_BPS_MAX && bps != reserveBps,
-            "InvalidNewReserve"
-        );
-        (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
-        updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
-        reserveBps = bps;
-        emit ReservePercentageChanged(reserveBps);
-    }
-
     /// @notice Sets the share of raw Senior risk premium used for the underwriter fee rate
     /// @dev Only callable by the CDO, which relays the rate from the Symbiotic insurance middleware
     function setUnderwriterFeeBps(uint256 bps) external onlyCDO {
@@ -2280,33 +1999,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
         (uint256 navT1, uint256 navT1Time, uint256 navMTM, uint256 navMTMTime) = _currentNavs();
         updateAccountingInner(navT1, navT1Time, navMTM, navMTMTime);
         insurancePool = insurancePool_;
-    }
-
-    function setFeeRetentionBps(
-        uint256 jrtRetentionBps,
-        uint256 srtRetentionBps
-    ) external onlyOwner {
-        require(jrtRetentionBps <= PERCENTAGE_100, "InvalidJrtRetention");
-        require(srtRetentionBps <= PERCENTAGE_100, "InvalidSrtRetention");
-        feeJrtRetentionBps = jrtRetentionBps;
-        feeSrtRetentionBps = srtRetentionBps;
-        emit FeeRetentionChanged(feeJrtRetentionBps, feeSrtRetentionBps);
-    }
-
-    function setMinimumJrtSrtRatio(uint256 ratio) external onlyOwner {
-        require(ratio <= minimumJrtSrtRatioBuffer, "RatioAboveSoftFloor");
-        minimumJrtSrtRatio = ratio;
-        emit MinimumJrtSrtRatioChanged(ratio);
-    }
-
-    function setMinimumJrtSrtRatioBuffer(uint256 ratio) external onlyOwner {
-        require(ratio <= 100 * PERCENTAGE_100, "RatioTooHigh");
-        require(
-            ratio >= minimumJrtSrtRatio && ratio != 0,
-            "RatioBelowHardFloor"
-        );
-        minimumJrtSrtRatioBuffer = ratio;
-        emit MinimumJrtSrtRatioBufferChanged(ratio);
     }
 
     /// @dev Suspends performance fees after a loss; only setReserveBps can re-enable them.
@@ -2389,13 +2081,6 @@ contract MTMAccounting is IAccounting, CDOComponent {
         extraNeeded = Math.saturatingSub(extraNeeded, _cappedSrtFundNav(price));
         uint256 juniorAvailable = Math.saturatingSub(jrtBaseNav, ONE_ASSET);
         return Math.saturatingSub(extraNeeded, juniorAvailable);
-    }
-
-    /// @notice Sets the grace period
-    function setValuationGracePeriod (uint64 period) external onlyRole(PAUSER_ROLE) {
-        require(period <= 1 days, "GracePeriodTooLong");
-        valuationGracePeriod = period;
-        emit ValuationGracePeriodChanged(period);
     }
 
     /// @dev Scale self-funding with Senior NAV reductions from fees or reconciliation.

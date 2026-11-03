@@ -6,6 +6,8 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { IERC20Metadata } from "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
+import { IRiskPremiumModel } from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { AccessControlManager } from "../../../contracts/governance/AccessControlManager.sol";
 import { StrataCDO } from "../../../contracts/tranches/StrataCDO.sol";
 import { Tranche } from "../../../contracts/tranches/Tranche.sol";
@@ -34,7 +36,7 @@ interface IResyncAccounting {
     function setValuationPrice(uint128 price) external returns (bool);
     function setInsurancePool(IInsurancePool pool) external;
     function setFloorRate(uint256 rate) external;
-    function setRiskParameters(UD60x18, UD60x18, UD60x18) external;
+    function setRiskModel(IRiskPremiumModel model) external;
     function updateBalanceFlow(uint256, uint256, uint256, uint256) external returns (uint256);
     function updateAccounting() external;
     function insuranceAmount() external view returns (uint256);
@@ -173,7 +175,7 @@ abstract contract ConservativeExitFixture is Test {
         cdo.configure(IAccounting(address(accounting)), IStrategy(address(strategy)), ITranche(address(jrt)), ITranche(address(srt)));
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         cdo.setValuationKeeper(address(this));
 
         _deposit(jrt, alice, 100e18); // Junior 100

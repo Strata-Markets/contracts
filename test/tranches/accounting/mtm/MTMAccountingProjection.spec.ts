@@ -8,6 +8,7 @@ import { $bigint } from 'dequanto/utils/$bigint';
 import { $date } from 'dequanto/utils/$date';
 import { $promise } from 'dequanto/utils/$promise';
 import { $require } from 'dequanto/utils/$require';
+import { $accounting } from '../../utils/$accounting';
 
 const SECONDS_PER_YEAR = 365 * 24 * 60 * 60;
 const hh = new HardhatProvider();
@@ -136,8 +137,7 @@ UTest.create({
             type: 'impersonated'
         } as TEth.IAccount;
 
-        await accounting.storage.$set('riskX', .5e18);
-        await accounting.storage.$set('riskY', 0);
+        await $accounting.setRiskModelStorage(accounting, .5, 0);
         await client.debug.setBalance(cdoAccount.address, BigInt(1e18));
 
         let snapshot = await client.debug.snapshot();
@@ -796,8 +796,7 @@ UTest.create({
             type: 'impersonated'
         } as TEth.IAccount;
 
-        await accounting.storage.$set('riskX', .5e18);
-        await accounting.storage.$set('riskY', 0);
+        await $accounting.setRiskModelStorage(accounting, .5, 0);
         await client.debug.setBalance(cdoAccount.address, BigInt(1e18));
     }
 });

@@ -5,6 +5,8 @@ libs = ['node_modules', 'lib']
 test = 'test'
 cache_path  = 'cache_forge'
 via_ir = true
+solc = '0.8.28'
+dynamic_test_linking = true
 
 [fmt]
 line_length = 100

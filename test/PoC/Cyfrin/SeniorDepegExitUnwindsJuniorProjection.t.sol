@@ -13,6 +13,8 @@ import { StrataCDO } from "../../../contracts/tranches/StrataCDO.sol";
 import { Tranche } from "../../../contracts/tranches/Tranche.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { IRiskPremiumModel } from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IAccounting } from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import { IStrategy } from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import { ITranche } from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -27,7 +29,7 @@ interface IProjectedAccounting {
     function jrtBaseNav() external view returns (uint256);
     function srtBaseNav() external view returns (uint256);
     function srtPnLProjected() external view returns (int256);
-    function setRiskParameters(UD60x18 x, UD60x18 y, UD60x18 k) external;
+    function setRiskModel(IRiskPremiumModel model) external;
 }
 
 /// @notice Real StrataCDO + two conservative-price Tranches + conservative APR-projection accounting
@@ -101,7 +103,7 @@ abstract contract SeniorDepegExitJuniorUnwindBase is Test {
         cdo.setActionStates(address(srt), true, true);
         cdo.setValuationKeeper(address(this));
         // Risk premium 50%: aprSrt = max(5%, 10% * 0.5) = 5%
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
 
         _deposit(jrt, alice, 1_000e18);
         _deposit(srt, dave, 9_000e18);

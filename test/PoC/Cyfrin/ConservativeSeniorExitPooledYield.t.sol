@@ -13,6 +13,8 @@ import { StrataCDO } from "../../../contracts/tranches/StrataCDO.sol";
 import { Tranche } from "../../../contracts/tranches/Tranche.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { IRiskPremiumModel } from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IAccounting } from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import { IStrategy } from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import { ITranche } from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -27,7 +29,7 @@ interface IProjectionAccounting {
     function jrtBaseNav() external view returns (uint256);
     function reserveNav() external view returns (uint256);
     function srtPnLProjected() external view returns (uint256);
-    function setRiskParameters(UD60x18, UD60x18, UD60x18) external;
+    function setRiskModel(IRiskPremiumModel) external;
 }
 
 /// @notice Policy regression adapted from Cyfrin f-111: conservative exits retain pooled realized-yield allocation.
@@ -95,7 +97,7 @@ abstract contract ConservativeSeniorExitPooledYieldBase is Test {
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
         // Risk premium 50%: Senior APR 5%
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
     }
 
     function _tranche(string memory name, bool conservative) internal returns (Tranche) {

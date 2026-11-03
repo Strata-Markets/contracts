@@ -6,13 +6,15 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {UD60x18} from "@prb/math/src/ud60x18/ValueType.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
+import {IRiskPremiumModel} from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import {RiskPremiumPower} from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import {IStrataCDO} from "../../../contracts/tranches/interfaces/IStrataCDO.sol";
 import {IStrategy} from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import {IAprPairFeed} from "../../../contracts/tranches/interfaces/IAprPairFeed.sol";
 import {AccessControlManager} from "../../../contracts/governance/AccessControlManager.sol";
 
 interface IRateAccounting {
-    function setRiskParameters(UD60x18 x, UD60x18 y, UD60x18 k) external;
+    function setRiskModel(IRiskPremiumModel model) external;
     function updateBalanceFlow(uint256 jIn, uint256 jOut, uint256 sIn, uint256 sOut) external returns (uint256);
     function updateAccounting() external;
     function totalAssets() external view returns (uint256, uint256, uint256);
@@ -54,7 +56,7 @@ contract ZeroStrategyRateFallbackTest is Test {
             abi.encodeWithSelector(DYSAccounting.initialize.selector,
                 address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(0)))
         )));
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         mockNav = 1000e18;
         accounting.updateBalanceFlow(500e18, 0, 500e18, 0);
     }

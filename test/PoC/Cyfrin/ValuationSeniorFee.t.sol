@@ -26,6 +26,7 @@ import { MockInsurancePool } from "../../symbiotic/mocks/MockInsurancePool.sol";
 import { Accounting } from "../../../contracts/tranches/Accounting.sol";
 import { DiscreteAccounting } from "../../../contracts/tranches/DiscreteAccounting.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 
 abstract contract ValuationSeniorFeeBase is Test {
     function _accountingImplementation() internal virtual returns (address);
@@ -84,7 +85,12 @@ abstract contract ValuationSeniorFeeBase is Test {
         cdo.configure(IAccounting(address(accounting)), strategy_, ITranche(address(jrt)), ITranche(address(srt)));
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        _setRiskPremium(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+    }
+
+    /// @dev Accounting and DiscreteAccounting keep the built-in premium parameters
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal virtual {
+        Accounting(address(accounting)).setRiskParameters(x, y, k);
     }
 
     function _tranche(IERC20Metadata asset, string memory name) internal returns (Tranche) {
@@ -419,10 +425,18 @@ contract DYSValuationSeniorFeeTest is ValuationSeniorFeeTests {
     function _accountingImplementation() internal override returns (address) {
         return address(new DYSAccounting(18, false, true, false, false, true));
     }
+
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal override {
+        accounting.setRiskModel(new RiskPremiumPower(x, y, k));
+    }
 }
 
 contract MTMValuationSeniorFeeTest is ValuationSeniorFeeTests {
     function _accountingImplementation() internal override returns (address) {
         return address(new MTMAccounting(18, false, true, false, false, true, false));
+    }
+
+    function _setRiskPremium(UD60x18 x, UD60x18 y, UD60x18 k) internal override {
+        accounting.setRiskModel(new RiskPremiumPower(x, y, k));
     }
 }

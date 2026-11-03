@@ -158,8 +158,8 @@ contract ValuationCheckpointDiscreteTest is ValuationCheckpointTests {
 }
 
 contract ValuationCheckpointDYSTest is ValuationCheckpointTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(
+    function _deployAccounting() internal override returns (address a) {
+        a = address(
             new ERC1967Proxy(
                 address(new DYSAccounting(18, false, false, false, true, false)),
                 abi.encodeWithSelector(
@@ -171,6 +171,7 @@ contract ValuationCheckpointDYSTest is ValuationCheckpointTests {
                 )
             )
         );
+        _setDefaultRiskModel(a);
     }
 }
 
@@ -207,8 +208,8 @@ contract ValuationCheckpointMTMTest is ValuationCheckpointTests {
         assertEq(recoveredJunior, 750e18, "live projection remains reversible");
     }
 
-    function _deployAccounting() internal override returns (address) {
-        return address(
+    function _deployAccounting() internal override returns (address a) {
+        a = address(
             new ERC1967Proxy(
                 address(new MTMAccounting(18, false, true, false, true, true, true)),
                 abi.encodeWithSelector(
@@ -220,5 +221,6 @@ contract ValuationCheckpointMTMTest is ValuationCheckpointTests {
                 )
             )
         );
+        _setDefaultRiskModel(a);
     }
 }

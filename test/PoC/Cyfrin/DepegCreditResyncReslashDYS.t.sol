@@ -12,6 +12,8 @@ import { IStrataAccounting } from "../../../contracts/tranches/symbiotic/interfa
 import { MockERC20 } from "../../../contracts/test/MockERC20.sol";
 import { MockOracleAdapter } from "../../../contracts/test/MockOracleAdapter.sol";
 import { MockAppAdapter } from "../../symbiotic/NetworkMiddleware.t.sol";
+import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 
 interface IDYSResyncAccounting {
     function setValuationPrice(uint128 price) external returns (bool);
@@ -67,6 +69,11 @@ contract DepegDYSRealizedPnLReslashTest is Test {
         )));
         middleware.setMarket(address(this), IStrataAccounting(address(a)), address(base), 0, true);
         a.setInsurancePool(IInsurancePool(address(middleware)));
+        // DYS has no built-in risk premium; installs the legacy 0.2/0.2/0.3 default as a model
+        acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
+        DYSAccounting(address(a)).setRiskModel(
+            new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18))
+        );
         tvl = juniorIn + seniorIn;
         a.updateBalanceFlow(juniorIn, 0, seniorIn, 0);
     }

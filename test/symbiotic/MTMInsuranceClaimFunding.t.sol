@@ -6,6 +6,7 @@ import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy
 import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 
 import { MTMAccounting } from "../../contracts/tranches/MTMAccounting.sol";
+import { RiskPremiumPower } from "../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IStrataCDO } from "../../contracts/tranches/interfaces/IStrataCDO.sol";
 import { IAprPairFeed } from "../../contracts/tranches/interfaces/IAprPairFeed.sol";
 import { AccessControlManager } from "../../contracts/governance/AccessControlManager.sol";
@@ -79,7 +80,7 @@ contract MTMInsuranceClaimFundingTest is Test {
 
         accounting.setReserveBps(0.1e18);
         acm.grantRole(accounting.UPDATER_STRAT_CONFIG_ROLE(), address(this));
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         // Underwriter fee policy reaches accounting through the CDO, which this contract stands in for.
         accounting.setUnderwriterFeeBps(0.1e18);
 

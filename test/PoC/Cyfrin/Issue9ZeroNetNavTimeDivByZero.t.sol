@@ -12,6 +12,8 @@ import { Tranche } from "../../../contracts/tranches/Tranche.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { IInsurancePool } from "../../../contracts/tranches/symbiotic/interfaces/IInsurancePool.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { IRiskPremiumModel } from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IAccounting } from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import { IStrategy } from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import { ITranche } from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -27,7 +29,7 @@ import { MockInsurancePool } from "../../symbiotic/mocks/MockInsurancePool.sol";
 
 interface IProjectionAccounting {
     function onAprChanged() external;
-    function setRiskParameters(UD60x18, UD60x18, UD60x18) external;
+    function setRiskModel(IRiskPremiumModel) external;
     function nav() external view returns (uint256);
     function insuranceAmount() external view returns (uint256);
     function srtBaseNav() external view returns (uint256);
@@ -76,7 +78,7 @@ contract MTMZeroNetNavTimeDivByZeroTest is Test {
         cdo.configure(IAccounting(address(accounting)), IStrategy(address(strategy)), ITranche(address(jrt)), ITranche(address(srt)));
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
 
         MockInsurancePool pool = new MockInsurancePool();
         pool.setCapacity(type(uint128).max);
@@ -178,6 +180,12 @@ contract DYSZeroNetNavTimeDivByZeroTest is Test {
         return IAprPairFeed.TRound({ aprTarget: 80_000_000_000, aprBase: 100_000_000_000, updatedAt: uint64(block.timestamp), answeredInRound: 1 });
     }
 
+    /// @dev DYS has no built-in risk premium; installs the legacy 0.2/0.2/0.3 power model
+    function _setDefaultRiskModel(AccessControlManager acm) internal {
+        acm.grantRole(accounting.UPDATER_STRAT_CONFIG_ROLE(), address(this));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18)));
+    }
+
     function test_DYSRecoveryRepaysClaim() public { _checkRecovery(500e18); }
     function test_DYSRecoveryBeyondClaimGoesToJunior() public { _checkRecovery(1500e18); }
 
@@ -189,6 +197,7 @@ contract DYSZeroNetNavTimeDivByZeroTest is Test {
                 DYSAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this))
             )
         )));
+        _setDefaultRiskModel(acm);
         MockInsurancePool pool = new MockInsurancePool();
         pool.setCapacity(type(uint128).max);
         accounting.setInsurancePool(IInsurancePool(address(pool)));
@@ -225,6 +234,7 @@ contract DYSZeroNetNavTimeDivByZeroTest is Test {
                 DYSAccounting.initialize.selector, address(this), address(acm), IStrataCDO(address(this)), IAprPairFeed(address(this))
             )
         )));
+        _setDefaultRiskModel(acm);
         MockInsurancePool pool = new MockInsurancePool();
         pool.setCapacity(type(uint128).max);
         accounting.setInsurancePool(IInsurancePool(address(pool)));

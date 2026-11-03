@@ -15,6 +15,7 @@ import { StrataCDO } from "../../../contracts/tranches/StrataCDO.sol";
 import { Tranche } from "../../../contracts/tranches/Tranche.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import { IAccounting } from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import { IStrategy } from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import { ITranche } from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -101,7 +102,7 @@ contract Issue65StackBase is Test {
         cdo.configure(IAccounting(address(accounting)), strategy_, ITranche(address(jrt)), ITranche(address(srt)));
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
-        accounting.setRiskParameters(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.5e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
     }
 
     function _tranche(IERC20Metadata asset, string memory name) internal returns (Tranche) {
@@ -256,7 +257,7 @@ contract SaturnBenchmarkDroppedOnReconcileTest is Issue65StackBase {
     /// A high risk premium must not remove the benchmark floor.
     function test_Regression_SaturnBenchmarkDroppedOnReconcile_FullRiskPremium() public {
         _setUp();
-        accounting.setRiskParameters(UD60x18.wrap(0.999e18), UD60x18.wrap(0), UD60x18.wrap(1e18)); // just below the 100% cap
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.999e18), UD60x18.wrap(0), UD60x18.wrap(1e18))); // just below the 100% cap
         for (uint256 i; i < DAYS; i++) {
             vm.warp(vm.getBlockTimestamp() + 1 days);
             _yield();

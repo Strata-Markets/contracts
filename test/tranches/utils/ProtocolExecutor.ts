@@ -11,6 +11,7 @@ import { $strata } from './$strata';
 import { $erc4626 } from './$erc4626';
 import { $test } from './$test';
 import { $tranche } from './$tranche';
+import { $accounting } from './$accounting';
 import { DeploymentsBase } from '@s/deployments/DeploymentsBase';
 
 let client: Web3Client;
@@ -45,10 +46,9 @@ export class ProtocolExecutor {
                 await $strata.setAprsViaFeed(this.test, target, base);
             }
             if (step.risk != null) {
-                let x = $bigint.toWei(step.risk[0]);
-                let y = $bigint.toWei(step.risk[1]);
-                let k = $bigint.toWei(step.risk[2]);
-                await accounting.$receipt().setRiskParameters(deployer, x, y, k);
+                let [ x, y, k ] = step.risk;
+                let accountingType = this.test.factory.cdoInfo.ContractVersions?.accounting;
+                await $accounting.setRiskPremium(accounting as any, deployer, accountingType, x, y, k);
             }
             if (step.deposit != null) {
                 if (step.deposit.jrt) {

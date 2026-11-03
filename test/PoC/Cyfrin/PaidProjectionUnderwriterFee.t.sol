@@ -10,6 +10,8 @@ import { StrataCDO } from "../../../contracts/tranches/StrataCDO.sol";
 import { Tranche } from "../../../contracts/tranches/Tranche.sol";
 import { DYSAccounting } from "../../../contracts/tranches/DYSAccounting.sol";
 import { MTMAccounting } from "../../../contracts/tranches/MTMAccounting.sol";
+import { RiskPremiumPower } from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
+import { UD60x18 } from "@prb/math/src/ud60x18/ValueType.sol";
 import { IAccounting } from "../../../contracts/tranches/interfaces/IAccounting.sol";
 import { IStrategy } from "../../../contracts/tranches/interfaces/IStrategy.sol";
 import { ITranche } from "../../../contracts/tranches/interfaces/ITranche.sol";
@@ -85,6 +87,9 @@ abstract contract PaidProjectionUnderwriterFeeBase is Test {
         acm.grantRole(keccak256("PAUSER_ROLE"), address(this));
         acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
         cdo.configure(IAccounting(address(accounting)), IStrategy(address(strategy)), ITranche(address(jrt)), ITranche(address(srt)));
+        DYSAccounting(address(accounting)).setRiskModel(
+            new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18))
+        );
         cdo.setActionStates(address(jrt), true, true);
         cdo.setActionStates(address(srt), true, true);
 

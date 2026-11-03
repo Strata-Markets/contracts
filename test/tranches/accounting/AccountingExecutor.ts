@@ -9,6 +9,7 @@ import { $apr } from '@s/utils/$apr';
 import { HardhatProvider } from 'dequanto/hardhat/HardhatProvider';
 import { ContractBase } from 'dequanto/contracts/ContractBase';
 import { $test } from '../utils/$test';
+import { $accounting } from '../utils/$accounting';
 import { DeploymentsBase } from '@s/deployments/DeploymentsBase';
 
 
@@ -74,10 +75,9 @@ export class AccountingExecutor {
                 await accounting.$receipt().onAprChanged(deployer);
             }
             if (step.risk != null) {
-                let x = $bigint.toWei(step.risk[0]);
-                let y = $bigint.toWei(step.risk[1]);
-                let k = $bigint.toWei(step.risk[2]);
-                await accounting.$receipt().setRiskParameters(deployer, x, y, k);
+                let [ x, y, k ] = step.risk;
+                let accountingType = this.test.factory.cdoInfo.ContractVersions?.accounting;
+                await $accounting.setRiskPremium(accounting as any, deployer, accountingType, x, y, k);
             }
             if (step.balanceFlow != null) {
                 l`gray<BalanceFlow>: cyan<${step.balanceFlow.join(' , ')}>`;

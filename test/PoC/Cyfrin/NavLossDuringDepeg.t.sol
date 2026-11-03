@@ -9,6 +9,7 @@ import {Accounting} from "../../../contracts/tranches/Accounting.sol";
 import {DiscreteAccounting} from "../../../contracts/tranches/DiscreteAccounting.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
+import {RiskPremiumPower} from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import {IStrataCDO} from "../../../contracts/tranches/interfaces/IStrataCDO.sol";
 import {IAprPairFeed} from "../../../contracts/tranches/interfaces/IAprPairFeed.sol";
 import {Test} from "forge-std/Test.sol";
@@ -135,6 +136,14 @@ abstract contract DepegNavLossFixture is Test {
         // Seed 1000 Jrt + 1000 Srt, as CDO.deposit() would book it
         mockStrategyTvl = 2000e18;
         accounting.updateBalanceFlow(1000e18, 0, 1000e18, 0);
+    }
+
+    /// @dev DYS and MTM have no built-in risk premium; installs the legacy 0.2/0.2/0.3 power model
+    function _setDefaultRiskModel(address a) internal {
+        acm.grantRole(keccak256("UPDATER_STRAT_CONFIG_ROLE"), address(this));
+        DYSAccounting(a).setRiskModel(
+            new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0.2e18), UD60x18.wrap(0.3e18))
+        );
     }
 
     function _totalSlashed() internal view returns (uint256 totalSlashed) {
@@ -297,8 +306,8 @@ contract NavLossDuringDepegDiscreteTest is NavLossDuringDepegTests {
 }
 
 contract NavLossDuringDepegDYSTest is NavLossDuringDepegTests {
-    function _deployAccounting() internal override returns (address) {
-        return address(
+    function _deployAccounting() internal override returns (address a) {
+        a = address(
             new ERC1967Proxy(
                 address(new DYSAccounting(18, false, false, false, true, false)),
                 abi.encodeWithSelector(
@@ -310,6 +319,7 @@ contract NavLossDuringDepegDYSTest is NavLossDuringDepegTests {
                 )
             )
         );
+        _setDefaultRiskModel(a);
     }
 }
 
@@ -350,8 +360,8 @@ contract NavLossDuringDepegMTMTest is NavLossDuringDepegTests {
         _assertWhole(0.4e18);
     }
 
-    function _deployAccounting() internal override returns (address) {
-        return address(
+    function _deployAccounting() internal override returns (address a) {
+        a = address(
             new ERC1967Proxy(
                 address(new MTMAccounting(18, false, true, false, true, true, true)),
                 abi.encodeWithSelector(
@@ -363,5 +373,6 @@ contract NavLossDuringDepegMTMTest is NavLossDuringDepegTests {
                 )
             )
         );
+        _setDefaultRiskModel(a);
     }
 }

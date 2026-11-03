@@ -6,6 +6,7 @@ import {AccountingLib} from "../../../contracts/tranches/utils/AccountingLib.sol
 import {RoundTripStackBase} from "./SeniorRoundTripProjection.t.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
+import {RiskPremiumPower} from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import {UD60x18} from "@prb/math/src/ud60x18/ValueType.sol";
 
 contract ProportionalPnLMathTest is Test {
@@ -55,7 +56,7 @@ abstract contract ProportionalPnLOverflowBase is RoundTripStackBase {
             ? address(new MTMAccounting(18, false, true, false, false, false, false))
             : address(new DYSAccounting(18, false, false, false, false, false));
         accounting = DYSAccounting(_deploy(impl, 0, 0, 3650 days));
-        accounting.setRiskParameters(UD60x18.wrap(0.05e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+        accounting.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.05e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         _deposit(jrt, alice, 500_000_000e18);
         _deposit(srt, bob, 500_000_000e18);
         vm.warp(block.timestamp + 3 days);
