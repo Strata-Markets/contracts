@@ -50,3 +50,4 @@ config/*
 /deployments/test/
 /deployments/*/deployments-hardhat*
 /tasks/local/
+/specs/local/

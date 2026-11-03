@@ -72,9 +72,8 @@ abstract contract SelfFundLostOnRecoveryTests is ValuationInsuranceFixture {
         accounting.setValuationPrice(0.8e18);
         assertEq(accounting.insuranceAmount(), claim);
         assertEq(accounting.srtBaseNav(), senior);
-        // No proceeds were funded in this fixture, so the existing middleware re-slashes the restored claim.
-        // It must not also slash for self-funding lost during recovery.
-        assertEq(_totalSlashed() - slashedBefore, claim * 8 / 10);
+        // Pending slash proceeds fully cover the restored claim.
+        assertEq(_totalSlashed(), slashedBefore);
     }
 
     function test_exitAfterRecoveryScalesRetainedBasis() public {

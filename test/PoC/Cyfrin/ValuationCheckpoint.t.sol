@@ -73,8 +73,8 @@ abstract contract ValuationCheckpointTests is DepegNavLossFixture {
         mockStrategyTvl = 1750e18;
         accounting.setValuationPrice(0.4e18);
         assertEq(accounting.insuranceAmount(), 751e18);
-        // The first 1-token claim is priced at $0.50; the new 750 at $0.40.
-        assertEq(_totalSlashed(), 0.5e18 + 300e18);
+        // Pending collateral covers an extra 0.25 base assets at the lower price.
+        assertEq(_totalSlashed(), 751e18 * 0.4e18 / 1e18);
     }
 
     function _navLossFloor() internal pure virtual returns (uint256) {

@@ -140,6 +140,7 @@ accounts:
     type: safe
     address: '0x40c5C15Ec27526Ad769b04E767cD319551f7F4e4'
     platform: 'eth'
+    operator: 'panamaTreas'
 
   - name: eth/deployer
     address: '0x296400D87BE5cFB63C5025904cD006EBB23d15d5'
