@@ -411,7 +411,7 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
                     srtNavT1,
                     reserveNavT1,
                     navMTM,
-                    navMTMTime,
+                    block.timestamp, // Accrue through the execution time, even when the live mark is older.
                     state
                 );
         }
@@ -555,7 +555,7 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
                     srtNavT1,
                     reserveNavT1,
                     navMTM,
-                    navMTMTime,
+                    block.timestamp, // Accrue through the execution time, even when the live mark is older.
                     state
                 );
         }
