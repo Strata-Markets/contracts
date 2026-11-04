@@ -9,6 +9,7 @@ import {DiscreteAccounting} from "../../../contracts/tranches/DiscreteAccounting
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
 import {IRiskPremiumModel} from "../../../contracts/tranches/accounting/premium/IRiskPremiumModel.sol";
+import {RiskPremiumStatic} from "../../../contracts/tranches/accounting/premium/RiskPremiumStatic.sol";
 import {RiskPremiumPower} from "../../../contracts/tranches/accounting/premium/RiskPremiumPower.sol";
 import {IAprPairFeed} from "../../../contracts/tranches/interfaces/IAprPairFeed.sol";
 import {AccessControlManager} from "../../../contracts/governance/AccessControlManager.sol";
@@ -107,6 +108,11 @@ contract RiskModelAprRefreshTest is Test {
         vm.warp(block.timestamp + 1 days);
         a.updateAccounting();
         assertEq(a.srtTargetIndex(), expectedIndex, "fallback premium controls subsequent accrual");
+        a.setRiskModel(new RiskPremiumStatic(UD60x18.wrap(1e18)));
+        assertEq(a.aprSrt(), 0, "all variants accept full premium");
+        IRiskPremiumModel excessive = new ConstantRiskPremium(1e18 + 1);
+        vm.expectRevert(">100%");
+        a.setRiskModel(excessive);
     }
 
     /// @dev DYS and MTM charge no premium until a model is set, and validate the model at install
@@ -115,9 +121,11 @@ contract RiskModelAprRefreshTest is Test {
         a.onAprChanged();
         assertEq(a.aprSrt(), 0.1e18, "no model: Senior earns the full base APR");
 
-        IRiskPremiumModel fullPremium = new ConstantRiskPremium(1e18);
-        vm.expectRevert(">=100%");
-        a.setRiskModel(fullPremium);
+        a.setRiskModel(new RiskPremiumStatic(UD60x18.wrap(1e18)));
+        assertEq(a.aprSrt(), 0, "100% premium excludes the base APR");
+        IRiskPremiumModel excessivePremium = new ConstantRiskPremium(1e18 + 1);
+        vm.expectRevert(">100%");
+        a.setRiskModel(excessivePremium);
 
         a.setRiskModel(new RiskPremiumPower(UD60x18.wrap(0.2e18), UD60x18.wrap(0), UD60x18.wrap(1e18)));
         assertEq(a.aprSrt(), 0.08e18, "install refreshes APR immediately");
@@ -164,5 +172,21 @@ contract RiskPremiumPowerTest is Test {
         vm.expectRevert(">=100%");
         new RiskPremiumPower(UD60x18.wrap(1e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
         new RiskPremiumPower(UD60x18.wrap(0.999e18), UD60x18.wrap(0), UD60x18.wrap(1e18));
+    }
+}
+
+contract RiskPremiumStaticTest is Test {
+    function test_fullPremiumAtEveryRatio(uint256 ratio) public {
+        RiskPremiumStatic model = new RiskPremiumStatic(UD60x18.wrap(1e18));
+        assertEq(model.premium().unwrap(), 1e18);
+        assertEq(model.riskPremium(UD60x18.wrap(ratio)).unwrap(), 1e18);
+    }
+    function test_zeroAndPartialPremium() public {
+        assertEq(new RiskPremiumStatic(UD60x18.wrap(0)).riskPremium(UD60x18.wrap(1e18)).unwrap(), 0);
+        assertEq(new RiskPremiumStatic(UD60x18.wrap(0.2e18)).riskPremium(UD60x18.wrap(0)).unwrap(), 0.2e18);
+    }
+    function test_rejectsPremiumAbove100Percent() public {
+        vm.expectRevert(">100%");
+        new RiskPremiumStatic(UD60x18.wrap(1e18 + 1));
     }
 }

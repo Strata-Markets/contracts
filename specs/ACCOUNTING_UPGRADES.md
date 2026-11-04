@@ -36,6 +36,20 @@ Use `initializeV3` only if the proxy's initialization version permits it and the
 
 This procedure addresses Cyfrin #74 untracked Discrete projection; it is not a substitute for validating the complete upgrade against the deployed state.
 
+## Legacy risk premium migration
+
+When upgrading accounting that uses legacy `riskX/riskY/riskK` parameters to an implementation that uses only an external risk model, the timelock must upgrade accounting and set the matching `riskPremiumModel` in a single atomic batch transaction. This also applies to in-place DYS upgrades where V3 is already initialized.
+
+Deploy the matching model beforehand: use `RiskPremiumPower` with the deployed parameters, or `RiskPremiumStatic(1e18)` for Saturn's fixed 100% premium. Execute the following calls in order:
+
+1. Reconcile pending settled PnL under the old implementation, following the applicable migration procedure above.
+2. Call `ProxyAdmin.upgradeAndCall` with the new implementation and only the initializer permitted by the proxy's migration state.
+3. Call `accountingProxy.setRiskModel(model)` directly from the timelock in the same batch, before any other accounting or tranche action.
+
+The timelock must have ProxyAdmin ownership and `UPDATER_STRAT_CONFIG_ROLE`, plus the authorization required for the reconciliation call. The entire batch must revert if any call fails. Do not schedule model installation as a separate transaction or pass `setRiskModel` as upgrade calldata: that would make ProxyAdmin the caller rather than the authorized timelock.
+
+An unset model means zero premium. Batching prevents transactions from interleaving, but `setRiskModel` itself checkpoints before installing the model. The preceding reconciliation is therefore necessary to avoid allocating the old epoch's pending settled gain at zero premium; an ordinary checkpoint that does not reconcile is insufficient. Validate the batch against the deployed state and verify the installed model and resulting Senior APR.
+
 ## Temporary terminal Junior dust recovery
 
 `contracts/tranches/accounting/recovery` contains a recovery subclass for each accounting variant. Normal implementations do not expose `settleTerminalJuniorDust`. The subclasses add no storage slots; their constructor parameters must match the original implementation's decimals and immutable accounting flags. Use the same accounting version and verify storage compatibility and deployed bytecode size before deploying the recovery implementation.

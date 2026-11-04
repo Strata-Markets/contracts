@@ -1097,7 +1097,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
         if (address(riskPremiumModel_) != address(0)) {
             UD60x18 risk = riskPremiumModel_.riskPremium(UD60x18.wrap(1e18));
-            require(risk.unwrap() < PERCENTAGE_100, ">=100%");
+            require(risk.unwrap() <= PERCENTAGE_100, ">100%");
         }
         riskPremiumModel = riskPremiumModel_;
         emit RiskModelChanged(address(riskPremiumModel_));

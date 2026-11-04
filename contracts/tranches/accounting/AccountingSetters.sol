@@ -92,12 +92,22 @@ contract AccountingSetters is AccountingStorage, AccountingOperations {
         migrationBitmap |= MIGRATION_V2;
     }
 
-    /// @notice Migration V3: DYS asset-time tracking, Senior true-up, and Senior loss floor.
-    /// @dev V3 migration upgrades Strata accountings to DYS accounting.
+    /// @notice Migration V3: asset-time tracking, Senior true-up, and Senior loss floor.
+    /// @dev V3 migration upgrades Strata accountings to DYS/MTM accounting.
     function _initV3() internal {
         if (migrationBitmap & MIGRATION_V3 != 0) {
             return;
         }
+        if (navTimestamp == 0) {
+            navTimestamp = block.timestamp;
+        }
+        if (navTargetIndex == 0) {
+            // Accounting->DYS/MTM; Keeps DiscreteAccounting projection
+            navTargetIndex = 1e18;
+            jrtNavProjected = jrtBaseNav;
+            lastReconciliation = block.timestamp;
+        }
+
         benchmarkIndex = 1e18;
         lastAccrual = block.timestamp;
         epochStart = block.timestamp;
@@ -118,7 +128,7 @@ contract AccountingSetters is AccountingStorage, AccountingOperations {
         _selfCall(OP_CHECKPOINT);
         if (address(riskPremiumModel_) != address(0)) {
             UD60x18 risk = riskPremiumModel_.riskPremium(UD60x18.wrap(1e18));
-            require(risk.unwrap() < PERCENTAGE_100, ">=100%");
+            require(risk.unwrap() <= PERCENTAGE_100, ">100%");
         }
         riskPremiumModel = riskPremiumModel_;
         emit RiskModelChanged(address(riskPremiumModel_));
