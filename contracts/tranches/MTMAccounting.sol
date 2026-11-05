@@ -355,10 +355,11 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
         TNavSplitState memory state = _currentNavSplitState();
         uint256 underwriterFeeNavT1;
         uint256 insuranceAmountT1;
+        uint256 jrtNavT1Real;
         (
             jrtNavT1Projected,
-            ,
-            /*jrtNavT1Real*/ srtNavT1,
+            jrtNavT1Real,
+            srtNavT1,
             reserveNavT1,
             underwriterFeeNavT1,
             insuranceAmountT1
@@ -399,8 +400,8 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
             state.insuranceAmount = insuranceAmountT1;
             (
                 jrtNavT1Projected,
-                ,
-                /*jrtNavT1Real*/ srtNavT1,
+                jrtNavT1Real,
+                srtNavT1,
                 reserveNavT1,
                 underwriterFeeNavT1,
                 insuranceAmountT1
@@ -415,7 +416,7 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
                     state
                 );
         }
-        (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
+        (jrtNavT1Projected, srtNavT1) = _effectiveLiveNav(jrtNavT1Projected, jrtNavT1Real, srtNavT1);
         return (jrtNavT1Projected, srtNavT1, reserveNavT1);
     }
 
@@ -543,8 +544,8 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
             state.insuranceAmount = insuranceAmountT1;
             (
                 jrtNavLive,
-                ,
-                /*jrtNavT1Real*/ srtNavT1,
+                jrtNavT1Real,
+                srtNavT1,
                 reserveNavT1,
                 underwriterFeeNavT1,
                 insuranceAmountT1
@@ -559,7 +560,7 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
                     state
                 );
         }
-        (jrtNavLive, srtNavLive) = calcEffectiveNav(jrtNavLive, srtNavT1);
+        (jrtNavLive, srtNavLive) = _effectiveLiveNav(jrtNavLive, jrtNavT1Real, srtNavT1);
         return (
             jrtNavLive,
             srtNavLive,
@@ -802,7 +803,7 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
                 );
         } else {
             // Flows checkpoint first; include stored MTM losses in Junior backing.
-            jrtNavForLimits = useMTMProjection
+            jrtNavForLimits = useMTMProjection || valuationPrice < 1e18
                 ? Math.min(jrtBaseNav, jrtNavProjected)
                 : jrtBaseNav;
             srtNavForLimits = srtBaseNav;
@@ -2161,6 +2162,18 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
             // Returning valuation credit is not a Senior loss.
             windowNetFlows -= int256(unwound);
         }
+    }
+
+    /// @dev Only settled Junior backing protects Senior; unrealized Junior gains remain with Junior.
+    function _effectiveLiveNav(uint256 juniorLive, uint256 juniorReal, uint256 seniorLive)
+        internal view returns (uint256 juniorEffective, uint256 seniorEffective)
+    {
+        if (valuationPrice == 1e18) {
+            return (juniorLive, seniorLive);
+        }
+        uint256 juniorBacking = Math.min(juniorLive, juniorReal);
+        (juniorEffective, seniorEffective) = calcEffectiveNav(juniorBacking, seniorLive);
+        juniorEffective += juniorLive - juniorBacking;
     }
 
     /// @notice Adjusts Junior and Senior NAVs when the base asset is trading below par (valuation loss)

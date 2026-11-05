@@ -323,4 +323,20 @@ contract TwoPassViewLaggedMarkBenchmarkTest is Test {
         assertApproxEqAbs(srtView, srtExec, 1, "Senior view matches execution");
         assertApproxEqAbs(jrtView, jrtExec, 1, "Junior view matches execution");
     }
+    function test_TwoPassDepegUsesFreshSettledJuniorBacking() public {
+        _deploy(false);
+        cdo.setValuationKeeper(address(this));
+        cdo.setValuationPrice(0.4e18);
+        _laggedMark();
+        (uint256 juniorPreview, uint256 seniorPreview,) = accounting.totalAssets();
+        (uint256 combinedJunior, uint256 combinedSenior,,) = accounting.totalAssetsLiveAndSettled();
+        assertEq(combinedJunior, juniorPreview);
+        assertEq(combinedSenior, seniorPreview);
+        vm.prank(address(jrt));
+        cdo.updateAccounting();
+        (uint256 juniorAfter, uint256 seniorAfter,) = accounting.totalAssets();
+        assertApproxEqAbs(juniorPreview, juniorAfter, 2);
+        assertApproxEqAbs(seniorPreview, seniorAfter, 2);
+        assertEq(juniorAfter, accounting.jrtNavProjected() - accounting.jrtBaseNav() + 1e18, "only settled Junior backs Senior");
+    }
 }

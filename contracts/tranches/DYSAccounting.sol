@@ -305,10 +305,11 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
         )
     {
         TNavSplitState memory state = _currentNavSplitState();
+        uint256 jrtNavT1Real;
         (
             jrtNavT1Projected,
-            ,
-            /*jrtNavT1Real*/ srtNavT1,
+            jrtNavT1Real,
+            srtNavT1,
             reserveNavT1,
             ,
         ) = calculateNAVSplit(
@@ -320,7 +321,7 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
                 navT1,
                 state
             );
-        (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
+        (jrtNavT1Projected, srtNavT1) = _effectiveLiveNav(jrtNavT1Projected, jrtNavT1Real, srtNavT1);
         return (jrtNavT1Projected, srtNavT1, reserveNavT1);
     }
 
@@ -336,10 +337,11 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
     {
         uint256 navT1 = cdo.totalStrategyAssets(nav, _navAnchor());
         TNavSplitState memory state = _currentNavSplitState();
+        uint256 jrtNavT1Real;
         (
             jrtNavT1Projected,
-            ,
-            /*jrtNavT1Real*/ srtNavT1,
+            jrtNavT1Real,
+            srtNavT1,
             reserveNavT1,
             ,
         ) = calculateNAVSplit(
@@ -351,7 +353,7 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
                 navT1,
                 state
             );
-        (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
+        (jrtNavT1Projected, srtNavT1) = _effectiveLiveNav(jrtNavT1Projected, jrtNavT1Real, srtNavT1);
         return (jrtNavT1Projected, srtNavT1, reserveNavT1);
     }
 
@@ -434,6 +436,7 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
                 state
             );
 
+        uint256 juniorReal = jrtNavSettled;
         if (isReconciliation) {
             // Reconciliation already replaces projected NAV with realized NAV.
             (jrtNavSettled, srtNavSettled) = calcEffectiveNav(jrtNavLive, srtNavT1);
@@ -448,7 +451,7 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
             (jrtNavSettled, srtNavSettled) = calcEffectiveNav(jrtNet, srtNet);
         }
 
-        (jrtNavLive, srtNavLive) = calcEffectiveNav(jrtNavLive, srtNavT1);
+        (jrtNavLive, srtNavLive) = _effectiveLiveNav(jrtNavLive, juniorReal, srtNavT1);
         return (
             jrtNavLive,
             srtNavLive,
@@ -590,7 +593,9 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
             // Disable withdrawals during grace period after valuation loss
             return 0;
         }
-        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
+        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(
+            valuationPrice < 1e18 ? Math.min(jrtBaseNav, jrtNavProjected) : jrtBaseNav, srtBaseNav
+        );
         if (ownerIsSharesCooldown) {
             return isJrt ? jrtNavEffective : srtNavEffective;
         }
@@ -608,7 +613,9 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
         if (isJrt) {
             return type(uint256).max;
         }
-        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
+        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(
+            valuationPrice < 1e18 ? Math.min(jrtBaseNav, jrtNavProjected) : jrtBaseNav, srtBaseNav
+        );
         uint256 maxSrt = (jrtNavEffective * 1e18) / minimumJrtSrtRatioBuffer;
         return Math.saturatingSub(maxSrt, srtNavEffective);
     }
@@ -1823,6 +1830,18 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
             // Returning valuation credit is not a Senior loss.
             windowNetFlows -= int256(unwound);
         }
+    }
+
+    /// @dev Only settled Junior backing protects Senior; unrealized Junior gains remain with Junior.
+    function _effectiveLiveNav(uint256 juniorLive, uint256 juniorReal, uint256 seniorLive)
+        internal view returns (uint256 juniorEffective, uint256 seniorEffective)
+    {
+        if (valuationPrice == 1e18) {
+            return (juniorLive, seniorLive);
+        }
+        uint256 juniorBacking = Math.min(juniorLive, juniorReal);
+        (juniorEffective, seniorEffective) = calcEffectiveNav(juniorBacking, seniorLive);
+        juniorEffective += juniorLive - juniorBacking;
     }
 
     /// @notice Adjusts Junior and Senior NAVs when the base asset is trading below par (valuation loss)

@@ -232,15 +232,16 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     /// @return srtNavT1 The updated Senior Tranche TVL
     /// @return reserveNavT1 The updated Reserve TVL
     function totalAssets (uint256 navT1) public view returns (uint256 jrtNavT1Projected, uint256 srtNavT1, uint256 reserveNavT1) {
+        uint256 jrtNavT1Real;
         (
             jrtNavT1Projected,
-            /*jrtNavT1Real*/,
+            jrtNavT1Real,
             srtNavT1,
             reserveNavT1,
             /*underwriterFeeNavT1*/,
             /*insuranceAmountT1*/
         ) = calculateNAVSplit(nav, jrtNavProjected, jrtBaseNav, srtBaseNav, reserveNav, underwriterFeeNav, insuranceAmount, navT1);
-        (jrtNavT1Projected, srtNavT1) = calcEffectiveNav(jrtNavT1Projected, srtNavT1);
+        (jrtNavT1Projected, srtNavT1) = _effectiveLiveNav(jrtNavT1Projected, jrtNavT1Real, srtNavT1);
     }
 
     /// @notice Returns projected or reconciled amounts without projection unwind.
@@ -393,7 +394,9 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             // Disable withdrawals during grace period after valuation loss
             return 0;
         }
-        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
+        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(
+            valuationPrice < 1e18 ? Math.min(jrtBaseNav, jrtNavProjected) : jrtBaseNav, srtBaseNav
+        );
         if (ownerIsSharesCooldown) {
             return isJrt ? jrtNavEffective : srtNavEffective;
         }
@@ -412,7 +415,9 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         if (isJrt) {
             return type(uint256).max;
         }
-        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
+        (uint256 jrtNavEffective, uint256 srtNavEffective) = calcEffectiveNav(
+            valuationPrice < 1e18 ? Math.min(jrtBaseNav, jrtNavProjected) : jrtBaseNav, srtBaseNav
+        );
         uint256 maxSrt = jrtNavEffective * 1e18 / minimumJrtSrtRatioBuffer;
         return Math.saturatingSub(maxSrt, srtNavEffective);
     }
@@ -529,7 +534,7 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
     function _splitValuationWithdrawal(uint256 assetsOut)
         internal returns (uint256 juniorOut, uint256 seniorStrategyOut, uint256 insuranceOut)
     {
-        (, uint256 seniorEffective) = calcEffectiveNav(jrtBaseNav, srtBaseNav);
+        (, uint256 seniorEffective) = calcEffectiveNav(Math.min(jrtBaseNav, jrtNavProjected), srtBaseNav);
         (juniorOut, seniorStrategyOut, insuranceOut) = AccountingLib.splitValuatedNavOut(
             srtBaseNav, seniorEffective, insuranceAmount, assetsOut
         );
@@ -1312,6 +1317,18 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
             _syncInsuranceClaim();
             srtBaseNav -= unwound;
         }
+    }
+
+    /// @dev Only settled Junior backing protects Senior; unrealized Junior gains remain with Junior.
+    function _effectiveLiveNav(uint256 juniorLive, uint256 juniorReal, uint256 seniorLive)
+        internal view returns (uint256 juniorEffective, uint256 seniorEffective)
+    {
+        if (valuationPrice == 1e18) {
+            return (juniorLive, seniorLive);
+        }
+        uint256 juniorBacking = Math.min(juniorLive, juniorReal);
+        (juniorEffective, seniorEffective) = calcEffectiveNav(juniorBacking, seniorLive);
+        juniorEffective += juniorLive - juniorBacking;
     }
 
     /// @notice Calculates valuation-adjusted NAVs for Junior and Senior tranches
