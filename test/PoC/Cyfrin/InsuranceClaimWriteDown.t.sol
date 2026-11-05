@@ -257,6 +257,25 @@ contract InsuranceClaimWriteDownTest is Test {
         }
     }
 
+    function test_moduleOperationsRejectExternalCallers() public {
+        for (uint256 i = 2; i < 4; ++i) {
+            _deploy(i, 0);
+            for (uint256 op; op <= 6; ++op) {
+                (bool ok, bytes memory reason) = address(a).call(
+                    abi.encodeWithSignature("selfCall(uint256,uint256,uint256)", op, 1000e18, 0)
+                );
+                assertFalse(ok, "even the CDO cannot call internal operations directly");
+                assertEq(bytes4(reason), bytes4(keccak256("InvalidCaller(address)")));
+            }
+            (bool success, bytes memory result) = address(a).staticcall(abi.encodeWithSignature("OPERATIONAL_MODULE()"));
+            assertTrue(success);
+            address operationalModule = abi.decode(result, (address));
+            (bool ok,) = operationalModule.call(abi.encodeWithSignature("writeDownInsuranceClaim(uint256,uint256)", 0, 1000e18));
+            assertFalse(ok, "module cannot write down outside the accounting proxy");
+            _identity();
+        }
+    }
+
     function test_accountingRejectsUnauthorizedOrInvalidWriteDown() public {
         for (uint256 i; i < 4; ++i) {
             _deploy(i, 0);

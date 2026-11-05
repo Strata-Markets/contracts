@@ -9,7 +9,7 @@ import {IRiskPremiumModel} from "./premium/IRiskPremiumModel.sol";
 import {IInsurancePool} from "../symbiotic/interfaces/IInsurancePool.sol";
 
 /// @title AccountingStorage
-/// @notice State variables of MTMAccounting and DYSAccounting, shared with AccountingSetters so all use the exact layout.
+/// @notice State variables of MTMAccounting and DYSAccounting, shared with AccountingOperationalModule so all use the exact layout.
 /// @dev Order and types MUST NOT change: deployed proxies rely on these slots. Append only.
 abstract contract AccountingStorage is CDOComponent, IAccountingState {
 

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {AccountingLib} from "../utils/AccountingLib.sol";
+
 import {UD60x18} from "@prb/math/src/ud60x18/Math.sol";
 import {IStrataCDO} from "../interfaces/IStrataCDO.sol";
 import {IAprPairFeed} from "../interfaces/IAprPairFeed.sol";
@@ -8,15 +11,15 @@ import {IRiskPremiumModel} from "./premium/IRiskPremiumModel.sol";
 import {AccountingStorage} from "./AccountingStorage.sol";
 import {AccountingOperations} from "./AccountingOperations.sol";
 
-/// @notice Accounting math exposed by MTMAccounting and DYSAccounting to their setters module.
+/// @notice Accounting math exposed by MTMAccounting and DYSAccounting to their operational module.
 interface IAccountingSelfCall {
-    function selfCall(uint256 op) external;
+    function selfCall(uint256 op, uint256 arg0, uint256 arg1) external;
 }
 
-/// @title AccountingSetters
-/// @notice Initializers and configuration setters shared by MTMAccounting and DYSAccounting, run via delegatecall on the accounting proxy.
-/// @dev Deployed by the accounting constructor. Accounting math stays in the accounting and is reached through selfCall.
-contract AccountingSetters is AccountingStorage, AccountingOperations {
+/// @title AccountingOperationalModule
+/// @notice Initializers, configuration setters and claim write-downs shared by MTMAccounting and DYSAccounting, run via delegatecall on the accounting proxy.
+/// @dev Deployed by the accounting constructor. Shared NAV and APR operations are reached through guarded selfCall.
+contract AccountingOperationalModule is AccountingStorage, AccountingOperations {
     uint256 private constant MIGRATION_V2 = 1 << 0;
     uint256 private constant MIGRATION_V3 = 1 << 1;
 
@@ -39,7 +42,16 @@ contract AccountingSetters is AccountingStorage, AccountingOperations {
     event FloorRateChanged(uint256 floorRate);
     event ValuationGracePeriodChanged(uint64 period);
 
-    constructor(bool useNavAtReconciliation_, bool useRatesForReconciliation_) {
+    /// @dev Mirrors the accounting configuration for write-down sizing.
+    bool private immutable useConservativePrice;
+    uint256 private immutable ONE_ASSET;
+
+    event UnderwriterFeeWrittenDown(uint256 amount);
+    event InsuranceClaimWrittenDown(uint256 amount);
+
+    constructor(bool useNavAtReconciliation_, bool useRatesForReconciliation_, bool useConservativePrice_, uint256 oneAsset_) {
+        useConservativePrice = useConservativePrice_;
+        ONE_ASSET = oneAsset_;
         useNavAtReconciliation = useNavAtReconciliation_;
         useRatesForReconciliation = useRatesForReconciliation_;
     }
@@ -220,8 +232,63 @@ contract AccountingSetters is AccountingStorage, AccountingOperations {
         emit ValuationGracePeriodChanged(period);
     }
 
+    /// @notice Writes down an unfunded realized-loss claim against accrued fees, then Senior principal.
+    /// @dev CDO checkpoints first and supplies the vault funding valued in base assets.
+    ///      The operator must finalize available slash proceeds and confirm that further funding is unavailable.
+    ///      Fees absorb the gap first; the Senior loss limit excludes fees and valuation-credit unwind.
+    ///      The whole call reverts if the remaining gap cannot be resolved within that limit.
+    /// @param fundedBase Available vault funding, in base-asset units at the current valuation price.
+    /// @param maxPrincipalLoss Maximum principal loss the operator accepts, excluding valuation-credit unwind.
+    /// @return amount Principal loss recognized; zero if no principal loss is needed.
+    function writeDownInsuranceClaim(uint256 fundedBase, uint256 maxPrincipalLoss) external onlyCDO returns (uint256 amount) {
+        if (fundedBase >= insuranceAmount) {
+            return 0;
+        }
+        // Release excess valuation credit before charging either fees or Senior principal.
+        if (valuationPrice < 1e18) {
+            _selfCall(OP_RESYNC_INSURANCE_FUND);
+        }
+        // Only the realized-loss claim is eligible; accrued fees absorb its funding gap first.
+        uint256 feeLoss = Math.min(underwriterFeeNav, Math.min(
+            Math.saturatingSub(insuranceAmount, fundedBase),
+            Math.saturatingSub(insuranceAmount, srtInsuranceFundNav)
+        ));
+        if (feeLoss > 0) {
+            underwriterFeeNav -= feeLoss;
+            insuranceAmount -= feeLoss;
+            emit UnderwriterFeeWrittenDown(feeLoss);
+        }
+        int256 liveProjection = srtPnLProjected - int256(useConservativePrice ? 0 : srtPaidProjected);
+        uint256 seniorAvailable = Math.saturatingSub(srtBaseNav, liveProjection > 0 ? uint256(liveProjection) : 0);
+        amount = AccountingLib.insuranceWriteDown(AccountingLib.InsuranceWriteDownState({
+            claim: insuranceAmount,
+            seniorNav: srtBaseNav,
+            seniorAvailable: seniorAvailable,
+            valuationCredit: srtInsuranceFundNav,
+            fundedGross: srtFundedGrossNav,
+            selfFund: srtFundNav,
+            juniorAvailable: Math.saturatingSub(jrtBaseNav, ONE_ASSET),
+            price: valuationPrice
+        }), fundedBase, maxPrincipalLoss);
+        if (valuationPrice < 1e18) {
+            IAccountingSelfCall(address(this)).selfCall(OP_SCALE_SRT_FUND, seniorAvailable, seniorAvailable - amount);
+        }
+        insuranceAmount -= amount;
+        srtBaseNav -= amount;
+        // The loss is accepted explicitly; the rolling floor must not restore it.
+        windowNetFlows -= int256(amount);
+        // Reduced principal can need less valuation credit; release it before checking funding.
+        if (valuationPrice < 1e18) {
+            _selfCall(OP_RESYNC_INSURANCE_FUND);
+        }
+        require(insuranceAmount <= fundedBase, "InsuranceShortfallUnresolved");
+        _selfCall(OP_SYNC_INSURANCE_CLAIM);
+        _selfCall(OP_UPDATE_APR_SRT);
+        emit InsuranceClaimWrittenDown(amount);
+    }
+
     /// @dev Runs accounting math in the accounting; address(this) is the proxy, so the call routes back to it.
     function _selfCall(uint256 op) private {
-        IAccountingSelfCall(address(this)).selfCall(op);
+        IAccountingSelfCall(address(this)).selfCall(op, 0, 0);
     }
 }

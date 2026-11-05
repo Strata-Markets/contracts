@@ -7,7 +7,7 @@ import {IAccounting} from "./interfaces/IAccounting.sol";
 import {IStrataCDO} from "./interfaces/IStrataCDO.sol";
 import {IAprPairFeed} from "./interfaces/IAprPairFeed.sol";
 import {AccountingStorage} from "./accounting/AccountingStorage.sol";
-import {AccountingSetters} from "./accounting/AccountingSetters.sol";
+import {AccountingOperationalModule} from "./accounting/AccountingOperationalModule.sol";
 import {AccountingOperations} from "./accounting/AccountingOperations.sol";
 import {UD60x18Ext} from "./utils/UD60x18Ext.sol";
 import {AccountingLib} from "./utils/AccountingLib.sol";
@@ -67,8 +67,8 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
     /// @notice When true, deposits use depositable NAV and redemptions use redeemable NAV.
     bool public immutable useConservativePrice;
 
-    /// @notice Initializers and setters, executed via delegatecall on this contract's storage.
-    address public immutable SETTERS;
+    /// @notice Initializers, configuration and claim write-downs, executed via delegatecall on this contract's storage.
+    address public immutable OPERATIONAL_MODULE;
 
     error InvalidNavSplit(
         uint256 navT1,
@@ -128,39 +128,39 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
         useJuniorCoversPaidSrtProjection = useJuniorCoversPaidSrtProjection_;
         useConservativePrice = useConservativePrice_;
 
-        SETTERS = address(new AccountingSetters(useNavAtReconciliation_, useRatesForReconciliation_));
+        OPERATIONAL_MODULE = address(new AccountingOperationalModule(useNavAtReconciliation_, useRatesForReconciliation_, useConservativePrice_, ONE_ASSET));
     }
 
     /*****************************************************************************
-     *                  Setters module (AccountingSetters)                        *
+     *                         Operational module                               *
      *****************************************************************************/
 
-    /// @dev See AccountingSetters.initialize
-    function initialize(address, address, IStrataCDO, IAprPairFeed) public virtual { _delegateToSetters(); }
-    /// @dev See AccountingSetters.initializeV2
-    function initializeV2() external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.initializeV3
-    function initializeV3() external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.setRiskModel
-    function setRiskModel(IRiskPremiumModel) external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.setAprPairFeed
-    function setAprPairFeed(IAprPairFeed) external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.setFloorRate
-    function setFloorRate(uint256) external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.setReserveBps
-    function setReserveBps(uint256) external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.setFeeRetentionBps
-    function setFeeRetentionBps(uint256, uint256) external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.setMinimumJrtSrtRatio
-    function setMinimumJrtSrtRatio(uint256) external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.setMinimumJrtSrtRatioBuffer
-    function setMinimumJrtSrtRatioBuffer(uint256) external { _delegateToSetters(); }
-    /// @dev See AccountingSetters.setValuationGracePeriod
-    function setValuationGracePeriod(uint64) external { _delegateToSetters(); }
+    /// @dev See AccountingOperationalModule.initialize
+    function initialize(address, address, IStrataCDO, IAprPairFeed) public virtual { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.initializeV2
+    function initializeV2() external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.initializeV3
+    function initializeV3() external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.setRiskModel
+    function setRiskModel(IRiskPremiumModel) external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.setAprPairFeed
+    function setAprPairFeed(IAprPairFeed) external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.setFloorRate
+    function setFloorRate(uint256) external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.setReserveBps
+    function setReserveBps(uint256) external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.setFeeRetentionBps
+    function setFeeRetentionBps(uint256, uint256) external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.setMinimumJrtSrtRatio
+    function setMinimumJrtSrtRatio(uint256) external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.setMinimumJrtSrtRatioBuffer
+    function setMinimumJrtSrtRatioBuffer(uint256) external { _delegateToOperational(); }
+    /// @dev See AccountingOperationalModule.setValuationGracePeriod
+    function setValuationGracePeriod(uint64) external { _delegateToOperational(); }
 
-    /// @notice Runs accounting math for the setters module; callable only by this contract.
+    /// @notice Runs accounting math for the operational module; callable only by this contract.
     /// @dev Under delegatecall the module's address(this) is the proxy, so its call lands here.
-    function selfCall(uint256 op) external {
+    function selfCall(uint256 op, uint256 arg0, uint256 arg1) external {
         if (msg.sender != address(this)) {
             revert InvalidCaller(msg.sender);
         }
@@ -184,17 +184,30 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
             windowStartSrtNav = Math.saturatingSub(srtBaseNav, liveProjection);
             return;
         }
-        revert("Unknown");
+        if (op == OP_RESYNC_INSURANCE_FUND) {
+            _resyncInsuranceFundNav(valuationPrice);
+            return;
+        }
+        if (op == OP_SCALE_SRT_FUND) {
+            _scaleSrtFund(arg0, arg1);
+            return;
+        }
+        if (op == OP_SYNC_INSURANCE_CLAIM) {
+            _syncInsuranceClaim();
+            return;
+        }
+        revert("UnknownOp");
     }
 
-    /// @dev Forwards the current call to the setters module and bubbles up its revert data.
-    function _delegateToSetters() private {
-        (bool ok, bytes memory ret) = SETTERS.delegatecall(msg.data);
+    /// @dev Forwards the current call to the operational module and bubbles up its revert data.
+    function _delegateToOperational() private returns (bytes memory) {
+        (bool ok, bytes memory ret) = OPERATIONAL_MODULE.delegatecall(msg.data);
         if (!ok) {
             assembly ("memory-safe") {
                 revert(add(ret, 32), mload(ret))
             }
         }
+        return ret;
     }
 
     /*****************************************************************************
@@ -625,58 +638,9 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
     }
 
-    /// @notice Writes down an unfunded realized-loss claim against accrued fees, then Senior principal.
-    /// @dev CDO checkpoints first and supplies the vault funding valued in base assets.
-    ///      The operator must finalize available slash proceeds and confirm that further funding is unavailable.
-    ///      Fees absorb the gap first; the Senior loss limit excludes fees and valuation-credit unwind.
-    ///      The whole call reverts if the remaining gap cannot be resolved within that limit.
-    /// @param fundedBase Available vault funding, in base-asset units at the current valuation price.
-    /// @param maxPrincipalLoss Maximum principal loss the operator accepts, excluding valuation-credit unwind.
-    /// @return amount Principal loss recognized; zero if no principal loss is needed.
-    function writeDownInsuranceClaim(uint256 fundedBase, uint256 maxPrincipalLoss) external onlyCDO returns (uint256 amount) {
-        if (fundedBase >= insuranceAmount) {
-            return 0;
-        }
-        // Release excess valuation credit before charging either fees or Senior principal.
-        if (valuationPrice < 1e18) {
-            _resyncInsuranceFundNav(valuationPrice);
-        }
-        // Only the realized-loss claim is eligible; accrued fees absorb its funding gap first.
-        uint256 feeLoss = Math.min(underwriterFeeNav, Math.min(
-            Math.saturatingSub(insuranceAmount, fundedBase),
-            Math.saturatingSub(insuranceAmount, srtInsuranceFundNav)
-        ));
-        if (feeLoss > 0) {
-            underwriterFeeNav -= feeLoss;
-            insuranceAmount -= feeLoss;
-            emit UnderwriterFeeWrittenDown(feeLoss);
-        }
-        uint256 seniorAvailable = Math.saturatingSub(srtBaseNav, Math.saturatingSub(uint256(srtPnLProjected), useConservativePrice ? 0 : srtPaidProjected));
-        amount = AccountingLib.insuranceWriteDown(AccountingLib.InsuranceWriteDownState({
-            claim: insuranceAmount,
-            seniorNav: srtBaseNav,
-            seniorAvailable: seniorAvailable,
-            valuationCredit: srtInsuranceFundNav,
-            fundedGross: srtFundedGrossNav,
-            selfFund: srtFundNav,
-            juniorAvailable: Math.saturatingSub(jrtBaseNav, ONE_ASSET),
-            price: valuationPrice
-        }), fundedBase, maxPrincipalLoss);
-        if (valuationPrice < 1e18) {
-            _scaleSrtFund(seniorAvailable, seniorAvailable - amount);
-        }
-        insuranceAmount -= amount;
-        srtBaseNav -= amount;
-        // The loss is accepted explicitly; the rolling floor must not restore it.
-        windowNetFlows -= int256(amount);
-        // Reduced principal can need less valuation credit; release it before checking funding.
-        if (valuationPrice < 1e18) {
-            _resyncInsuranceFundNav(valuationPrice);
-        }
-        require(insuranceAmount <= fundedBase, "InsuranceShortfallUnresolved");
-        _syncInsuranceClaim();
-        updateAprSrt(aprTarget, aprBase);
-        emit InsuranceClaimWrittenDown(amount);
+    /// @dev See AccountingOperationalModule.writeDownInsuranceClaim. Authorization is enforced in the module.
+    function writeDownInsuranceClaim(uint256, uint256) external returns (uint256) {
+        return abi.decode(_delegateToOperational(), (uint256));
     }
 
     /// @notice Updates the Net Asset Values after deposits or withdrawals
