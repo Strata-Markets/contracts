@@ -914,12 +914,16 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
             uint256 insuranceAmountT1
         )
     {
-        if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 > 0) {
-            // Keep the underwriter fee capped to the remaining assets so a wipeout below the accrued underwriter fee
-            // cannot underflow; the bucket absorbs the shortfall.
-            underwriterFeeNavT1 = Math.min(navT1, state.underwriterFeeNav);
-            return (0, 0, 0, navT1 - underwriterFeeNavT1, underwriterFeeNavT1, state.insuranceAmount);
+        if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 >= navT0) {
+            // Recovery repays realized claims before excess assets become reserve.
+            uint256 realizedClaim = Math.saturatingSub(state.insuranceAmount, srtInsuranceFundNav);
+            insuranceAmountT1 = state.insuranceAmount - Math.min(navT1 - navT0, realizedClaim);
+            // Preserve insurance backing even when both tranches are empty.
+            uint256 totalNav = navT1 + insuranceAmountT1;
+            underwriterFeeNavT1 = Math.min(totalNav, state.underwriterFeeNav);
+            return (0, 0, 0, totalNav - underwriterFeeNavT1, underwriterFeeNavT1, insuranceAmountT1);
         }
+        // Further losses follow the normal waterfall.
 
         if (!_shouldReconcile(navT0, navT1)) {
             // No realized gain yet; process using the projection

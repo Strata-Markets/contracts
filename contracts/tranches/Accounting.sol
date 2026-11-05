@@ -587,13 +587,16 @@ contract Accounting is IAccounting, CDOComponent {
     ) {
         insuranceAmountT1 = insuranceAmountT0;
 
-        if (jrtNavT0 == 0 && srtNavT0 == 0 && navT1 > 0) {
-            // No deposits yet, however Strategy reports gain, move all to reserve; keep accrued
-            // underwriter fee. Underwriter fee is capped to the remaining assets: after a wipeout that left assets
-            // below the accrued underwriter fee, the bucket absorbs the shortfall instead of underflowing.
-            uint256 underwriterFeeKept = Math.min(navT1, underwriterFeeNavT0);
-            return (0, 0, navT1 - underwriterFeeKept, underwriterFeeKept, insuranceAmountT0);
+        if (jrtNavT0 == 0 && srtNavT0 == 0 && navT1 >= navT0) {
+            // Recovery repays realized claims before excess assets become reserve.
+            uint256 realizedClaim = Math.saturatingSub(insuranceAmountT0, srtInsuranceFundNav);
+            insuranceAmountT1 = insuranceAmountT0 - Math.min(navT1 - navT0, realizedClaim);
+            // Preserve insurance backing even when both tranches are empty.
+            uint256 totalNav = navT1 + insuranceAmountT1;
+            underwriterFeeNavT1 = Math.min(totalNav, underwriterFeeNavT0);
+            return (0, 0, totalNav - underwriterFeeNavT1, underwriterFeeNavT1, insuranceAmountT1);
         }
+        // Further losses follow the normal waterfall.
         int256 gain_dT = int256(navT1) - int256(navT0);
 
         if (gain_dT < 0) {

@@ -212,13 +212,13 @@ contract ProtectedFeesTerminalLossTest is Test {
         }
     }
 
-    function test_emptyMarketZeroNavPreservesExistingShortcutPolicy() public {
+    function test_allVariantsEmptyMarketZeroNavInsuresFees() public {
         for (uint256 i; i < 4; ++i) {
             _deploy(i, 0, 0);
             pool.setCapacity(2000e18);
             strategyNav = 0;
             accounting.updateAccounting();
-            uint256 covered = i == 3 ? 0 : 100e18;
+            uint256 covered = 100e18;
             assertEq(accounting.underwriterFeeNav(), covered);
             assertEq(accounting.insuranceAmount(), covered);
             assertEq(pool.capacity(), 2000e18 - covered);

@@ -1156,14 +1156,16 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
             uint256 insuranceAmountT1
         )
     {
-        if (jrtNavT0Projected == 0 && srtNavT0 == 0) {
-            // No tranche deposits; everything is reserve, less the underwriter fee already accrued. Underwriter fee
-            // is capped to the remaining assets so a wipeout below it cannot underflow.
-            // Persist only settled NAV; any live excess is realized at reconciliation.
-            uint256 available = navT1;
-            underwriterFeeNavT1 = Math.min(available, state.underwriterFeeNav);
-            return (0, 0, 0, available - underwriterFeeNavT1, underwriterFeeNavT1, state.insuranceAmount);
+        if (jrtNavT0Projected == 0 && srtNavT0 == 0 && navT1 >= navT0) {
+            // Recovery repays realized claims before excess assets become reserve.
+            uint256 realizedClaim = Math.saturatingSub(state.insuranceAmount, srtInsuranceFundNav);
+            insuranceAmountT1 = state.insuranceAmount - Math.min(navT1 - navT0, realizedClaim);
+            // Preserve insurance backing even when both tranches are empty.
+            uint256 totalNav = navT1 + insuranceAmountT1;
+            underwriterFeeNavT1 = Math.min(totalNav, state.underwriterFeeNav);
+            return (0, 0, 0, totalNav - underwriterFeeNavT1, underwriterFeeNavT1, insuranceAmountT1);
         }
+        // Further losses follow the normal waterfall.
 
         if (_shouldReconcile(navT0, navT1)) {
             // Reconciliation: realized PnL detected (navT0 != navT1)
