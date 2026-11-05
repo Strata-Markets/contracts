@@ -202,6 +202,14 @@ The system models:
 
 Senior entries record their entry loss as `amount * (1 - entryPrice)` in `srtFundNav`, in USD scaled to base-asset decimals. Using normalized prices, at a later price, the usable token allowance is `min(srtFundNav / price, srtFundedGrossNav * (1 - price) / price)`. This preserves entry dollar value on a deeper depeg and retains the entry basis through partial recoveries. Exits and principal reductions scale both trackers proportionally; a full repeg clears them. Different entry prices remain pooled rather than tracked per depositor.
 
+### 15.2 Junior entries during a depeg
+
+Junior deposits remain paused operationally until the operator explicitly decides to reopen them.
+
+Reopening Junior deposits is an economic rebaseline: the protocol accepts the current reduced valuation as the new reference point for participation, even if it differs from the originally expected state. New depositors enter at that valuation, assume subsequent downside, and share future gains, including any valuation recovery, proportionally with existing holders. Recovery is not reserved exclusively for pre-depeg holders.
+
+This decision does not reset accounting state, crystallize an accounting loss, or cancel existing insurance claims. The Junior shortfall check remains enforced; reopening does not bypass it.
+
 ## 16. Alternatives Considered
 ### Continuous oracle reads (rejected)
 Rejected due to:
