@@ -987,7 +987,7 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
     function _srtFlowProjection() internal view returns (int256) {
         return useConservativePrice
             ? int256(_positiveProjection(srtPnLProjected))
-            : _srtLiveProjection() + srtBoughtProjected;
+            : _srtLiveProjection() + srtBoughtProjection.net;
     }
 
     function _trackSrtProjectionIn(uint256 assetsIn) internal {
@@ -999,19 +999,23 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
         int256 bought = _scaleProjection(_srtFlowProjection(), assetsIn, seniorNav);
         uint256 matched = Math.min(_positiveProjection(bought), srtPaidProjected);
         srtPaidProjected -= matched;
-        srtBoughtProjected += bought - int256(matched);
+        srtBoughtProjection.net = AccountingLib.toInt128(int256(srtBoughtProjection.net) + bought - int256(matched));
+        if (bought < 0) {
+            srtBoughtProjection.losses = AccountingLib.toUint128(uint256(srtBoughtProjection.losses) + uint256(-bought));
+        }
     }
 
-    /// @dev Match purchased projection before recording paid gains or forfeited losses.
+    /// @dev Match gains and losses separately: opposite purchases must not erase each other.
     function _trackSrtProjectionOut(int256 projectionOut) internal {
         if (projectionOut >= 0) {
-            uint256 matched = Math.min(uint256(projectionOut), _positiveProjection(srtBoughtProjected));
-            srtBoughtProjected -= int256(matched);
+            uint256 matched = Math.min(uint256(projectionOut), uint256(srtBoughtProjection.net + int256(uint256(srtBoughtProjection.losses))));
+            srtBoughtProjection.net = AccountingLib.toInt128(int256(srtBoughtProjection.net) - int256(matched));
             srtPaidProjected += uint256(projectionOut) - matched;
         } else {
             uint256 lossOut = uint256(-projectionOut);
-            uint256 matched = Math.min(lossOut, _positiveProjection(-srtBoughtProjected));
-            srtBoughtProjected += int256(matched);
+            uint256 matched = Math.min(lossOut, srtBoughtProjection.losses);
+            srtBoughtProjection.net = AccountingLib.toInt128(int256(srtBoughtProjection.net) + int256(matched));
+            srtBoughtProjection.losses -= uint128(matched);
             srtPnLProjected += int256(lossOut - matched);
         }
     }
@@ -1755,7 +1759,7 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
             srtPnLBenchmark = 0;
             if (!useConservativePrice) {
                 srtPaidProjected = 0;
-                srtBoughtProjected = 0;
+                delete srtBoughtProjection;
             }
             srtNavTime = 0;
             navTime = 0;

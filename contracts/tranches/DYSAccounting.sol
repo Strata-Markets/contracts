@@ -709,7 +709,7 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
             srtPnLBenchmark -= Math.min(forfeitedBenchmark, srtPnLBenchmark);
         }
 
-        if (!valuationWithdrawal && srtAssetsOut > 0 && (srtPnLProjected > 0 || (!useConservativePrice && srtBoughtProjected > 0))) {
+        if (!valuationWithdrawal && srtAssetsOut > 0 && (srtPnLProjected > 0 || (!useConservativePrice && srtBoughtProjection.net > 0))) {
             if (useConservativePrice) {
                 // Conservative redemptions pay only net Senior assets
                 // Return the unpaid projection to Junior real NAV
@@ -773,7 +773,7 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
     function _srtFlowProjection() internal view returns (uint256) {
         return useConservativePrice
             ? uint256(srtPnLProjected)
-            : Math.saturatingSub(uint256(srtPnLProjected), srtPaidProjected) + uint256(srtBoughtProjected);
+            : Math.saturatingSub(uint256(srtPnLProjected), srtPaidProjected) + uint256(int256(srtBoughtProjection.net));
     }
 
     function _trackSrtProjectionIn(uint256 assetsIn) internal {
@@ -785,13 +785,13 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
         uint256 bought = Math.mulDiv(assetsIn, _srtFlowProjection(), seniorNav);
         uint256 matched = Math.min(bought, srtPaidProjected);
         srtPaidProjected -= matched;
-        srtBoughtProjected += int256(bought - matched);
+        srtBoughtProjection.net = AccountingLib.toInt128(int256(srtBoughtProjection.net) + int256(bought - matched));
     }
 
     function _trackSrtProjectionOut(uint256 projectionOut) internal {
-        uint256 matched = Math.min(projectionOut, uint256(srtBoughtProjected));
-        srtBoughtProjected -= int256(matched);
-        require(srtBoughtProjected >= 0, "NegativeBoughtProjection");
+        uint256 matched = Math.min(projectionOut, uint256(int256(srtBoughtProjection.net)));
+        srtBoughtProjection.net = AccountingLib.toInt128(int256(srtBoughtProjection.net) - int256(matched));
+        require(srtBoughtProjection.net >= 0, "NegativeBoughtProjection");
         srtPaidProjected += projectionOut - matched;
     }
 
@@ -1418,7 +1418,7 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
             srtPnLBenchmark = 0;
             if (!useConservativePrice) {
                 srtPaidProjected = 0;
-                srtBoughtProjected = 0;
+                delete srtBoughtProjection;
             }
             srtNavTime = 0;
             navTime = 0;

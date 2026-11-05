@@ -178,7 +178,14 @@ abstract contract AccountingStorage is CDOComponent, IAccountingState {
     ///      insuranceAmount. Booked in setValuationPrice, unwound on re-peg in _resyncsrtFundNav.
     uint256 public srtInsuranceFundNav;
 
-    /// @notice Unmatched projection purchased by live-priced Senior deposits during this epoch.
-    /// @dev Signed projection purchased by deposits, excluded from unrealized PnL and matched on exits.
-    int256 public srtBoughtProjected;
+    struct BoughtProjection {
+        // Signed net purchases, excluded from unrealized PnL and matched on exits.
+        int128 net;
+        // Unmatched purchased losses. Purchased gains equal net + int256(losses).
+        uint128 losses;
+    }
+
+    /// @dev Live-priced Senior purchases for the epoch; both fields occupy one slot.
+    BoughtProjection public srtBoughtProjection;
+
 }

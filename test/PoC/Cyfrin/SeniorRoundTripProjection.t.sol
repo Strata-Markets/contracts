@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {BoughtProjectionTestLib} from "../../utils/BoughtProjectionTestLib.sol";
+
 import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import {Test} from "forge-std/Test.sol";
 import {console2} from "forge-std/console2.sol";
@@ -192,7 +194,7 @@ contract DYSSeniorRoundTripProjectionTest is RoundTripStackBase {
         assertApproxEqAbs(received, ROUND_TRIP, 1e6, "round trip returns the capital");
         assertApproxEqAbs(a.srtBaseNav(), srtBefore, 1e6, "tranche NAV unchanged");
         assertApproxEqAbs(a.srtPaidProjected(), 0, 1e6, "round trip has no net paid projection");
-        assertApproxEqAbs(a.srtBoughtProjected(), 0, 1e6, "purchase credit cleared");
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(a)).net, 0, 1e6, "purchase credit cleared");
         console2.log("srtPaidProjected after one round trip", a.srtPaidProjected());
 
         _reconcileFlat();
@@ -301,7 +303,7 @@ contract MTMSeniorRoundTripProjectionTest is RoundTripStackBase {
             _roundTrip(bob, 9_225e18);
             assertApproxEqAbs(accounting.srtBaseNav(), 1025e18, 1e6, "tranche NAV unchanged");
             assertApproxEqAbs(accounting.srtPaidProjected(), 0, 1e6, "no net paid projection");
-            assertApproxEqAbs(accounting.srtBoughtProjected(), 0, 1e6, "purchase credit cleared");
+            assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, 0, 1e6, "purchase credit cleared");
         }
 
         strategy.setTotalAssets(accounting.nav());

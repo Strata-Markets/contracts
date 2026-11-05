@@ -141,7 +141,7 @@ UTest.create({
         for (let i = 0; i < actions.length; i++) {
             const action = actions[i];
             await testMTM.mine(action.time);
-            let boughtBefore = await testMTM.accounting.srtBoughtProjected();
+            let boughtBefore = (await testMTM.accounting.srtBoughtProjection()).net;
 
             if (action.type === 'deposit') {
                 await testMTM.deposit(action.jrt, action.srt);
@@ -156,7 +156,7 @@ UTest.create({
             // This sequence retains enough purchased projection to fund every Senior exit.
             $require.eq(await testMTM.accounting.srtPaidProjected(), 0n,
                 `Deposits should offset paid projection after ${i + 1}: ${formatAction(action)}`);
-            let boughtAfter = await testMTM.accounting.srtBoughtProjected();
+            let boughtAfter = (await testMTM.accounting.srtBoughtProjection()).net;
             if (action.type === 'deposit' && action.srt > 0) {
                 $require.gt(boughtAfter, boughtBefore, 'Senior deposits should purchase projection');
             }

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {BoughtProjectionTestLib} from "../../utils/BoughtProjectionTestLib.sol";
+
 import {RoundTripStackBase} from "./SeniorRoundTripProjection.t.sol";
 import {NegativeProjectionStack} from "./MTMNegativeProjection.t.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
@@ -45,7 +47,7 @@ abstract contract FloorSetterProjectionBase is RoundTripStackBase {
 
     function test_resetKeepsDepositPurchasedProjectionAsCapital() public {
         _deposit(srt, carol, 110e18);
-        assertGt(a.srtBoughtProjected(), 0);
+        assertGt(BoughtProjectionTestLib.read(address(a)).net, 0);
         _assertReset(1110e18);
     }
 

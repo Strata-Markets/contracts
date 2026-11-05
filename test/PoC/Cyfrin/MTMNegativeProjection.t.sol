@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {BoughtProjectionTestLib} from "../../utils/BoughtProjectionTestLib.sol";
+
 import {ISharesCooldown} from "../../../contracts/tranches/interfaces/cooldown/ISharesCooldown.sol";
 import { Test } from "forge-std/Test.sol";
 import { ERC1967Proxy } from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
@@ -415,7 +417,7 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         uint256 out = srt.redeem(shares, carol, carol);
         assertApproxEqAbs(out, amount, 2);
         assertApproxEqAbs(accounting.srtPnLProjected(), -5e18, 10);
-        assertApproxEqAbs(accounting.srtBoughtProjected(), 0, 10);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, 0, 10);
         mtmStrategy.setTotalAssets(2000e18 + amount - out);
         _poke();
         assertApproxEqAbs(accounting.srtBaseNav(), 1000e18, 10);
@@ -437,7 +439,7 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
     function test_LossPurchaseSurvivesRecoveryBeforeExit() public {
         _liveLoss();
         uint256 shares = _deposit(srt, carol, 995e18);
-        assertApproxEqAbs(accounting.srtBoughtProjected(), -5e18, 1);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, -5e18, 1);
         mtmStrategy.setTotalAssets(2995e18);
         _poke();
         assertEq(accounting.srtPnLProjected(), 0);
@@ -447,7 +449,7 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         assertEq(accounting.srtPnLProjected(), 0);
         assertEq(accounting.srtPaidProjected(), 0);
         // Only purchased loss is consumed; recovery must not create a new live gain.
-        assertApproxEqAbs(accounting.srtBoughtProjected(), -2.5e18, 2);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, -2.5e18, 2);
         _poke();
         assertEq(accounting.srtPnLProjected(), 0);
     }
@@ -456,11 +458,11 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         _liveLoss();
         uint256 snapshot = vm.snapshotState();
         _deposit(srt, carol, 995e18);
-        int256 bought = accounting.srtBoughtProjected();
+        int256 bought = BoughtProjectionTestLib.read(address(accounting)).net;
         vm.revertToState(snapshot);
         _deposit(srt, carol, 199e18);
         _deposit(srt, carol, 796e18);
-        assertApproxEqAbs(accounting.srtBoughtProjected(), bought, 2);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, bought, 2);
         // The live projection changes sign while the purchased loss remains outstanding.
         mtmStrategy.setTotalAssets(3035e18);
         _poke();
@@ -470,7 +472,7 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         vm.prank(carol);
         srt.redeem(shares, carol, carol);
         int256 projection = accounting.srtPnLProjected();
-        bought = accounting.srtBoughtProjected();
+        bought = BoughtProjectionTestLib.read(address(accounting)).net;
         uint256 paid = accounting.srtPaidProjected();
         vm.revertToState(snapshot);
         vm.prank(carol);
@@ -478,7 +480,7 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         vm.prank(carol);
         srt.redeem(shares - shares / 2, carol, carol);
         assertApproxEqAbs(accounting.srtPnLProjected(), projection, 10);
-        assertApproxEqAbs(accounting.srtBoughtProjected(), bought, 10);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, bought, 10);
         assertApproxEqAbs(accounting.srtPaidProjected(), paid, 10);
     }
 
@@ -495,7 +497,7 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         uint256 out = srt.redeem(shares, carol, carol);
         assertApproxEqAbs(out, 100e18, 3);
         assertApproxEqAbs(accounting.srtPnLProjected(), projection, 10);
-        assertApproxEqAbs(accounting.srtBoughtProjected(), 0, 10);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, 0, 10);
     }
 
     function test_PositivePurchaseThenLossDoesNotCreatePaidGain() public {
@@ -505,7 +507,7 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         mtmStrategy.setTotalAssets(2020e18);
         _poke();
         uint256 shares = _deposit(srt, carol, 1005e18);
-        assertApproxEqAbs(accounting.srtBoughtProjected(), 5e18, 1);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, 5e18, 1);
         mtmStrategy.setTotalAssets(2985e18);
         _poke();
         assertApproxEqAbs(accounting.srtPnLProjected(), -5e18, 1);
@@ -513,18 +515,18 @@ contract MTMNegativeProjectionTest is NegativeProjectionStack {
         vm.prank(carol);
         srt.redeem(shares, carol, carol);
         assertEq(accounting.srtPaidProjected(), 0);
-        assertApproxEqAbs(accounting.srtBoughtProjected(), 5e18, 2);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(accounting)).net, 5e18, 2);
         assertApproxEqAbs(accounting.srtPnLProjected(), -5e18, 2);
     }
 
     function test_ReconciliationClearsNegativePurchase() public {
         _liveLoss();
         _deposit(srt, carol, 995e18);
-        assertLt(accounting.srtBoughtProjected(), 0);
+        assertLt(BoughtProjectionTestLib.read(address(accounting)).net, 0);
         vm.warp(block.timestamp + 2 days);
         mtmStrategy.setTotalAssets(3005e18);
         _poke();
-        assertEq(accounting.srtBoughtProjected(), 0);
+        assertEq(BoughtProjectionTestLib.read(address(accounting)).net, 0);
         assertEq(accounting.srtPaidProjected(), 0);
         assertEq(accounting.srtPnLProjected(), 0);
     }

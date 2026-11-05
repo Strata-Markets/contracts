@@ -7,6 +7,24 @@ import { Math } from "@openzeppelin/contracts/utils/math/Math.sol";
  * @title Accounting Utility Library
  */
 library AccountingLib {
+    error CastOverflow();
+
+    /// @dev Checked narrowing conversion; reverts instead of truncating.
+    function toInt128(int256 value) internal pure returns (int128) {
+        if (value < type(int128).min || value > type(int128).max) {
+            revert CastOverflow();
+        }
+        return int128(value);
+    }
+
+    /// @dev Checked narrowing conversion; reverts instead of truncating.
+    function toUint128(uint256 value) internal pure returns (uint128) {
+        if (value > type(uint128).max) {
+            revert CastOverflow();
+        }
+        return uint128(value);
+    }
+
 
     /// @dev Full-precision proportional PnL, rounded toward zero for both gains and losses.
     ///      Assumes input/output magnitudes fit int256 and totalTime > 0.

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity ^0.8.28;
 
+import {BoughtProjectionTestLib} from "../../utils/BoughtProjectionTestLib.sol";
+
 import {RoundTripStackBase} from "./SeniorRoundTripProjection.t.sol";
 import {DYSAccounting} from "../../../contracts/tranches/DYSAccounting.sol";
 import {MTMAccounting} from "../../../contracts/tranches/MTMAccounting.sol";
@@ -55,20 +57,20 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
         _poke();
         assertEq(a.srtPnLProjected(), 0);
         assertEq(a.srtPaidProjected(), 0);
-        assertEq(a.srtBoughtProjected(), 0);
+        assertEq(BoughtProjectionTestLib.read(address(a)).net, 0);
     }
 
     function _state() internal view returns (uint256[5] memory) {
         if (!_mtm()) {
             assertGe(a.srtPnLProjected(), 0, "DYS projection remains nonnegative");
-            assertGe(a.srtBoughtProjected(), 0, "DYS bought projection remains nonnegative");
+            assertGe(BoughtProjectionTestLib.read(address(a)).net, 0, "DYS bought projection remains nonnegative");
         }
         return [
             a.srtBaseNav(),
             a.jrtBaseNav(),
             uint256(a.srtPnLProjected()),
             a.srtPaidProjected(),
-            uint256(a.srtBoughtProjected())
+            uint256(BoughtProjectionTestLib.read(address(a)).net)
         ];
     }
 
@@ -96,7 +98,7 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
         _deposit(srt, carol, 1050e18);
         _assertState(expected);
         _redeem(srt.balanceOf(carol), carol);
-        assertApproxEqAbs(a.srtBoughtProjected(), 0, 1e6);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(a)).net, 0, 1e6);
         assertApproxEqAbs(a.srtPaidProjected(), 0, 1e6);
     }
 
@@ -134,7 +136,7 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
 
     function test_depositCreditIsNotUnrealizedAssetTime() public {
         _deposit(srt, carol, 4725e18);
-        assertApproxEqAbs(a.srtBoughtProjected(), 225e18, 1e6);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(a)).net, 225e18, 1e6);
         uint256 t = a.srtProjectedPnLTime();
         vm.warp(block.timestamp + 1 hours);
         _poke();
@@ -186,7 +188,7 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
         assertApproxEqAbs(seniorAfter, seniorBefore, 1e6);
         assertApproxEqAbs(a.srtPnLProjected(), projectedBefore, 1e6);
         assertApproxEqAbs(a.srtPaidProjected(), 0, 1e6);
-        assertApproxEqAbs(a.srtBoughtProjected(), 0, 1e6);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(a)).net, 0, 1e6);
     }
 
     function test_projectionChangeBetweenDepositAndExitPreservesSplitEquivalence() public {
@@ -231,9 +233,9 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
         }
         _redeem(srt.balanceOf(carol), carol);
         uint256 bobShares = srt.balanceOf(bob);
-        int256 expectedCredit = a.srtBoughtProjected() * 0.1e18 / int256(bobShares);
+        int256 expectedCredit = BoughtProjectionTestLib.read(address(a)).net * 0.1e18 / int256(bobShares);
         _redeem(bobShares - 0.1e18, bob);
-        assertApproxEqAbs(a.srtBoughtProjected(), expectedCredit, 1e6);
+        assertApproxEqAbs(BoughtProjectionTestLib.read(address(a)).net, expectedCredit, 1e6);
     }
 }
 

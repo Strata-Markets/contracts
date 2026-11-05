@@ -94,7 +94,7 @@ contract AccountingToMTMForkTest is Test, IForkMigrationNavSource {
     uint256 constant RESERVE_NAV_SLOT = 110;
     uint256 constant NAV_TARGET_INDEX_SLOT = 118;
     uint256 constant JRT_NAV_PROJECTED_SLOT = 120;
-    // Covers slots 0 through 148, including srtBoughtProjected.
+    // Covers slots 0 through 148, including packed srtBoughtProjection.
     uint256 constant ACCOUNTING_STORAGE_SLOT_COUNT = 149;
 
     uint256 public liveNav;
