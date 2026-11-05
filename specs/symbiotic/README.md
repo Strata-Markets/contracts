@@ -87,7 +87,9 @@ The deducted amount accrues to the separate `underwriterFeeNav` bucket. The real
 Junior NAV, reserve, Symbiotic coverage, accrued underwriter fees, then Senior NAV. By policy, insurance
 is requested for the full remainder after Junior and reserve, including accrued underwriter fees and
 protected Junior dust, even when no Senior remains. Fees absorb any loss not covered by insurance
-before Senior does. Existing Junior dust protection and `NavBelowMinimum` remain unchanged. Existing
+before Senior does. The same priority applies when an operator writes down an unfunded realized-loss
+claim: unpaid underwriter fees absorb the eligible shortfall before Senior principal. Already-paid fees
+cannot be recovered by this procedure. Existing Junior dust protection and `NavBelowMinimum` remain unchanged. Existing
 empty-market shortcuts still cap fees to available assets; MTM also uses that shortcut at zero NAV.
 Since it is a straight transfer from Senior into that bucket, it cancels out of the NAV identity.
 `payUnderwriterFee` sweeps the accrued fee, in the strategy share token, down one of two routes:
@@ -210,7 +212,8 @@ consuming half the claim receives 400.5, leaving only 80.1 for later exits. Fund
 320.4 restores backing for the remaining claim.
 
 If further funding is unavailable, the separate `writeDownInsuranceClaim` procedure below can
-recognize an eligible unrecoverable shortfall as a Senior loss. This is an explicit loss-acceptance
+absorb an eligible unrecoverable shortfall with unpaid underwriter fees, then recognize any remainder
+as a Senior loss. This is an explicit loss-acceptance
 decision, not the normal swap-shortfall policy. Perform it before reopening withdrawals so early
 exits do not avoid losses subsequently assigned to remaining Seniors. Valuation-only claims are
 not eligible for a principal write-down.
@@ -276,13 +279,18 @@ If the remainder is unrecoverable, an account with `RESERVE_MANAGER_ROLE` can ca
 Senior principal loss in base-asset units, not an exact amount to debit. The function:
 
 - Checkpoints accounting and values vault funding at the current valuation price in the same transaction.
-- Calculates a principal loss that closes the funding gap, including any valuation-credit unwind.
 - Reverts atomically if the required loss exceeds the operator's limit, available settled principal, or realized claim.
 - Preserves positive live projection and scales entry self-funding with the remaining principal during a depeg.
-- Reduces the claim and Senior NAV equally, including released valuation credit; strategy and Junior NAV stay unchanged.
+- Releases unneeded valuation credit first, then reduces unpaid underwriter fees and the eligible realized-loss claim equally.
+- Sizes the remaining Senior principal loss against the reduced claim, including any additional valuation-credit unwind. Only that Senior principal loss counts toward `maxPrincipalLoss`.
+- Reduces Senior NAV and the remaining claim equally for the principal loss and released valuation credit; strategy and Junior NAV stay unchanged.
 - Synchronizes middleware backing and adjusts the DYS/MTM floor baseline so it cannot restore the loss.
 - Returns the actual principal loss and emits `InsuranceClaimWrittenDown(amount)` when processing a shortfall.
-  An already-funded claim returns zero without a write-down. No tokens move in the write-down itself.
+  A fee-only write-down also returns zero Senior principal loss and emits `UnderwriterFeeWrittenDown(feeLoss)`; the same event records fee absorption in a mixed write-down. An already-funded claim returns zero without a write-down. No tokens move in the write-down itself.
+
+Operators should defer `payUnderwriterFee` until claim funding and any required write-down are resolved.
+Payout remains permissioned, not automatically blocked by an open claim; fees paid earlier are no longer
+available to absorb a later funding gap.
 
 To estimate `maxPrincipalLoss`, read `Accounting::insuranceAmount`, `Accounting::valuationPrice`,
 and `InsuranceVault::fundedCoverage`. With token amounts expressed in whole-token units and the
@@ -308,11 +316,12 @@ The calculated loss may be smaller when valuation credit unwinds. The search che
 base-asset units below its candidates to handle rounding dips. It does not guarantee the absolute
 minimum; wider rounding gaps may still require a looser operator limit or cause the call to revert.
 Any successful call stays within the operator limit and leaves the remaining claim fully funded.
-For a tighter limit, simulate `StrataCDO.writeDownInsuranceClaim` and use its returned principal loss.
+The shortfall estimate is conservative when unpaid underwriter fees can absorb part of it. For a tighter
+limit, simulate `StrataCDO.writeDownInsuranceClaim` and use its returned principal loss.
 The simulation checkpoints accounting; standalone getter values may be stale. The transaction sizes
 the loss again and reverts if the required principal loss exceeds the supplied limit.
 
-For example, a 101-base claim backed by 90.9 coverage tokens at par needs a 10.1 principal loss.
+For example, with no unpaid underwriter fees, a 101-base claim backed by 90.9 coverage tokens at par needs a 10.1 principal loss.
 A limit of 20 accepts that loss but still debits only 10.1; a limit below 10.1 reverts.
 During a depeg at 0.80, a 125-base funding gap may need only 100 of principal loss plus 25 of valuation-credit unwind.
 The limit controls the principal loss, not the combined NAV reduction.

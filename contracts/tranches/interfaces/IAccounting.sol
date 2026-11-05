@@ -9,6 +9,7 @@ import {IInsurancePool} from "../symbiotic/interfaces/IInsurancePool.sol";
 interface IAccounting is ICDOComponent, IAprPairFeedListener, IAccountingState {
 
     event InsuranceClaimWrittenDown(uint256 amount);
+    event UnderwriterFeeWrittenDown(uint256 amount);
 
     event ValuationPriceChanged(uint256 valuationPrice);
     event ValuationGracePeriodChanged(uint64 period);

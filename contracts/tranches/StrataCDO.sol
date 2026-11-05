@@ -588,10 +588,10 @@ contract StrataCDO is IErrors, IStrataCDO, IStrataCDOSetters, AccessControlled {
         emit InsuranceClaimFunded(token, amount, baseAssets);
     }
 
-    /// @notice Sizes and recognizes an unrecoverable insurance funding shortfall as a Senior loss.
+    /// @notice Absorbs an unrecoverable insurance funding shortfall with accrued fees, then Senior principal.
     /// @dev Checkpoints accounting and sizes the loss using current vault funding and valuation credit.
     ///      The operator must finalize available slash proceeds and confirm that further funding is unavailable.
-    /// @param maxPrincipalLoss Maximum accepted principal loss in base units, excluding valuation-credit unwind.
+    /// @param maxPrincipalLoss Maximum accepted Senior principal loss, excluding fee losses and valuation-credit unwind.
     /// @return amount Principal loss recognized; zero if no principal loss is needed.
     function writeDownInsuranceClaim(uint256 maxPrincipalLoss) external onlyRole(RESERVE_MANAGER_ROLE) nonReentrant returns (uint256 amount) {
         if (address(insuranceVault) == address(0)) {

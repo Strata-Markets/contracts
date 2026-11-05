@@ -430,18 +430,33 @@ contract DiscreteAccounting is IAccounting, CDOComponent {
         updateAccountingInner(cdo.totalStrategyAssets(nav, _navAnchor()));
     }
 
-    /// @notice Sizes an unfunded realized-loss claim write-down as a permanent Senior principal loss.
+    /// @notice Writes down an unfunded realized-loss claim against accrued fees, then Senior principal.
     /// @dev CDO checkpoints first and supplies the vault funding valued in base assets.
     ///      The operator must finalize available slash proceeds and confirm that further funding is unavailable.
-    ///      Sizing includes any additional valuation-credit unwind; the whole call reverts if the limit is too low.
+    ///      Fees absorb the gap first; the Senior loss limit excludes fees and valuation-credit unwind.
+    ///      The whole call reverts if the remaining gap cannot be resolved within that limit.
     /// @param fundedBase Available vault funding, in base-asset units at the current valuation price.
     /// @param maxPrincipalLoss Maximum principal loss the operator accepts, excluding valuation-credit unwind.
     /// @return amount Principal loss recognized; zero if no principal loss is needed.
     function writeDownInsuranceClaim(uint256 fundedBase, uint256 maxPrincipalLoss) external onlyCDO returns (uint256 amount) {
-        uint256 seniorAvailable = srtBaseNav;
         if (fundedBase >= insuranceAmount) {
             return 0;
         }
+        // Release excess valuation credit before charging either fees or Senior principal.
+        if (valuationPrice < 1e18) {
+            _resyncInsuranceFundNav(valuationPrice);
+        }
+        // Only the realized-loss claim is eligible; accrued fees absorb its funding gap first.
+        uint256 feeLoss = Math.min(underwriterFeeNav, Math.min(
+            Math.saturatingSub(insuranceAmount, fundedBase),
+            Math.saturatingSub(insuranceAmount, srtInsuranceFundNav)
+        ));
+        if (feeLoss > 0) {
+            underwriterFeeNav -= feeLoss;
+            insuranceAmount -= feeLoss;
+            emit UnderwriterFeeWrittenDown(feeLoss);
+        }
+        uint256 seniorAvailable = srtBaseNav;
         amount = AccountingLib.insuranceWriteDown(AccountingLib.InsuranceWriteDownState({
             claim: insuranceAmount,
             seniorNav: srtBaseNav,
