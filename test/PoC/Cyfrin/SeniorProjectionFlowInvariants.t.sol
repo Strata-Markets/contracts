@@ -167,6 +167,15 @@ abstract contract SeniorProjectionFlowInvariants is RoundTripStackBase {
     function test_samePriceValuationRoundTripIsNeutral() public {
         cdo.setValuationPrice(0.8e18);
         cdo.setActionStates(address(srt), true, true);
+        // The valuation setter checkpoints at the old price. Refresh at the new price
+        // before measuring cash-flow neutrality: live MTM yield is valuation-scaled.
+        int256 projectionAtOldPrice = a.srtPnLProjected();
+        _poke();
+        if (_liveMtm()) {
+            assertApproxEqAbs(a.srtPnLProjected(), projectionAtOldPrice * 8 / 10, 1e6);
+        } else {
+            assertApproxEqAbs(a.srtPnLProjected(), projectionAtOldPrice, 1e6);
+        }
         (uint256 juniorBefore, uint256 seniorBefore,) = a.totalAssets();
         int256 projectedBefore = a.srtPnLProjected();
         uint256 received = _roundTrip(carol, 4725e18);

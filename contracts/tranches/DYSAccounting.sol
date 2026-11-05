@@ -1207,6 +1207,11 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
             state
         );
 
+        // Value new realized yield at the current price; preserve prior benchmark entitlement below.
+        if (valuationPrice < 1e18 && srtPnLRealized > 0) {
+            srtPnLRealized = int256(Math.mulDiv(uint256(srtPnLRealized), valuationPrice, 1e18));
+        }
+
         // Benchmark mode: Use max(realized PnL, benchmark gain)
         // Note: Benchmark APR changes during the epoch, so we separately track the benchmark gain during the projection
         if (useBenchmarkProjection && srtPnLRealized < int256(state.srtPnLBenchmark)) {

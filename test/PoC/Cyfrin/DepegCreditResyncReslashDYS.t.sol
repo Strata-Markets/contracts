@@ -86,9 +86,9 @@ contract DepegDYSRealizedPnLReslashTest is Test {
         a.updateAccounting();
     }
 
-    /// Junior 500, Senior 1,500, floor 1%/day, push to 0.4. Senior's share of realized PnL (~45%) exceeds the price,
-    /// so a realized loss Senior shares under the floor releases claim and the gain that recovers it re-books the claim
-    function test_PoC_DYSRealizedLossThenGainReusesUnfundedClaim() public {
+    /// Junior 500, Senior 1,500, floor 1%/day, push to 0.4. Once the floor limits Senior losses,
+    /// losses can increase the claim; recovery gains remain valuation-scaled and release credit.
+    function test_DYSRealizedLossThenScaledGainReducesClaim() public {
         _setUpMarket(500e18, 1_500e18);
         a.setFloorRate(0.01e18); // Senior shares realized losses (floor 1%/day)
         a.setValuationPrice(PRICE); // de-peg push: 1,500 / 0.4 - 1,500 - 499 = 1,751 base claim
@@ -103,13 +103,19 @@ contract DepegDYSRealizedPnLReslashTest is Test {
         for (uint256 i; i < 5; ++i) {
             _update(settled - 40e18); // realized 2% strategy loss, Senior shares it
             uint256 afterLoss = a.insuranceAmount();
-            assertLt(afterLoss, claim, "Senior-shared realized loss releases valuation credit and claim");
-            released += claim - afterLoss;
+            if (i == 0) {
+                assertLt(afterLoss, claim, "initial Senior-shared loss releases credit");
+            }
+            // Later losses may reach the daily Senior floor and require coverage instead.
+            if (afterLoss < claim) {
+                released += claim - afterLoss;
+            }
             uint256 slashedBefore = _slashed();
 
             _update(settled); // realized gain back to the same strategy NAV
             claim = a.insuranceAmount();
-            assertGt(claim, afterLoss, "gain re-books the released claim");
+            assertLt(claim, afterLoss, "scaled gain releases more valuation credit");
+            assertEq(_slashed(), slashedBefore, "scaled gain needs no additional slash");
             assertApproxEqAbs(_slashed(), claim * PRICE / 1e18 > slashedBefore ? claim * PRICE / 1e18 : slashedBefore, 2, "slash only beyond existing pending backing");
         }
 

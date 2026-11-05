@@ -127,6 +127,17 @@ The underwriter fee is calculated on positive allocated Senior gain, including t
 before the loss waterfall. It is not recalculated solely on the gain that remains after the waterfall.
 Underwriters therefore accept that coverage may fund accrued benchmark yield and its associated fee.
 
+## Realized Senior yield during a valuation loss
+
+During a valuation loss, `DYSAccounting` and `MTMAccounting` scale positive realized Senior strategy
+gains by `valuationPrice` before applying benchmark entitlement and underwriter fees. The remainder
+stays with Junior, helping fund the valuation protection attached to Senior's new gain. Previously
+accrued benchmark entitlement retains the treatment described above. Negative realized PnL and
+at-par allocations are unchanged.
+
+`Accounting` and `DiscreteAccounting` continue using target-APR gains capped by Junior's effective
+protection headroom.
+
 ## Loss coverage: the `insuranceAmount` model
 
 All four accounting variants (`Accounting`, `DiscreteAccounting`, `DYSAccounting`, `MTMAccounting`)

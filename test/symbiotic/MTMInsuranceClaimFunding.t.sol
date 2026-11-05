@@ -93,17 +93,22 @@ contract MTMInsuranceClaimFundingTest is Test {
         _deploy();
     }
 
-    function test_valuationGain_resizesCreditAndSplitsNormally() public {
+    function test_valuationGain_scalesYieldAndResizesCredit() public {
         accounting.setValuationPrice(0.4e18);
         uint256 credit = accounting.srtInsuranceFundNav();
+        uint256 capacityBefore = pool.capacity();
         uint256 seniorBefore = accounting.srtBaseNav();
         uint256 juniorBefore = accounting.jrtBaseNav();
         vm.warp(block.timestamp + 1 days);
         mockStrategyTvl += 100e18;
         accounting.updateAccounting();
 
-        // Gross Senior gain is 25, less 1.25 underwriter fee; Junior receives 75.
-        uint256 expectedCredit = 1023.75e18 * 15 / 10 - (1075e18 - 1e18);
+        // Gross Senior gain is 25 * 0.4 = 10, less 0.5 underwriter fee; Junior receives 90.
+        uint256 expectedCredit = 1009.5e18 * 15 / 10 - (1090e18 - 1e18);
+        assertEq(accounting.underwriterFeeNav(), 0.5e18);
+        assertEq(accounting.jrtBaseNav(), 1090e18);
+        assertEq(accounting.srtBaseNav() - expectedCredit, 1009.5e18);
+        assertEq(pool.capacity(), capacityBefore, "gain needs no additional coverage");
         assertEq(accounting.insuranceAmount(), expectedCredit);
         assertEq(accounting.srtInsuranceFundNav(), expectedCredit);
         assertLt(expectedCredit, credit);
@@ -120,13 +125,18 @@ contract MTMInsuranceClaimFundingTest is Test {
     function test_valuationGain_withFeesEnabled() public {
         accounting.setValuationPrice(0.4e18);
         accounting.setReserveBps(0.1e18);
+        uint256 capacityBefore = pool.capacity();
         vm.warp(block.timestamp + 1 days);
         mockStrategyTvl += 100e18;
         accounting.totalAssets();
         accounting.updateAccounting();
         assertEq(accounting.reserveNav(), 10e18);
-        // The reserve takes 10 from Junior's gain; Senior still earns 23.75 net.
-        uint256 expectedCredit = 1023.75e18 * 15 / 10 - (1065e18 - 1e18);
+        // The reserve takes 10 from Junior's gain; scaled Senior yield remains 9.5 net.
+        uint256 expectedCredit = 1009.5e18 * 15 / 10 - (1080e18 - 1e18);
+        assertEq(accounting.underwriterFeeNav(), 0.5e18);
+        assertEq(accounting.jrtBaseNav(), 1080e18);
+        assertEq(accounting.srtBaseNav() - expectedCredit, 1009.5e18);
+        assertEq(pool.capacity(), capacityBefore, "gain needs no additional coverage");
         assertEq(accounting.insuranceAmount(), expectedCredit);
         assertEq(accounting.srtInsuranceFundNav(), expectedCredit);
     }
