@@ -1756,8 +1756,12 @@ contract MTMAccounting is AccountingStorage, AccountingOperations, IAccounting {
 
         if (isReconciliation) {
             if (valuationPrice < 1e18) {
-                // Remaining projection is assumed negligible for scaling.
-                _scaleSrtFund(srtBaseNav, srtNavT1);
+                // Restore either sign of unrealized PnL before measuring settled principal loss.
+                int256 liveProjection = _srtLiveProjection();
+                uint256 seniorSettled = liveProjection >= 0
+                    ? Math.saturatingSub(srtBaseNav, uint256(liveProjection))
+                    : srtBaseNav + uint256(-liveProjection);
+                _scaleSrtFund(seniorSettled, srtNavT1);
             }
             emit Reconciled(
                 epochStart,

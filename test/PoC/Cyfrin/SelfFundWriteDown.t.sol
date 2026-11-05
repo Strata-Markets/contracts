@@ -190,7 +190,7 @@ contract SelfFundWriteDownTest is Test {
         }
     }
 
-    function test_reconciliationUsesLiveNavWhenProjectionReverses() public {
+    function test_reconciliationIgnoresUnrealizedProjectionReversal() public {
         for (uint256 i = 2; i < 4; i++) {
             _deploy(i);
             _seed(100e18, 120e18, 0, 0, 100e18, 20e18);
@@ -198,18 +198,18 @@ contract SelfFundWriteDownTest is Test {
             a.updateAccounting();
             assertLt(a.srtBaseNav(), 120e18);
             assertGe(a.srtBaseNav(), 100e18);
-            _assertFunds(uint256(100e18) * a.srtBaseNav() / 120e18);
+            _assertFunds(100e18);
         }
     }
 
-    function test_realizedLossUsesLiveNavRatio() public {
+    function test_realizedLossUsesSettledNavRatio() public {
         for (uint256 i = 2; i < 4; i++) {
             _deploy(i);
             _seed(0, 120e18, 0, 0, 100e18, 20e18);
             strategyNav = 80e18;
             a.updateAccounting();
             assertEq(a.srtBaseNav(), 79e18);
-            _assertFunds(uint256(100e18) * 79 / 120);
+            _assertFunds(79e18);
         }
     }
 
@@ -277,7 +277,7 @@ contract SelfFundWriteDownTest is Test {
         }
     }
 
-    function test_reconciliationUsesStoredNavWithPaidProjection() public {
+    function test_reconciliationExcludesOnlyUnpaidProjection() public {
         for (uint256 i = 2; i < 4; i++) {
             _deploy(i);
             _seed(100e18, 120e18, 0, 0, 100e18, 30e18);
@@ -287,7 +287,7 @@ contract SelfFundWriteDownTest is Test {
             // These fixtures charge paid projection to Senior at reconciliation.
             assertLt(a.srtBaseNav(), 120e18);
             assertGt(a.srtBaseNav(), 90e18);
-            _assertFunds(uint256(100e18) * a.srtBaseNav() / 120e18);
+            _assertFunds(a.srtBaseNav() < 100e18 ? a.srtBaseNav() : 100e18);
         }
     }
 

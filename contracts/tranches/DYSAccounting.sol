@@ -1417,8 +1417,9 @@ contract DYSAccounting is AccountingStorage, AccountingOperations, IAccounting {
 
         if (isReconciliation) {
             if (valuationPrice < 1e18) {
-                // Remaining projection is assumed negligible for scaling.
-                _scaleSrtFund(srtBaseNav, srtNavT1);
+                // Scale only settled principal losses, excluding unpaid projection.
+                uint256 liveProjection = Math.saturatingSub(uint256(srtPnLProjected), useConservativePrice ? 0 : srtPaidProjected);
+                _scaleSrtFund(Math.saturatingSub(srtBaseNav, liveProjection), srtNavT1);
             }
             emit Reconciled(
                 epochStart,
