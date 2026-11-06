@@ -202,6 +202,8 @@ The system models:
 
 Senior entries record their entry loss as `amount * (1 - entryPrice)` in `srtFundNav`, in USD scaled to base-asset decimals. Using normalized prices, at a later price, the usable token allowance is `min(srtFundNav / price, srtFundedGrossNav * (1 - price) / price)`. This preserves entry dollar value on a deeper depeg and retains the entry basis through partial recoveries. Exits and principal reductions scale both trackers proportionally; a full repeg clears them. Different entry prices remain pooled rather than tracked per depositor.
 
+Reopening Senior deposits during a depeg accepts pooled redemption of Junior's valuation backing, regardless of when Senior shares were acquired. Any Senior redemption, including a same-price deposit/redemption round trip, can permanently consume that backing and reduce Junior's recovery if the valuation price later rises. Such round trips may benefit remaining Senior holders even though the depositor receives only its deposited amount back. This is accepted behavior under the pooled allocation policy; Junior retains recovery rights only over backing not yet consumed.
+
 ### 15.2 Junior entries during a depeg
 
 Junior deposits remain paused operationally until the operator explicitly decides to reopen them.
