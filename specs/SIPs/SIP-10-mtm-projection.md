@@ -310,6 +310,30 @@ Before reopening redemptions under this mode, the operator SHOULD checkpoint the
 
 ---
 
+### 10.2 Senior exit losses and subsequent recovery
+
+A Senior redemption during a temporary MTM dip finalizes the exiting shares' loss after matching any purchased loss projection. The finalized portion is removed from Senior's recoverable projection. If the underlying subsequently recovers, that portion benefits Junior as residual capital rather than increasing the recovery entitlement of remaining Seniors. Junior continues to bear residual downside risk; this allocation is an accepted economic benefit of that role. Remaining Seniors retain their own entitlement under the normal waterfall.
+
+This rule applies at par as well as during a depeg, and with either pricing mode. It does not promise a recovery or a fixed Junior gain: persistent losses, benchmark entitlement, fees and insurance remain subject to the normal accounting rules. Redemption fees are separate and follow their configured retention rates.
+
+For example, assume zero fees and benchmark, 1,000 assets and 1,000 shares in each tranche, and a temporary strategy loss of 20 allocated as 5 to Senior and 15 to Junior. Redeeming 500 Senior shares pays 497.5 and finalizes 2.5 of Senior loss. If the strategy fully recovers, with zero epoch PnL after adjusting for the withdrawal, the remaining Senior NAV is 500 over 500 shares (PPS 1.00), while Junior NAV is 1,002.5 over 1,000 shares (PPS 1.0025). The redeemed shares receive no later reimbursement.
+
+Junior exits do not transfer their subsequent recovery to Senior. In the same example, redeeming 500 Junior shares pays 492.5. On full recovery, Senior returns to 1,000 and the remaining Junior NAV is 507.5 over 500 shares (PPS 1.015). The two tranches intentionally have different recovery allocation: Senior has its waterfall entitlement, while Junior receives the residual.
+
+### 10.3 Deposit pricing and order-dependent round trips
+
+With conservative pricing enabled, deposits use the higher of settled and live NAV. During a dip below settled NAV, this prevents new shares from being minted at the discounted live price and sharing the existing holders' recovery on that basis. It does not reverse a loss already finalized by a redemption.
+
+With conservative pricing disabled, deposits use live NAV. A deposit during a dip does not dilute the current live PPS, but the new shares participate in subsequent recovery alongside existing shares. Full underlying recovery therefore does not guarantee restoration of the historical PPS. This is an accepted trade-off of live pricing. The protocol intends to enable conservative pricing in its markets; non-conservative pricing remains available for markets that explicitly choose these economics.
+
+An exit followed by a deposit is not treated as a reversal of the exit. Purchased gains and losses are matched separately, but a later loss-buying deposit does not restore previously finalized Senior losses. Consequently, deposit-first and redemption-first round trips can have different outcomes, even within the same transaction. This order dependence is explicitly accepted, including when ordinary exits and entries are made by different users.
+
+In the Senior example above, a live-priced deposit of 497.5 followed immediately by redemption leaves Senior and Junior at 1,000 each after recovery. Redeeming 500 original Senior shares first and redepositing the 497.5 proceeds instead leaves Senior at 997.5 and Junior at 1,002.5. The intervening checkpoint results in approximately 1,000.025127 Senior shares, so Senior PPS ends near 0.997475. Conservative re-entry instead mints 497.5 shares at PPS 1.00: final Senior NAV and supply are both 997.5, preserving PPS 1.00 while the exiting holder still bears the finalized loss.
+
+The live-pricing scenarios are reproduced in `test/PoC/Cyfrin/MTMSeniorExitRecoveryPolicy.t.sol`. These outcomes are policy acceptance, not a claim that round trips are allocation-neutral.
+
+---
+
 ## 11. Invariants
 
 Implementations MUST preserve the following:

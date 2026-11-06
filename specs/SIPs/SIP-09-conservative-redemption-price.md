@@ -118,3 +118,5 @@ This mechanism is simple and robust, but it is conservative for redeemers:
 * The protocol avoids paying projected yield itself before reconciliation. During insured valuation loss, the associated insurance coverage remains pro-rata redeemable under Section 3.1.
 
 Markets SHOULD document this behavior before enabling it.
+
+For temporary MTM losses, the recovery allocation and deposit-pricing trade-offs are specified in [SIP-10, Sections 10.2 and 10.3](SIP-10-mtm-projection.md#102-senior-exit-losses-and-subsequent-recovery). Finalized Senior exit losses can benefit Junior on recovery; conservative deposit pricing does not reverse that finalization.
